@@ -1,0 +1,7 @@
+.git/
+_bmad/
+_bmad*/
+.claude/
+docs/
+coverage.*
+.env*
