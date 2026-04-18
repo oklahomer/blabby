@@ -1,0 +1,133 @@
+syntax = "proto3";
+package user;
+
+option go_package = "github.com/oklahomer/blabby/gen/user;userpb";
+
+// --- Connection Lifecycle ---
+
+// RegisterConnectionRequest registers a UserConnection actor with the User grain.
+message RegisterConnectionRequest {
+  string connection_id = 1;
+}
+
+// RegisterConnectionResponse indicates whether the connection was registered.
+message RegisterConnectionResponse {
+  bool success = 1;
+}
+
+// DeregisterConnectionRequest removes a UserConnection actor from the User grain.
+message DeregisterConnectionRequest {
+  string connection_id = 1;
+}
+
+// DeregisterConnectionResponse indicates whether the connection was deregistered.
+message DeregisterConnectionResponse {
+  bool success = 1;
+}
+
+// --- Command Routing (gateway commands routed to Room grain) ---
+
+// JoinRoomRequest routes a room join command through the User grain.
+// Uses inline error fields instead of ErrorDetail (RB1 constraint).
+message JoinRoomRequest {
+  string room_id = 1;
+}
+
+// JoinRoomResponse indicates the result of the join command.
+message JoinRoomResponse {
+  bool success = 1;
+  int32 error_code = 2;
+  string error_status = 3;
+  string error_message = 4;
+}
+
+// LeaveRoomRequest routes a room leave command through the User grain.
+message LeaveRoomRequest {
+  string room_id = 1;
+}
+
+// LeaveRoomResponse indicates the result of the leave command.
+message LeaveRoomResponse {
+  bool success = 1;
+  int32 error_code = 2;
+  string error_status = 3;
+  string error_message = 4;
+}
+
+// SendMessageRequest routes a message send command through the User grain.
+message SendMessageRequest {
+  string room_id = 1;
+  string text = 2;
+}
+
+// SendMessageResponse indicates the result of the send command.
+message SendMessageResponse {
+  bool success = 1;
+  int64 timestamp = 2;
+  int32 error_code = 3;
+  string error_status = 4;
+  string error_message = 5;
+}
+
+// --- Event Delivery (Room grain fan-out to User's connections) ---
+
+// ForwardMessageRequest delivers a chat message to the User grain for fan-out.
+message ForwardMessageRequest {
+  string room_id = 1;
+  string sender_id = 2;
+  string text = 3;
+  int64 timestamp = 4;
+}
+
+// ForwardMessageResponse acknowledges the message delivery.
+message ForwardMessageResponse {
+  bool success = 1;
+}
+
+// RoomEventType enumerates the types of room membership events.
+enum RoomEventType {
+  ROOM_EVENT_TYPE_UNSPECIFIED = 0;
+  ROOM_EVENT_TYPE_JOINED = 1;
+  ROOM_EVENT_TYPE_LEFT = 2;
+}
+
+// NotifyRoomEventRequest delivers a room event (join/leave) to the User grain.
+message NotifyRoomEventRequest {
+  string room_id = 1;
+  string user_id = 2;
+  RoomEventType event_type = 3;
+}
+
+// NotifyRoomEventResponse acknowledges the event notification.
+message NotifyRoomEventResponse {
+  bool success = 1;
+}
+
+// --- Queries ---
+
+// GetJoinedRoomsRequest queries which rooms the user has joined.
+message GetJoinedRoomsRequest {}
+
+// GetJoinedRoomsResponse returns the list of room IDs.
+message GetJoinedRoomsResponse {
+  repeated string room_ids = 1;
+}
+
+// UserGrain defines the User virtual actor service.
+service UserGrain {
+  // Connection lifecycle
+  rpc RegisterConnection(RegisterConnectionRequest) returns (RegisterConnectionResponse);
+  rpc DeregisterConnection(DeregisterConnectionRequest) returns (DeregisterConnectionResponse);
+
+  // Command routing
+  rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
+  rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse);
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+
+  // Event delivery
+  rpc ForwardMessage(ForwardMessageRequest) returns (ForwardMessageResponse);
+  rpc NotifyRoomEvent(NotifyRoomEventRequest) returns (NotifyRoomEventResponse);
+
+  // Queries
+  rpc GetJoinedRooms(GetJoinedRoomsRequest) returns (GetJoinedRoomsResponse);
+}
