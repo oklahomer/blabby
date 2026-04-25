@@ -2,9 +2,11 @@ package auth_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/oklahomer/blabby/internal/auth"
 )
 
@@ -101,21 +103,27 @@ func TestJWTAuthenticator_ValidateToken(t *testing.T) {
 		}
 	})
 
-	t.Run("malformed token is rejected", func(t *testing.T) {
+	t.Run("malformed token is rejected with ErrTokenInvalid", func(t *testing.T) {
 		_, err := authenticator.ValidateToken(ctx, "not-a-jwt")
 		if err == nil {
 			t.Fatal("expected error for malformed token")
 		}
+		if !errors.Is(err, auth.ErrTokenInvalid) {
+			t.Errorf("expected ErrTokenInvalid, got %v", err)
+		}
 	})
 
-	t.Run("empty token is rejected", func(t *testing.T) {
+	t.Run("empty token is rejected with ErrTokenInvalid", func(t *testing.T) {
 		_, err := authenticator.ValidateToken(ctx, "")
 		if err == nil {
 			t.Fatal("expected error for empty token")
 		}
+		if !errors.Is(err, auth.ErrTokenInvalid) {
+			t.Errorf("expected ErrTokenInvalid, got %v", err)
+		}
 	})
 
-	t.Run("token with wrong signing key is rejected", func(t *testing.T) {
+	t.Run("token with wrong signing key is rejected with ErrTokenInvalid", func(t *testing.T) {
 		otherAuth := auth.NewJWTAuthenticator([]byte("other-secret"), store)
 		otherResult, err := otherAuth.Authenticate(ctx, auth.AuthParams{
 			Username: "alice",
@@ -128,6 +136,9 @@ func TestJWTAuthenticator_ValidateToken(t *testing.T) {
 		_, err = authenticator.ValidateToken(ctx, otherResult.Token)
 		if err == nil {
 			t.Fatal("expected error for token signed with different key")
+		}
+		if !errors.Is(err, auth.ErrTokenInvalid) {
+			t.Errorf("expected ErrTokenInvalid, got %v", err)
 		}
 	})
 }
@@ -155,6 +166,14 @@ func TestJWTAuthenticator_ExpiredToken(t *testing.T) {
 	_, err = authenticator.ValidateToken(ctx, result.Token)
 	if err == nil {
 		t.Fatal("expected error for expired token")
+	}
+	if !errors.Is(err, auth.ErrTokenExpired) {
+		t.Errorf("expected ErrTokenExpired, got %v", err)
+	}
+	// The original jwt error should remain reachable via errors.Is so existing
+	// callers / tests that assert on the underlying chain keep working.
+	if !errors.Is(err, jwt.ErrTokenExpired) {
+		t.Errorf("expected underlying jwt.ErrTokenExpired in chain, got %v", err)
 	}
 }
 
