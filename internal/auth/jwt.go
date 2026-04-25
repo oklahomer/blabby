@@ -103,9 +103,14 @@ func (a *JWTAuthenticator) Authenticate(_ context.Context, params AuthParams) (*
 }
 
 // ValidateToken parses a JWT string and returns the embedded claims.
+//
+// On failure the returned error always wraps one of ErrTokenExpired or
+// ErrTokenInvalid so callers can classify the failure via errors.Is without
+// importing the underlying JWT library. The underlying jwt error is preserved
+// in the chain so callers asserting on it continue to work.
 func (a *JWTAuthenticator) ValidateToken(_ context.Context, tokenString string) (*Claims, error) {
 	if tokenString == "" {
-		return nil, errors.New("failed to validate token: empty token")
+		return nil, fmt.Errorf("%w: empty token", ErrTokenInvalid)
 	}
 
 	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
@@ -115,12 +120,15 @@ func (a *JWTAuthenticator) ValidateToken(_ context.Context, tokenString string) 
 		return a.signingKey, nil
 	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired(), jwt.WithIssuer(Issuer), jwt.WithAudience(Audience))
 	if err != nil {
-		return nil, fmt.Errorf("failed to validate token: %w", err)
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, fmt.Errorf("%w: %w", ErrTokenExpired, err)
+		}
+		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
 	}
 
 	claims, ok := token.Claims.(*jwt.RegisteredClaims)
 	if !ok || !token.Valid {
-		return nil, errors.New("failed to validate token: invalid claims")
+		return nil, fmt.Errorf("%w: invalid claims", ErrTokenInvalid)
 	}
 
 	return &Claims{
