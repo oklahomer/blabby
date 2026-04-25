@@ -96,7 +96,7 @@ func NewErrorDetail(code ErrorCode, message string) ErrorDetail {
 
 // WriteErrorResponse writes a JSON error envelope to the response writer
 // with the given HTTP status code. This should be the only path for writing
-// error responses to enforce NFR3 (no internal details in errors).
+// error responses, ensuring no internal details leak to clients.
 func WriteErrorResponse(w http.ResponseWriter, httpStatus int, detail ErrorDetail) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
