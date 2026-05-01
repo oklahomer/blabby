@@ -18,3 +18,4 @@ Each ADR follows a standard format: Title, Status, Context, Decision, Consequenc
 | [ADR-008](adr-008-no-redis.md) | No Redis -- why grain in-memory state replaces a cache layer | Proposed | -- |
 | [ADR-009](adr-009-error-response-format.md) | Error response format -- why dual numeric + string codes with range encoding | Proposed | -- |
 | [ADR-010](adr-010-eventual-consistency-model.md) | Eventual consistency model -- why grains are single-writer and reads are eventually consistent | Proposed | -- |
+| [ADR-011](adr-011-cross-boundary-pid-propagation.md) | Cross-boundary PID propagation -- pass `*actor.PID` in the proto body, not `ctx.Sender()` | Accepted | 2026-04-30 |
