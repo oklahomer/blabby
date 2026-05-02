@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-04-30
-- **Related:** [ADR-004](adr-004-message-routing-through-user-grain.md), [ADR-006](adr-006-bidirectional-watch-pattern.md)
+- **Related:** [ADR-004](adr-004-message-routing-through-user-grain.md), [ADR-006](adr-006-bidirectional-watch-pattern.md), [ADR-012](adr-012-watch-based-connection-lifecycle.md)
 
 ## Context
 
@@ -32,17 +32,20 @@ We hit this in production-shaped form when the User grain first attempted to cap
 
 Concretely:
 
-- The proto request includes two string fields: `pid_address` and `pid_id`.
-- The caller sets these from `ctx.Self()`:
+- The proto request includes a `requester_pid` field of type `PID` (a small message carrying `address` and `id`). The `PID` message is defined once and reused wherever a caller needs to hand its PID to a grain.
+- The caller sets it from `ctx.Self()`:
   ```go
-  pid_address = ctx.Self().Address
-  pid_id      = ctx.Self().Id
+  req.RequesterPid = &userpb.PID{
+      Address: ctx.Self().Address,
+      Id:      ctx.Self().Id,
+  }
   ```
 - The grain reconstructs the PID at the boundary:
   ```go
-  pid := &actor.PID{Address: req.GetPidAddress(), Id: req.GetPidId()}
+  rp := req.GetRequesterPid()
+  pid := &actor.PID{Address: rp.GetAddress(), Id: rp.GetId()}
   ```
-- The grain validates both fields non-empty at the boundary and rejects with `4001 INVALID_REQUEST` if either is missing (defense-in-depth — even though a real cluster caller never sends empties, the validation is the contract).
+- The grain validates that `requester_pid` is present and that both `address` and `id` are non-empty, rejecting with `4001 INVALID_REQUEST` otherwise (defense-in-depth — even though a real cluster caller never sends empties, the validation is the contract).
 - The grain MUST NOT consult `ctx.Sender()` for caller identity in any handler that registers, watches, or routes back to an external actor.
 
 Reading `ctx.Sender()` is acceptable only for short-lived in-handler operations (e.g., logging the future PID for diagnostics, or `ctx.Respond(...)` which targets the future by design and runs before the future expires).
@@ -53,18 +56,39 @@ Reading `ctx.Sender()` is acceptable only for short-lived in-handler operations 
 
 - **Eliminates an entire class of silent failures.** Without this rule, fan-outs from the grain to outside actors dead-letter. The failure is invisible: the grain logs success, the outside actor receives nothing, and the bug only manifests when a user notices their messages aren't arriving.
 - **Stable across cluster reactivations.** When a grain passivates and re-activates, or when an outside actor's host node restarts, the next register call carries the new PID and the grain rebinds. The future-PID approach has no equivalent recovery story.
-- **Wire-format clarity.** PIDs become explicit data, consistent with how every other identifying value (`user_id`, `room_id`, `connection_id`) crosses the cluster boundary in this project. No reliance on actor-system implicit context.
+- **Wire-format clarity.** PIDs become explicit data, consistent with how every other identifying value (`user_id`, `room_id`) crosses the cluster boundary in this project. No reliance on actor-system implicit context.
 - **Testable from outside the actor system.** A unit test against a fake `cluster.GrainContext` can drive register-and-fan-out flows without spinning up real actors, because the PID is a plain proto field.
 
 ### Negative
 
-- **Two additional proto fields per registration message.** Negligible cost; both are short strings (`pid_id` is typically a UUID-shaped suffix; `pid_address` is `host:port`).
+- **One additional nested proto message per registration message.** Negligible cost; `PID` carries two short strings (`id` is typically a UUID-shaped suffix; `address` is `host:port`).
 - **Caller responsibility.** The outside actor MUST remember to set the fields. Mitigated by the grain rejecting empty values with a clear error code at the boundary.
 - **Slight wire-format coupling to protoactor's PID shape.** If protoactor changes the PID structure (unlikely; `Address` + `Id` has been stable for years), the proto would need to grow alongside it.
 
 ### Neutral
 
 - **No effect on grain-to-grain calls.** Grains address each other by `(kind, identity)` strings via the generated cluster client; no PID handling is involved on those paths.
+
+## Operational requirements
+
+The PID-in-payload rule keeps the *protocol* correct, but the address it carries is only as good as the address protoactor's process registry was given at startup. `ctx.Self().Address` is whatever the remote layer wrote to `ProcessRegistry.Address` when `Remote.Start()` ran — see [`remote/server.go` lines 80-88](https://github.com/asynkron/protoactor-go/blob/288962e52f3f/remote/server.go#L80-L88):
+
+```go
+if r.config.AdvertisedHost != "" {
+    address = r.config.AdvertisedHost
+} else {
+    address = lis.Addr().String() // <- fallback
+}
+r.actorSystem.ProcessRegistry.Address = address
+```
+
+Concretely:
+
+- **`AdvertisedHost` MUST be set to a peer-reachable host:port** when the node participates in a real cluster. The exact value depends on the deployment topology:
+  - **Kubernetes:** typically the pod IP injected via the Downward API (`status.podIP`), or a stable service hostname when peers can resolve it.
+  - **Bare metal / VM:** the routable hostname or external IP, not `localhost`/`127.0.0.1`.
+- **The fallback (`lis.Addr().String()`) is unsafe** in any non-trivial topology. The most common bind pattern (`0.0.0.0:port`) makes the listener report `[::]:port` or `0.0.0.0:port`, which is not reachable from sibling nodes. Loopback binds report `127.0.0.1:port`, which only works for in-process traffic. A specific LAN-IP bind works on a flat LAN but breaks under containers, NAT, or k8s.
+- **Symptom of a misconfigured `AdvertisedHost`:** `RegisterConnection` succeeds, the User grain stores the PID, and every subsequent fan-out from the grain to that connection dead-letters silently on peer nodes. This is the same failure mode this ADR was written to prevent at the protocol level — at the configuration level it has to be prevented operationally.
 
 ## Scope of applicability
 
@@ -76,7 +100,7 @@ This rule applies whenever:
 Concrete current applications:
 
 - **User grain `RegisterConnection`:** UserConnection actors register their PID with the User grain so the grain can fan out `ForwardMessage` and `NotifyRoomEvent` to every active connection.
-- **UserConnection actor (producer side):** When invoking `RegisterConnection`, MUST set `pid_address = ctx.Self().Address` and `pid_id = ctx.Self().Id`.
+- **UserConnection actor (producer side):** When invoking `RegisterConnection`, MUST set `requester_pid` to a `PID` populated from `ctx.Self()` (`Address` and `Id`).
 
 Likely future applications (re-derive when reaching them, but expect the same answer):
 
