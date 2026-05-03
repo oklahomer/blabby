@@ -89,8 +89,8 @@ func TestRoomGrain_Integration_FanOutThroughCluster(t *testing.T) {
 	if postResp.GetError() != nil {
 		t.Fatalf("PostMessage: error=%+v", postResp.GetError())
 	}
-	if postResp.GetTimestamp() <= 0 {
-		t.Errorf("Timestamp: got %d, want > 0", postResp.GetTimestamp())
+	if ts := postResp.GetTimestamp(); ts == nil || ts.AsTime().IsZero() {
+		t.Errorf("Timestamp: got %v, want non-zero", ts)
 	}
 
 	// Allow async fan-out to settle.

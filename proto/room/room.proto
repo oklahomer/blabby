@@ -2,6 +2,7 @@ syntax = "proto3";
 package room;
 
 import "common/common.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/oklahomer/blabby/gen/room;roompb";
 
@@ -35,10 +36,10 @@ message PostMessageRequest {
 
 // PostMessageResponse indicates whether the message was posted.
 // A nil error indicates success; a populated error indicates failure.
-// `timestamp` is the server-assigned Unix-ms timestamp on success and zero
-// on failure. See ADR-013.
+// `timestamp` is the server-assigned timestamp on success and nil on
+// failure. See ADR-013.
 message PostMessageResponse {
-  int64 timestamp = 1;
+  google.protobuf.Timestamp timestamp = 1;
   common.ErrorDetail error = 2;
 }
 

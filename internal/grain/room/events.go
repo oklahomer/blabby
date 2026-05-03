@@ -3,6 +3,8 @@ package room
 import (
 	"time"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	userpb "github.com/oklahomer/blabby/gen/user"
 )
 
@@ -29,14 +31,12 @@ func buildLeftEvent(roomID, leaverID string) *userpb.NotifyRoomEventRequest {
 
 // buildForwardMessage shapes the ForwardMessage payload sent to every
 // current member (including the sender — multi-device echo, FR3) for a
-// posted chat message. The grain works in time.Time domain values; the
-// conversion to the canonical int64 Unix-milliseconds wire format happens
-// here at the proto boundary.
+// posted chat message.
 func buildForwardMessage(roomID, senderID, text string, timestamp time.Time) *userpb.ForwardMessageRequest {
 	return &userpb.ForwardMessageRequest{
 		RoomId:    roomID,
 		SenderId:  senderID,
 		Text:      text,
-		Timestamp: timestamp.UnixMilli(),
+		Timestamp: timestamppb.New(timestamp),
 	}
 }

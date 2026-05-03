@@ -10,6 +10,7 @@ import (
 	common "github.com/oklahomer/blabby/gen/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -468,11 +469,11 @@ func (x *SendMessageRequest) GetText() string {
 
 // SendMessageResponse indicates the result of the send command.
 // A nil error indicates success; a populated error indicates failure.
-// `timestamp` is the server-assigned timestamp on success and zero on failure.
+// `timestamp` is the server-assigned timestamp on success and nil on failure.
 // See ADR-013.
 type SendMessageResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Timestamp     int64                  `protobuf:"varint,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	Error         *common.ErrorDetail    `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -508,11 +509,11 @@ func (*SendMessageResponse) Descriptor() ([]byte, []int) {
 	return file_user_user_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *SendMessageResponse) GetTimestamp() int64 {
+func (x *SendMessageResponse) GetTimestamp() *timestamppb.Timestamp {
 	if x != nil {
 		return x.Timestamp
 	}
-	return 0
+	return nil
 }
 
 func (x *SendMessageResponse) GetError() *common.ErrorDetail {
@@ -528,7 +529,7 @@ type ForwardMessageRequest struct {
 	RoomId        string                 `protobuf:"bytes,1,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
 	SenderId      string                 `protobuf:"bytes,2,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
 	Text          string                 `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
-	Timestamp     int64                  `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -584,11 +585,11 @@ func (x *ForwardMessageRequest) GetText() string {
 	return ""
 }
 
-func (x *ForwardMessageRequest) GetTimestamp() int64 {
+func (x *ForwardMessageRequest) GetTimestamp() *timestamppb.Timestamp {
 	if x != nil {
 		return x.Timestamp
 	}
-	return 0
+	return nil
 }
 
 // ForwardMessageResponse acknowledges the message delivery. The User grain
@@ -815,7 +816,7 @@ var File_user_user_proto protoreflect.FileDescriptor
 
 const file_user_user_proto_rawDesc = "" +
 	"\n" +
-	"\x0fuser/user.proto\x12\x04user\x1a\x13common/common.proto\"/\n" +
+	"\x0fuser/user.proto\x12\x04user\x1a\x13common/common.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"/\n" +
 	"\x03PID\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\"K\n" +
@@ -833,15 +834,15 @@ const file_user_user_proto_rawDesc = "" +
 	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"A\n" +
 	"\x12SendMessageRequest\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"^\n" +
-	"\x13SendMessageResponse\x12\x1c\n" +
-	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp\x12)\n" +
-	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"\x7f\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"z\n" +
+	"\x13SendMessageResponse\x128\n" +
+	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12)\n" +
+	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"\x9b\x01\n" +
 	"\x15ForwardMessageRequest\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x1b\n" +
 	"\tsender_id\x18\x02 \x01(\tR\bsenderId\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\x12\x1c\n" +
-	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\"\x18\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\x128\n" +
+	"\ttimestamp\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\x18\n" +
 	"\x16ForwardMessageResponse\"~\n" +
 	"\x16NotifyRoomEventRequest\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x17\n" +
@@ -897,33 +898,36 @@ var file_user_user_proto_goTypes = []any{
 	(*GetJoinedRoomsRequest)(nil),      // 14: user.GetJoinedRoomsRequest
 	(*GetJoinedRoomsResponse)(nil),     // 15: user.GetJoinedRoomsResponse
 	(*common.ErrorDetail)(nil),         // 16: common.ErrorDetail
+	(*timestamppb.Timestamp)(nil),      // 17: google.protobuf.Timestamp
 }
 var file_user_user_proto_depIdxs = []int32{
 	1,  // 0: user.RegisterConnectionRequest.requester_pid:type_name -> user.PID
 	16, // 1: user.RegisterConnectionResponse.error:type_name -> common.ErrorDetail
 	16, // 2: user.JoinRoomResponse.error:type_name -> common.ErrorDetail
 	16, // 3: user.LeaveRoomResponse.error:type_name -> common.ErrorDetail
-	16, // 4: user.SendMessageResponse.error:type_name -> common.ErrorDetail
-	0,  // 5: user.NotifyRoomEventRequest.event_type:type_name -> user.RoomEventType
-	2,  // 6: user.UserGrain.RegisterConnection:input_type -> user.RegisterConnectionRequest
-	4,  // 7: user.UserGrain.JoinRoom:input_type -> user.JoinRoomRequest
-	6,  // 8: user.UserGrain.LeaveRoom:input_type -> user.LeaveRoomRequest
-	8,  // 9: user.UserGrain.SendMessage:input_type -> user.SendMessageRequest
-	10, // 10: user.UserGrain.ForwardMessage:input_type -> user.ForwardMessageRequest
-	12, // 11: user.UserGrain.NotifyRoomEvent:input_type -> user.NotifyRoomEventRequest
-	14, // 12: user.UserGrain.GetJoinedRooms:input_type -> user.GetJoinedRoomsRequest
-	3,  // 13: user.UserGrain.RegisterConnection:output_type -> user.RegisterConnectionResponse
-	5,  // 14: user.UserGrain.JoinRoom:output_type -> user.JoinRoomResponse
-	7,  // 15: user.UserGrain.LeaveRoom:output_type -> user.LeaveRoomResponse
-	9,  // 16: user.UserGrain.SendMessage:output_type -> user.SendMessageResponse
-	11, // 17: user.UserGrain.ForwardMessage:output_type -> user.ForwardMessageResponse
-	13, // 18: user.UserGrain.NotifyRoomEvent:output_type -> user.NotifyRoomEventResponse
-	15, // 19: user.UserGrain.GetJoinedRooms:output_type -> user.GetJoinedRoomsResponse
-	13, // [13:20] is the sub-list for method output_type
-	6,  // [6:13] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	17, // 4: user.SendMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
+	16, // 5: user.SendMessageResponse.error:type_name -> common.ErrorDetail
+	17, // 6: user.ForwardMessageRequest.timestamp:type_name -> google.protobuf.Timestamp
+	0,  // 7: user.NotifyRoomEventRequest.event_type:type_name -> user.RoomEventType
+	2,  // 8: user.UserGrain.RegisterConnection:input_type -> user.RegisterConnectionRequest
+	4,  // 9: user.UserGrain.JoinRoom:input_type -> user.JoinRoomRequest
+	6,  // 10: user.UserGrain.LeaveRoom:input_type -> user.LeaveRoomRequest
+	8,  // 11: user.UserGrain.SendMessage:input_type -> user.SendMessageRequest
+	10, // 12: user.UserGrain.ForwardMessage:input_type -> user.ForwardMessageRequest
+	12, // 13: user.UserGrain.NotifyRoomEvent:input_type -> user.NotifyRoomEventRequest
+	14, // 14: user.UserGrain.GetJoinedRooms:input_type -> user.GetJoinedRoomsRequest
+	3,  // 15: user.UserGrain.RegisterConnection:output_type -> user.RegisterConnectionResponse
+	5,  // 16: user.UserGrain.JoinRoom:output_type -> user.JoinRoomResponse
+	7,  // 17: user.UserGrain.LeaveRoom:output_type -> user.LeaveRoomResponse
+	9,  // 18: user.UserGrain.SendMessage:output_type -> user.SendMessageResponse
+	11, // 19: user.UserGrain.ForwardMessage:output_type -> user.ForwardMessageResponse
+	13, // 20: user.UserGrain.NotifyRoomEvent:output_type -> user.NotifyRoomEventResponse
+	15, // 21: user.UserGrain.GetJoinedRooms:output_type -> user.GetJoinedRoomsResponse
+	15, // [15:22] is the sub-list for method output_type
+	8,  // [8:15] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_user_user_proto_init() }

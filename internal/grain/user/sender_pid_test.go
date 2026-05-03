@@ -7,6 +7,7 @@ import (
 
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	userpb "github.com/oklahomer/blabby/gen/user"
 )
@@ -155,7 +156,7 @@ func TestUserGrain_SenderPID(t *testing.T) {
 
 		uc := userpb.GetUserGrainGrainClient(c, userID)
 		fwdReq := &userpb.ForwardMessageRequest{
-			RoomId: "general", SenderId: userID, Text: "hi", Timestamp: 1,
+			RoomId: "general", SenderId: userID, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
 		}
 		if _, err := uc.ForwardMessage(fwdReq); err != nil {
 			t.Fatalf("ForwardMessage via cluster: %v", err)
@@ -180,7 +181,7 @@ func TestUserGrain_SenderPID(t *testing.T) {
 
 		uc := userpb.GetUserGrainGrainClient(c, userID)
 		fwdReq := &userpb.ForwardMessageRequest{
-			RoomId: "general", SenderId: userID, Text: "multi-device", Timestamp: 42,
+			RoomId: "general", SenderId: userID, Text: "multi-device", Timestamp: timestamppb.New(time.UnixMilli(42)),
 		}
 		if _, err := uc.ForwardMessage(fwdReq); err != nil {
 			t.Fatalf("ForwardMessage via cluster: %v", err)
@@ -220,7 +221,7 @@ func TestUserGrain_SenderPID(t *testing.T) {
 		// Poison has been applied, so within a small number of
 		// attempts the grain stops trying to send to A.
 		fwdReq := &userpb.ForwardMessageRequest{
-			RoomId: "general", SenderId: userID, Text: "after-evict", Timestamp: 99,
+			RoomId: "general", SenderId: userID, Text: "after-evict", Timestamp: timestamppb.New(time.UnixMilli(99)),
 		}
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {

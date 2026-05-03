@@ -9,9 +9,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/asynkron/protoactor-go/actor"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
@@ -92,7 +94,7 @@ func (f *fakeRoomClient) PostMessage(roomID string, req *roompb.PostMessageReque
 	if def != nil {
 		return def, nil
 	}
-	return &roompb.PostMessageResponse{Timestamp: 12345}, nil
+	return &roompb.PostMessageResponse{Timestamp: timestamppb.New(time.UnixMilli(12345))}, nil
 }
 
 // recordingSender captures every fan-out call so tests can assert delivery
@@ -427,14 +429,15 @@ func TestGrain_SendMessage(t *testing.T) {
 	t.Run("success returns Room grain timestamp without local fan-out", func(t *testing.T) {
 		h := newGrain(t)
 		mustRegister(t, h, actor.NewPID("addr", "conn-1"))
-		h.rooms.defaultPost = &roompb.PostMessageResponse{Timestamp: 9999}
+		want := time.UnixMilli(9999)
+		h.rooms.defaultPost = &roompb.PostMessageResponse{Timestamp: timestamppb.New(want)}
 
 		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, graintest.NewFakeGrainContext("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if resp.GetError() != nil || resp.GetTimestamp() != 9999 {
-			t.Fatalf("got %+v, want error=nil ts=9999", resp)
+		if resp.GetError() != nil || !resp.GetTimestamp().AsTime().Equal(want) {
+			t.Fatalf("got %+v, want error=nil ts=%v", resp, want)
 		}
 		if len(h.rooms.postCalls) != 1 || h.rooms.postCalls[0] != (postCall{RoomID: "general", UserID: "alice", Text: "hi"}) {
 			t.Errorf("postCalls: got %+v, want one call with alice/hi", h.rooms.postCalls)
@@ -478,8 +481,8 @@ func TestGrain_SendMessage(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		assertErrResponse(t, resp.GetError(), 2001, "ROOM_NOT_MEMBER")
-		if resp.GetTimestamp() != 0 {
-			t.Errorf("Timestamp: got %d, want 0 on failure", resp.GetTimestamp())
+		if resp.GetTimestamp() != nil {
+			t.Errorf("Timestamp: got %v, want nil on failure", resp.GetTimestamp())
 		}
 	})
 
@@ -506,7 +509,7 @@ func TestGrain_ForwardMessage(t *testing.T) {
 		mustRegister(t, h, actor.NewPID("addr", "conn-b"))
 		mustRegister(t, h, actor.NewPID("addr", "conn-c"))
 
-		req := &userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice", Text: "hello", Timestamp: 42}
+		req := &userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice", Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(42))}
 		resp, err := h.g.ForwardMessage(req, graintest.NewFakeGrainContext("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -612,7 +615,7 @@ func TestGrain_MultiDeviceEcho(t *testing.T) {
 	pidB := actor.NewPID("addr", "device-B")
 	mustRegister(t, h, pidA)
 	mustRegister(t, h, pidB)
-	h.rooms.defaultPost = &roompb.PostMessageResponse{Timestamp: 7}
+	h.rooms.defaultPost = &roompb.PostMessageResponse{Timestamp: timestamppb.New(time.UnixMilli(7))}
 
 	// 1. SendMessage: alice posts "hi" — Room grain returns success.
 	sendResp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, graintest.NewFakeGrainContext("alice"))
@@ -629,7 +632,7 @@ func TestGrain_MultiDeviceEcho(t *testing.T) {
 	}
 
 	// 3. Simulate Room grain fan-out back to alice.
-	fwd := &userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice", Text: "hi", Timestamp: 7}
+	fwd := &userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice", Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(7))}
 	_, err = h.g.ForwardMessage(fwd, graintest.NewFakeGrainContext("alice"))
 	if err != nil {
 		t.Fatalf("ForwardMessage unexpected error: %v", err)
@@ -693,7 +696,7 @@ func TestGrain_DoesNotLogMessageText(t *testing.T) {
 		h := newGrain(t)
 
 		_, _ = h.g.ForwardMessage(&userpb.ForwardMessageRequest{
-			RoomId: "general", SenderId: "alice", Text: text, Timestamp: 1,
+			RoomId: "general", SenderId: "alice", Text: text, Timestamp: timestamppb.New(time.UnixMilli(1)),
 		}, graintest.NewFakeGrainContext("alice"))
 
 		out := buf.String()

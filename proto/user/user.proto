@@ -2,6 +2,7 @@ syntax = "proto3";
 package user;
 
 import "common/common.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/oklahomer/blabby/gen/user;userpb";
 
@@ -71,10 +72,10 @@ message SendMessageRequest {
 
 // SendMessageResponse indicates the result of the send command.
 // A nil error indicates success; a populated error indicates failure.
-// `timestamp` is the server-assigned timestamp on success and zero on failure.
+// `timestamp` is the server-assigned timestamp on success and nil on failure.
 // See ADR-013.
 message SendMessageResponse {
-  int64 timestamp = 1;
+  google.protobuf.Timestamp timestamp = 1;
   common.ErrorDetail error = 2;
 }
 
@@ -85,7 +86,7 @@ message ForwardMessageRequest {
   string room_id = 1;
   string sender_id = 2;
   string text = 3;
-  int64 timestamp = 4;
+  google.protobuf.Timestamp timestamp = 4;
 }
 
 // ForwardMessageResponse acknowledges the message delivery. The User grain

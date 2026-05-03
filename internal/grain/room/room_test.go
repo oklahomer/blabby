@@ -35,7 +35,7 @@ type forwardCall struct {
 	RoomID    string
 	SenderID  string
 	Text      string
-	Timestamp int64
+	Timestamp time.Time
 }
 
 func (f *fakeNotifier) NotifyRoomEvent(userID string, req *userpb.NotifyRoomEventRequest) error {
@@ -57,7 +57,7 @@ func (f *fakeNotifier) ForwardMessage(userID string, req *userpb.ForwardMessageR
 		RoomID:    req.GetRoomId(),
 		SenderID:  req.GetSenderId(),
 		Text:      req.GetText(),
-		Timestamp: req.GetTimestamp(),
+		Timestamp: req.GetTimestamp().AsTime(),
 	})
 	if f.forwardErrFn != nil {
 		return f.forwardErrFn(userID)
@@ -252,8 +252,8 @@ func TestGrain_PostMessage(t *testing.T) {
 		if resp.GetError() != nil {
 			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
-		if resp.GetTimestamp() == 0 {
-			t.Errorf("Timestamp: got 0, want non-zero")
+		if resp.GetTimestamp() == nil {
+			t.Errorf("Timestamp: got nil, want populated")
 		}
 
 		if len(notifier.forwardCalls) != 2 {
@@ -263,9 +263,10 @@ func TestGrain_PostMessage(t *testing.T) {
 		if !reflect.DeepEqual(gotRecipients, []string{"alice", "bob"}) {
 			t.Errorf("recipients: got %v, want [alice bob]", gotRecipients)
 		}
+		respTime := resp.GetTimestamp().AsTime()
 		for i, c := range notifier.forwardCalls {
-			if c.SenderID != "alice" || c.Text != "hello" || c.Timestamp != resp.GetTimestamp() {
-				t.Errorf("forwardCalls[%d]: got %+v, want sender=alice text=hello ts=%d", i, c, resp.GetTimestamp())
+			if c.SenderID != "alice" || c.Text != "hello" || !c.Timestamp.Equal(respTime) {
+				t.Errorf("forwardCalls[%d]: got %+v, want sender=alice text=hello ts=%v", i, c, respTime)
 			}
 		}
 		if got := g.RecentMessageCount(); got != 1 {
@@ -280,8 +281,10 @@ func TestGrain_PostMessage(t *testing.T) {
 		resp1, _ := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "one"}, graintest.NewFakeGrainContext("general"))
 		resp2, _ := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "two"}, graintest.NewFakeGrainContext("general"))
 
-		if resp2.GetTimestamp() <= resp1.GetTimestamp() {
-			t.Errorf("expected ts2 > ts1, got ts1=%d ts2=%d", resp1.GetTimestamp(), resp2.GetTimestamp())
+		ts1 := resp1.GetTimestamp().AsTime()
+		ts2 := resp2.GetTimestamp().AsTime()
+		if !ts2.After(ts1) {
+			t.Errorf("expected ts2 > ts1, got ts1=%v ts2=%v", ts1, ts2)
 		}
 		if got := g.RecentMessageCount(); got != 2 {
 			t.Errorf("RecentMessageCount: got %d, want 2", got)
@@ -391,8 +394,8 @@ func TestGrain_Init_DefaultsClockWhenAbsent(t *testing.T) {
 	if resp.GetError() != nil {
 		t.Fatalf("PostMessage failed: %+v", resp.GetError())
 	}
-	if resp.GetTimestamp() <= 0 {
-		t.Errorf("expected default clock to assign positive Unix ms timestamp, got %d", resp.GetTimestamp())
+	if ts := resp.GetTimestamp(); ts == nil || ts.AsTime().IsZero() {
+		t.Errorf("expected default clock to assign a non-zero timestamp, got %v", ts)
 	}
 }
 

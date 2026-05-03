@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asynkron/protoactor-go/cluster"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	roompb "github.com/oklahomer/blabby/gen/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
@@ -39,7 +40,7 @@ var (
 
 // stubPostTimestamp is the deterministic timestamp the stub Room grain
 // returns for every PostMessage. Asserted by the integration test.
-const stubPostTimestamp int64 = 9999
+var stubPostTimestamp = time.UnixMilli(9999)
 
 func TestMain(m *testing.M) {
 	// Stub Room grain shared by all cluster-using tests. Counters are
@@ -50,7 +51,7 @@ func TestMain(m *testing.M) {
 			leaveCount: &stubRoomLeaveCount,
 			postCount:  &stubRoomPostCount,
 			postResponse: &roompb.PostMessageResponse{
-				Timestamp: stubPostTimestamp,
+				Timestamp: timestamppb.New(stubPostTimestamp),
 			},
 		}
 	}, time.Minute)

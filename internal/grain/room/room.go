@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/asynkron/protoactor-go/cluster"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
@@ -81,9 +82,9 @@ func (n *clusterUserNotifier) ForwardMessage(userID string, req *userpb.ForwardM
 // state (architecture.md "Grain State Management").
 //
 // The clock seam (`now`) returns a domain time.Time for readability and
-// type safety; the conversion to the project's canonical int64 Unix-ms
-// wire format happens at the proto boundaries (PostMessage's response and
-// buildForwardMessage in events.go).
+// type safety; the conversion to google.protobuf.Timestamp happens at the
+// proto boundaries (PostMessage's response and buildForwardMessage in
+// events.go).
 type Grain struct {
 	state    roomState
 	notifier userNotifier
@@ -223,8 +224,7 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 	payload := buildForwardMessage(ctx.Identity(), req.GetUserId(), req.GetText(), timestamp)
 	g.fanOutForward(ctx, recipients, payload, "PostMessage.fanout")
 
-	// Proto wire format is int64 Unix-ms; conversion at the response boundary.
-	return &roompb.PostMessageResponse{Timestamp: timestamp.UnixMilli()}, nil
+	return &roompb.PostMessageResponse{Timestamp: timestamppb.New(timestamp)}, nil
 }
 
 // fanOutNotify delivers a NotifyRoomEvent to each recipient. Failures are

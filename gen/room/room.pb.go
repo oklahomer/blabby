@@ -10,6 +10,7 @@ import (
 	common "github.com/oklahomer/blabby/gen/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -259,11 +260,11 @@ func (x *PostMessageRequest) GetText() string {
 
 // PostMessageResponse indicates whether the message was posted.
 // A nil error indicates success; a populated error indicates failure.
-// `timestamp` is the server-assigned Unix-ms timestamp on success and zero
-// on failure. See ADR-013.
+// `timestamp` is the server-assigned timestamp on success and nil on
+// failure. See ADR-013.
 type PostMessageResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Timestamp     int64                  `protobuf:"varint,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	Error         *common.ErrorDetail    `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -299,11 +300,11 @@ func (*PostMessageResponse) Descriptor() ([]byte, []int) {
 	return file_room_room_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *PostMessageResponse) GetTimestamp() int64 {
+func (x *PostMessageResponse) GetTimestamp() *timestamppb.Timestamp {
 	if x != nil {
 		return x.Timestamp
 	}
-	return 0
+	return nil
 }
 
 func (x *PostMessageResponse) GetError() *common.ErrorDetail {
@@ -317,7 +318,7 @@ var File_room_room_proto protoreflect.FileDescriptor
 
 const file_room_room_proto_rawDesc = "" +
 	"\n" +
-	"\x0froom/room.proto\x12\x04room\x1a\x13common/common.proto\"&\n" +
+	"\x0froom/room.proto\x12\x04room\x1a\x13common/common.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"&\n" +
 	"\vJoinRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"9\n" +
 	"\fJoinResponse\x12)\n" +
@@ -328,9 +329,9 @@ const file_room_room_proto_rawDesc = "" +
 	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"A\n" +
 	"\x12PostMessageRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"^\n" +
-	"\x13PostMessageResponse\x12\x1c\n" +
-	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp\x12)\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"z\n" +
+	"\x13PostMessageResponse\x128\n" +
+	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12)\n" +
 	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error2\xb0\x01\n" +
 	"\tRoomGrain\x12-\n" +
 	"\x04Join\x12\x11.room.JoinRequest\x1a\x12.room.JoinResponse\x120\n" +
@@ -351,29 +352,31 @@ func file_room_room_proto_rawDescGZIP() []byte {
 
 var file_room_room_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_room_room_proto_goTypes = []any{
-	(*JoinRequest)(nil),         // 0: room.JoinRequest
-	(*JoinResponse)(nil),        // 1: room.JoinResponse
-	(*LeaveRequest)(nil),        // 2: room.LeaveRequest
-	(*LeaveResponse)(nil),       // 3: room.LeaveResponse
-	(*PostMessageRequest)(nil),  // 4: room.PostMessageRequest
-	(*PostMessageResponse)(nil), // 5: room.PostMessageResponse
-	(*common.ErrorDetail)(nil),  // 6: common.ErrorDetail
+	(*JoinRequest)(nil),           // 0: room.JoinRequest
+	(*JoinResponse)(nil),          // 1: room.JoinResponse
+	(*LeaveRequest)(nil),          // 2: room.LeaveRequest
+	(*LeaveResponse)(nil),         // 3: room.LeaveResponse
+	(*PostMessageRequest)(nil),    // 4: room.PostMessageRequest
+	(*PostMessageResponse)(nil),   // 5: room.PostMessageResponse
+	(*common.ErrorDetail)(nil),    // 6: common.ErrorDetail
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_room_room_proto_depIdxs = []int32{
 	6, // 0: room.JoinResponse.error:type_name -> common.ErrorDetail
 	6, // 1: room.LeaveResponse.error:type_name -> common.ErrorDetail
-	6, // 2: room.PostMessageResponse.error:type_name -> common.ErrorDetail
-	0, // 3: room.RoomGrain.Join:input_type -> room.JoinRequest
-	2, // 4: room.RoomGrain.Leave:input_type -> room.LeaveRequest
-	4, // 5: room.RoomGrain.PostMessage:input_type -> room.PostMessageRequest
-	1, // 6: room.RoomGrain.Join:output_type -> room.JoinResponse
-	3, // 7: room.RoomGrain.Leave:output_type -> room.LeaveResponse
-	5, // 8: room.RoomGrain.PostMessage:output_type -> room.PostMessageResponse
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	7, // 2: room.PostMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
+	6, // 3: room.PostMessageResponse.error:type_name -> common.ErrorDetail
+	0, // 4: room.RoomGrain.Join:input_type -> room.JoinRequest
+	2, // 5: room.RoomGrain.Leave:input_type -> room.LeaveRequest
+	4, // 6: room.RoomGrain.PostMessage:input_type -> room.PostMessageRequest
+	1, // 7: room.RoomGrain.Join:output_type -> room.JoinResponse
+	3, // 8: room.RoomGrain.Leave:output_type -> room.LeaveResponse
+	5, // 9: room.RoomGrain.PostMessage:output_type -> room.PostMessageResponse
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_room_room_proto_init() }

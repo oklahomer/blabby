@@ -48,9 +48,7 @@ func TestBuildForwardMessage(t *testing.T) {
 	if got.GetText() != "hello" {
 		t.Errorf("Text: got %q, want %q", got.GetText(), "hello")
 	}
-	// Conversion to int64 Unix milliseconds is the proto-boundary
-	// responsibility of buildForwardMessage.
-	if got.GetTimestamp() != 12345 {
-		t.Errorf("Timestamp: got %d, want %d", got.GetTimestamp(), 12345)
+	if !got.GetTimestamp().AsTime().Equal(ts) {
+		t.Errorf("Timestamp: got %v, want %v", got.GetTimestamp().AsTime(), ts)
 	}
 }

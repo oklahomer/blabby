@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/asynkron/protoactor-go/cluster"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
@@ -39,7 +40,7 @@ func (s *stubRoomGrain) PostMessage(*roompb.PostMessageRequest, cluster.GrainCon
 	if s.postResponse != nil {
 		return s.postResponse, nil
 	}
-	return &roompb.PostMessageResponse{Timestamp: time.Now().UnixMilli()}, nil
+	return &roompb.PostMessageResponse{Timestamp: timestamppb.Now()}, nil
 }
 
 // TestUserGrain_Integration_RoutesCommandsThroughCluster drives the full
@@ -88,8 +89,8 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 		t.Fatalf("SendMessage: error code=%d status=%q msg=%q",
 			ed.GetCode(), ed.GetStatus(), ed.GetMessage())
 	}
-	if sendResp.GetTimestamp() != stubPostTimestamp {
-		t.Errorf("Timestamp: got %d, want %d (stub response)", sendResp.GetTimestamp(), stubPostTimestamp)
+	if got := sendResp.GetTimestamp(); got == nil || !got.AsTime().Equal(stubPostTimestamp) {
+		t.Errorf("Timestamp: got %v, want %v (stub response)", got, stubPostTimestamp)
 	}
 	if got := atomic.LoadInt64(&stubRoomPostCount); got != 1 {
 		t.Errorf("stub RoomGrain.PostMessage calls: got %d, want 1", got)
@@ -125,7 +126,7 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	}
 
 	if _, err := uc.ForwardMessage(&userpb.ForwardMessageRequest{
-		RoomId: "general", SenderId: userID, Text: "hi", Timestamp: 1,
+		RoomId: "general", SenderId: userID, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
 	}); err != nil {
 		t.Fatalf("ForwardMessage via cluster: %v", err)
 	}
