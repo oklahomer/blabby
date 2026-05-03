@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	roompb "github.com/oklahomer/blabby/gen/room"
+	commonpb "github.com/oklahomer/blabby/gen/common"
 )
 
 // ErrorCode is a typed error code for programmatic error handling.
@@ -112,7 +112,7 @@ var ErrNilProtoErrorDetail = errors.New("proto ErrorDetail is nil")
 // FromProtoErrorDetail converts a protobuf ErrorDetail to a gateway ErrorDetail.
 // It returns an error if the proto is nil, which indicates a grain reported failure
 // without providing error details.
-func FromProtoErrorDetail(proto *roompb.ErrorDetail) (ErrorDetail, error) {
+func FromProtoErrorDetail(proto *commonpb.ErrorDetail) (ErrorDetail, error) {
 	if proto == nil {
 		return ErrorDetail{}, ErrNilProtoErrorDetail
 	}

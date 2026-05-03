@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	roompb "github.com/oklahomer/blabby/gen/room"
+	commonpb "github.com/oklahomer/blabby/gen/common"
 )
 
 func TestErrorResponseJSONSerialization(t *testing.T) {
@@ -233,7 +233,7 @@ func TestWriteErrorResponse(t *testing.T) {
 
 func TestFromProtoErrorDetail(t *testing.T) {
 	t.Run("converts all fields", func(t *testing.T) {
-		proto := &roompb.ErrorDetail{
+		proto := &commonpb.ErrorDetail{
 			Code:    2001,
 			Status:  "ROOM_NOT_MEMBER",
 			Message: "You are not a member of this room",

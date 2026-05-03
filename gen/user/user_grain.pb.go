@@ -62,7 +62,6 @@ type UserGrain interface {
 	Terminate(ctx cluster.GrainContext)
 	ReceiveDefault(ctx cluster.GrainContext)
 	RegisterConnection(req *RegisterConnectionRequest, ctx cluster.GrainContext) (*RegisterConnectionResponse, error)
-	DeregisterConnection(req *DeregisterConnectionRequest, ctx cluster.GrainContext) (*DeregisterConnectionResponse, error)
 	JoinRoom(req *JoinRoomRequest, ctx cluster.GrainContext) (*JoinRoomResponse, error)
 	LeaveRoom(req *LeaveRoomRequest, ctx cluster.GrainContext) (*LeaveRoomResponse, error)
 	SendMessage(req *SendMessageRequest, ctx cluster.GrainContext) (*SendMessageResponse, error)
@@ -104,33 +103,6 @@ func (g *UserGrainGrainClient) RegisterConnection(r *RegisterConnectionRequest, 
 	}
 }
 
-// DeregisterConnection requests the execution on to the cluster with CallOptions
-func (g *UserGrainGrainClient) DeregisterConnection(r *DeregisterConnectionRequest, opts ...cluster.GrainCallOption) (*DeregisterConnectionResponse, error) {
-	if g.cluster.Config.RequestLog {
-		g.cluster.Logger().Info("Requesting", slog.String("identity", g.Identity), slog.String("kind", "UserGrain"), slog.String("method", "DeregisterConnection"), slog.Any("request", r))
-	}
-	bytes, err := proto.Marshal(r)
-	if err != nil {
-		return nil, err
-	}
-	reqMsg := &cluster.GrainRequest{MethodIndex: 1, MessageData: bytes}
-	resp, err := g.cluster.Request(g.Identity, "UserGrain", reqMsg, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("error request: %w", err)
-	}
-	switch msg := resp.(type) {
-	case *DeregisterConnectionResponse:
-		return msg, nil
-	case *cluster.GrainErrorResponse:
-		if msg == nil {
-			return nil, nil
-		}
-		return nil, msg
-	default:
-		return nil, fmt.Errorf("unknown response type %T", resp)
-	}
-}
-
 // JoinRoom requests the execution on to the cluster with CallOptions
 func (g *UserGrainGrainClient) JoinRoom(r *JoinRoomRequest, opts ...cluster.GrainCallOption) (*JoinRoomResponse, error) {
 	if g.cluster.Config.RequestLog {
@@ -140,7 +112,7 @@ func (g *UserGrainGrainClient) JoinRoom(r *JoinRoomRequest, opts ...cluster.Grai
 	if err != nil {
 		return nil, err
 	}
-	reqMsg := &cluster.GrainRequest{MethodIndex: 2, MessageData: bytes}
+	reqMsg := &cluster.GrainRequest{MethodIndex: 1, MessageData: bytes}
 	resp, err := g.cluster.Request(g.Identity, "UserGrain", reqMsg, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("error request: %w", err)
@@ -167,7 +139,7 @@ func (g *UserGrainGrainClient) LeaveRoom(r *LeaveRoomRequest, opts ...cluster.Gr
 	if err != nil {
 		return nil, err
 	}
-	reqMsg := &cluster.GrainRequest{MethodIndex: 3, MessageData: bytes}
+	reqMsg := &cluster.GrainRequest{MethodIndex: 2, MessageData: bytes}
 	resp, err := g.cluster.Request(g.Identity, "UserGrain", reqMsg, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("error request: %w", err)
@@ -194,7 +166,7 @@ func (g *UserGrainGrainClient) SendMessage(r *SendMessageRequest, opts ...cluste
 	if err != nil {
 		return nil, err
 	}
-	reqMsg := &cluster.GrainRequest{MethodIndex: 4, MessageData: bytes}
+	reqMsg := &cluster.GrainRequest{MethodIndex: 3, MessageData: bytes}
 	resp, err := g.cluster.Request(g.Identity, "UserGrain", reqMsg, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("error request: %w", err)
@@ -221,7 +193,7 @@ func (g *UserGrainGrainClient) ForwardMessage(r *ForwardMessageRequest, opts ...
 	if err != nil {
 		return nil, err
 	}
-	reqMsg := &cluster.GrainRequest{MethodIndex: 5, MessageData: bytes}
+	reqMsg := &cluster.GrainRequest{MethodIndex: 4, MessageData: bytes}
 	resp, err := g.cluster.Request(g.Identity, "UserGrain", reqMsg, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("error request: %w", err)
@@ -248,7 +220,7 @@ func (g *UserGrainGrainClient) NotifyRoomEvent(r *NotifyRoomEventRequest, opts .
 	if err != nil {
 		return nil, err
 	}
-	reqMsg := &cluster.GrainRequest{MethodIndex: 6, MessageData: bytes}
+	reqMsg := &cluster.GrainRequest{MethodIndex: 5, MessageData: bytes}
 	resp, err := g.cluster.Request(g.Identity, "UserGrain", reqMsg, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("error request: %w", err)
@@ -275,7 +247,7 @@ func (g *UserGrainGrainClient) GetJoinedRooms(r *GetJoinedRoomsRequest, opts ...
 	if err != nil {
 		return nil, err
 	}
-	reqMsg := &cluster.GrainRequest{MethodIndex: 7, MessageData: bytes}
+	reqMsg := &cluster.GrainRequest{MethodIndex: 6, MessageData: bytes}
 	resp, err := g.cluster.Request(g.Identity, "UserGrain", reqMsg, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("error request: %w", err)
@@ -342,26 +314,6 @@ func (a *UserGrainActor) Receive(ctx actor.Context) {
 			}
 			ctx.Respond(r0)
 		case 1:
-			req := &DeregisterConnectionRequest{}
-			err := proto.Unmarshal(msg.MessageData, req)
-			if err != nil {
-				ctx.Logger().Error("[Grain] DeregisterConnection(DeregisterConnectionRequest) proto.Unmarshal failed.", slog.Any("error", err))
-				resp := cluster.NewGrainErrorResponse(cluster.ErrorReason_INVALID_ARGUMENT, err.Error()).
-					WithMetadata(map[string]string{
-						"argument": req.String(),
-					})
-				ctx.Respond(resp)
-				return
-			}
-
-			r0, err := a.inner.DeregisterConnection(req, a.ctx)
-			if err != nil {
-				resp := cluster.FromError(err)
-				ctx.Respond(resp)
-				return
-			}
-			ctx.Respond(r0)
-		case 2:
 			req := &JoinRoomRequest{}
 			err := proto.Unmarshal(msg.MessageData, req)
 			if err != nil {
@@ -381,7 +333,7 @@ func (a *UserGrainActor) Receive(ctx actor.Context) {
 				return
 			}
 			ctx.Respond(r0)
-		case 3:
+		case 2:
 			req := &LeaveRoomRequest{}
 			err := proto.Unmarshal(msg.MessageData, req)
 			if err != nil {
@@ -401,7 +353,7 @@ func (a *UserGrainActor) Receive(ctx actor.Context) {
 				return
 			}
 			ctx.Respond(r0)
-		case 4:
+		case 3:
 			req := &SendMessageRequest{}
 			err := proto.Unmarshal(msg.MessageData, req)
 			if err != nil {
@@ -421,7 +373,7 @@ func (a *UserGrainActor) Receive(ctx actor.Context) {
 				return
 			}
 			ctx.Respond(r0)
-		case 5:
+		case 4:
 			req := &ForwardMessageRequest{}
 			err := proto.Unmarshal(msg.MessageData, req)
 			if err != nil {
@@ -441,7 +393,7 @@ func (a *UserGrainActor) Receive(ctx actor.Context) {
 				return
 			}
 			ctx.Respond(r0)
-		case 6:
+		case 5:
 			req := &NotifyRoomEventRequest{}
 			err := proto.Unmarshal(msg.MessageData, req)
 			if err != nil {
@@ -461,7 +413,7 @@ func (a *UserGrainActor) Receive(ctx actor.Context) {
 				return
 			}
 			ctx.Respond(r0)
-		case 7:
+		case 6:
 			req := &GetJoinedRoomsRequest{}
 			err := proto.Unmarshal(msg.MessageData, req)
 			if err != nil {

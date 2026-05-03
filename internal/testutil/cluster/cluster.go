@@ -9,7 +9,6 @@ package clustertest
 import (
 	"net"
 	"strconv"
-	"testing"
 	"time"
 
 	"github.com/asynkron/protoactor-go/actor"
@@ -19,21 +18,32 @@ import (
 	"github.com/asynkron/protoactor-go/remote"
 )
 
+// TB is the subset of testing.TB used by Start. *testing.T satisfies it,
+// and a TestMain helper can satisfy it with a tiny shim — letting tests
+// share a single cluster across the whole package via TestMain when the
+// alternative (one cluster per test) would race against protoactor's
+// process-global grpclog state.
+type TB interface {
+	Helper()
+	Cleanup(func())
+	Fatalf(format string, args ...any)
+}
+
 // Start brings up a single-member in-process cluster suitable for unit and
-// integration tests. It registers t.Cleanup so the cluster is shut down
-// automatically when the test ends.
+// integration tests. It registers tb.Cleanup so the cluster is shut down
+// automatically when the test (or TestMain) ends.
 //
 // Random ports are chosen for both the remote transport and the automanaged
-// discovery endpoint so parallel tests do not collide.
+// discovery endpoint so parallel test packages do not collide.
 //
 // Start is for in-process integration tests only; do not use it in production
 // wiring.
-func Start(t *testing.T, kinds ...*cluster.Kind) *cluster.Cluster {
-	t.Helper()
+func Start(tb TB, kinds ...*cluster.Kind) *cluster.Cluster {
+	tb.Helper()
 
 	autoPort, err := freeTCPPort()
 	if err != nil {
-		t.Fatalf("failed to find free port for automanaged: %v", err)
+		tb.Fatalf("failed to find free port for automanaged: %v", err)
 	}
 
 	system := actor.NewActorSystem()
@@ -57,7 +67,7 @@ func Start(t *testing.T, kinds ...*cluster.Kind) *cluster.Cluster {
 	c := cluster.New(system, cfg)
 	c.StartMember()
 
-	t.Cleanup(func() { c.Shutdown(true) })
+	tb.Cleanup(func() { c.Shutdown(true) })
 
 	return c
 }

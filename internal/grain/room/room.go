@@ -20,6 +20,7 @@ import (
 
 	"github.com/asynkron/protoactor-go/cluster"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
 )
@@ -274,20 +275,20 @@ func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []string, pay
 func joinErr(code int32, status, msg string) *roompb.JoinResponse {
 	return &roompb.JoinResponse{
 		Success: false,
-		Error:   &roompb.ErrorDetail{Code: code, Status: status, Message: msg},
+		Error:   &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
 	}
 }
 
 func leaveErr(code int32, status, msg string) *roompb.LeaveResponse {
 	return &roompb.LeaveResponse{
 		Success: false,
-		Error:   &roompb.ErrorDetail{Code: code, Status: status, Message: msg},
+		Error:   &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
 	}
 }
 
 func postErr(code int32, status, msg string) *roompb.PostMessageResponse {
 	return &roompb.PostMessageResponse{
 		Success: false,
-		Error:   &roompb.ErrorDetail{Code: code, Status: status, Message: msg},
+		Error:   &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
 	}
 }

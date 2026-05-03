@@ -8,11 +8,19 @@ func TestNewFakeGrainContext_ReportsIdentityAndKind(t *testing.T) {
 	if got := ctx.Identity(); got != "general" {
 		t.Errorf("Identity: got %q, want %q", got, "general")
 	}
-	if got := ctx.Kind(); got != "RoomGrain" {
-		t.Errorf("Kind: got %q, want %q", got, "RoomGrain")
+	if got := ctx.Kind(); got != "" {
+		t.Errorf("Kind: got %q, want empty (callers opt in via WithKind)", got)
 	}
 	if ctx.Cluster() != nil {
 		t.Errorf("Cluster: got non-nil, want nil")
+	}
+}
+
+func TestNewFakeGrainContext_WithKindOverridesDefault(t *testing.T) {
+	ctx := NewFakeGrainContext("general", WithKind("RoomGrain"))
+
+	if got := ctx.Kind(); got != "RoomGrain" {
+		t.Errorf("Kind: got %q, want %q", got, "RoomGrain")
 	}
 }
 

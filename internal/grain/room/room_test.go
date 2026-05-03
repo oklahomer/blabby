@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/grain/room"
@@ -479,7 +480,7 @@ func mustJoin(t *testing.T, g *room.Grain, userID string) {
 	}
 }
 
-func assertErrResponse(t *testing.T, success bool, ed *roompb.ErrorDetail, wantCode int32, wantStatus string) {
+func assertErrResponse(t *testing.T, success bool, ed *commonpb.ErrorDetail, wantCode int32, wantStatus string) {
 	t.Helper()
 	if success {
 		t.Errorf("Success: got true, want false")

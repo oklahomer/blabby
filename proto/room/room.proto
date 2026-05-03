@@ -1,16 +1,9 @@
 syntax = "proto3";
 package room;
 
-option go_package = "github.com/oklahomer/blabby/gen/room;roompb";
+import "common/common.proto";
 
-// ErrorDetail is the canonical business error type for grain responses.
-// Error code taxonomy: 1000-1999 (Auth), 2000-2999 (Room/Membership),
-// 3000-3999 (Rate Limiting), 4000-4999 (Validation), 5000-5999 (System).
-message ErrorDetail {
-  int32 code = 1;
-  string status = 2;
-  string message = 3;
-}
+option go_package = "github.com/oklahomer/blabby/gen/room;roompb";
 
 // JoinRequest is sent when a user wants to join a room.
 message JoinRequest {
@@ -20,7 +13,7 @@ message JoinRequest {
 // JoinResponse indicates whether the join operation succeeded.
 message JoinResponse {
   bool success = 1;
-  ErrorDetail error = 2;
+  common.ErrorDetail error = 2;
 }
 
 // LeaveRequest is sent when a user wants to leave a room.
@@ -31,7 +24,7 @@ message LeaveRequest {
 // LeaveResponse indicates whether the leave operation succeeded.
 message LeaveResponse {
   bool success = 1;
-  ErrorDetail error = 2;
+  common.ErrorDetail error = 2;
 }
 
 // PostMessageRequest is sent when a user posts a message to a room.
@@ -45,7 +38,7 @@ message PostMessageRequest {
 message PostMessageResponse {
   bool success = 1;
   int64 timestamp = 2;
-  ErrorDetail error = 3;
+  common.ErrorDetail error = 3;
 }
 
 // RoomGrain defines the Room virtual actor service.

@@ -29,9 +29,6 @@ func (s *stubUserGrain) ReceiveDefault(cluster.GrainContext) {}
 func (s *stubUserGrain) RegisterConnection(*userpb.RegisterConnectionRequest, cluster.GrainContext) (*userpb.RegisterConnectionResponse, error) {
 	return &userpb.RegisterConnectionResponse{Success: true}, nil
 }
-func (s *stubUserGrain) DeregisterConnection(*userpb.DeregisterConnectionRequest, cluster.GrainContext) (*userpb.DeregisterConnectionResponse, error) {
-	return &userpb.DeregisterConnectionResponse{Success: true}, nil
-}
 func (s *stubUserGrain) JoinRoom(*userpb.JoinRoomRequest, cluster.GrainContext) (*userpb.JoinRoomResponse, error) {
 	return &userpb.JoinRoomResponse{Success: true}, nil
 }
