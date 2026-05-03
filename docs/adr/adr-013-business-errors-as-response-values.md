@@ -36,11 +36,11 @@ Concretely:
 - Every grain response message that can carry a business failure has the shape:
   ```protobuf
   message FooResponse {
-    bool success = 1;
-    common.ErrorDetail error = 2;  // nil when success=true
+    common.ErrorDetail error = 1;  // nil on success, populated on failure
     // ... success-path fields ...
   }
   ```
+  Presence of `error` is the success/failure signal. A separate `bool success` field would be redundant: in proto3, message-typed fields always carry presence, so an unset `error` is observable in every official language binding (Go: `nil`; Java/C++/Python: `hasError() == false`; Rust/TypeScript: `Option::None` / `undefined`). Callers branch on `error == nil` (or the language's equivalent presence check) and read success-path fields when the error is absent.
 - `ErrorDetail` is defined once in `proto/common/common.proto` and imported by every proto file that needs it. Both grains and any future grain reference the same Go type (`commonpb.ErrorDetail`).
   ```protobuf
   message ErrorDetail {
@@ -49,7 +49,8 @@ Concretely:
     string message = 3; // short human-readable description
   }
   ```
-- The contract is **mutually exclusive**: when `success = true`, `error` is nil and the success-path fields are populated. When `success = false`, `error` is non-nil and the success-path fields are zero-valued. Callers check `success` first; the response shape makes "succeeded with an error attached" unrepresentable in practice.
+- The contract is **mutually exclusive**: when `error` is nil, the success-path fields are populated. When `error` is non-nil, the success-path fields are zero-valued. The response shape makes "succeeded with an error attached" unrepresentable in practice.
+- Pure acknowledgement responses with no possible business failure (e.g. best-effort fan-out acks like `ForwardMessageResponse`) may be empty messages. An empty response with no transport error means "request accepted." If a future failure mode is identified, an `error` field can be added without breaking the wire format.
 - A grain handler returns a non-nil Go `error` only when the framework needs to know the call failed at the transport layer (e.g. a downstream cluster call that itself returned a transport error and cannot be meaningfully translated to a business error). Returning Go errors for business outcomes is forbidden.
 - The numeric `code` and the `status` string come from the project's error taxonomy (see [ADR-009](adr-009-error-response-format.md)). The HTTP gateway maps the same taxonomy to HTTP status codes for REST clients and to the same JSON envelope for WebSocket clients.
 
@@ -62,11 +63,12 @@ Concretely:
 - **The HTTP gateway has a clean translation.** JSON clients get a structured error envelope by serializing the response directly; no Go-error-to-JSON adapter is needed.
 - **One Go type for errors across grains.** `commonpb.ErrorDetail` is shared, so middleware (logging, metrics) can pattern-match on a single type to extract `code` and `status`.
 - **Failures are visibly part of the API surface.** A reader of `user.proto` sees that `JoinRoom` can fail and how, without consulting a separate error catalogue or framework documentation.
+- **One signal per response, not two.** Presence of `error` is the entire success/failure indicator. There is no parallel `bool success` field that could disagree with `error` and force callers to decide which to trust.
 
 ### Negative
 
-- **gRPC tooling doesn't see business failures as "errors."** Interceptors that count failures by gRPC status code, retry policies that act on `UNAVAILABLE`/`DEADLINE_EXCEEDED`, and dashboards that group by status code all see only `OK` for a business failure that returned `success=false`. Observability for business failures has to be built separately, on `success=false` and `error.code` instead of on framework status codes.
-- **Caller discipline is required.** A caller that forgets to check `success` and reads success-path fields will see zero values — not a panic, not an error, just silently wrong data. The mutual-exclusion contract has to be enforced by code review, not by the type system. Mitigated by every response carrying `success` as field 1 and by tests asserting both branches.
+- **gRPC tooling doesn't see business failures as "errors."** Interceptors that count failures by gRPC status code, retry policies that act on `UNAVAILABLE`/`DEADLINE_EXCEEDED`, and dashboards that group by status code all see only `OK` for a business failure carried in the response body. Observability for business failures has to be built separately, on `error != nil` and `error.code` instead of on framework status codes.
+- **Caller discipline is required.** A caller that forgets to check `error` and reads success-path fields on a failure response will see zero values — not a panic, not an error, just silently wrong data. The mutual-exclusion contract has to be enforced by code review, not by the type system. Mitigated by tests asserting both branches and by the convention being uniform across every grain response.
 - **Not what most public gRPC APIs do.** Engineers familiar with the gRPC idiom will need to learn the project's convention. The trade-off is documented here so that's a one-time cost.
 
 ### Neutral
@@ -81,11 +83,17 @@ Use the framework's native status model: failed RPCs return a non-nil `error` ca
 
 Rejected for this system because (a) protoactor-go's cluster client serializes the error channel as a Go `error`, not as a typed `google.rpc.Status` with deserializable `details`; recovering structured fields on the client requires hand-rolled string parsing or out-of-band conventions, and (b) modeling routine domain outcomes as exceptions encourages defensive caller code where a structured branch is more honest about the API.
 
-### Inline scattered error fields (`success bool` + `error_code int32` + `error_status string` + `error_message string`)
+### Inline scattered error fields (`error_code int32` + `error_status string` + `error_message string`)
 
 Skip the nested message and put the three error fields directly on the response. Same information, fewer types.
 
-Rejected because the four-field response loses the structural signal that the error fields are a unit. Easy to populate `error_code` and forget `error_status`, easy to read a success-path field (e.g. `Timestamp`) without checking `Success` first because the field looks like just another piece of data. Nesting under a single nullable `ErrorDetail` makes "success or error, never both" the obvious shape and gives reviewers one symbol to grep for.
+Rejected because the flat response loses the structural signal that the error fields are a unit. Easy to populate `error_code` and forget `error_status`, and harder to tell at a glance whether a response is in its success or failure shape. Nesting under a single nullable `ErrorDetail` makes "success or error, never both" the obvious shape and gives reviewers one symbol to grep for.
+
+### Parallel `bool success` flag alongside `ErrorDetail error`
+
+Carry both `bool success` and `common.ErrorDetail error` on every response, with the convention that they agree (`success=true` ↔ `error=nil`).
+
+Rejected as redundant. In proto3, message-typed fields always have presence semantics — every official language binding exposes "is the message field set?" (Go: `nil` check; Java/C++/Python: `hasError()`; Rust/TypeScript: `Option`/`undefined`). A `bool success` field carries no information that isn't already in `error`'s presence, and adds a second source of truth that callers and reviewers must keep synchronized. Worse, it admits an inconsistent state at the type level (`success=true` with a non-nil `error`, or vice versa) that the contract forbids — leaving the runtime to enforce what the schema could simply not express.
 
 ### Sentinel Go errors (`var ErrNotMember = errors.New("...")`)
 

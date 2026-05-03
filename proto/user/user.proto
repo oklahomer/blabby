@@ -34,10 +34,9 @@ message RegisterConnectionRequest {
 }
 
 // RegisterConnectionResponse indicates whether the connection was registered.
-// `error` is non-nil exactly when `success` is false. See ADR-013.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 message RegisterConnectionResponse {
-  bool success = 1;
-  common.ErrorDetail error = 2;
+  common.ErrorDetail error = 1;
 }
 
 // --- Command Routing (gateway commands routed to Room grain) ---
@@ -48,10 +47,9 @@ message JoinRoomRequest {
 }
 
 // JoinRoomResponse indicates the result of the join command.
-// `error` is non-nil exactly when `success` is false. See ADR-013.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 message JoinRoomResponse {
-  bool success = 1;
-  common.ErrorDetail error = 2;
+  common.ErrorDetail error = 1;
 }
 
 // LeaveRoomRequest routes a room leave command through the User grain.
@@ -60,10 +58,9 @@ message LeaveRoomRequest {
 }
 
 // LeaveRoomResponse indicates the result of the leave command.
-// `error` is non-nil exactly when `success` is false. See ADR-013.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 message LeaveRoomResponse {
-  bool success = 1;
-  common.ErrorDetail error = 2;
+  common.ErrorDetail error = 1;
 }
 
 // SendMessageRequest routes a message send command through the User grain.
@@ -73,12 +70,12 @@ message SendMessageRequest {
 }
 
 // SendMessageResponse indicates the result of the send command.
-// `error` is non-nil exactly when `success` is false. `timestamp` is
-// the server-assigned timestamp on success and zero on failure. See ADR-013.
+// A nil error indicates success; a populated error indicates failure.
+// `timestamp` is the server-assigned timestamp on success and zero on failure.
+// See ADR-013.
 message SendMessageResponse {
-  bool success = 1;
-  int64 timestamp = 2;
-  common.ErrorDetail error = 3;
+  int64 timestamp = 1;
+  common.ErrorDetail error = 2;
 }
 
 // --- Event Delivery (Room grain fan-out to User's connections) ---
@@ -91,10 +88,10 @@ message ForwardMessageRequest {
   int64 timestamp = 4;
 }
 
-// ForwardMessageResponse acknowledges the message delivery.
-message ForwardMessageResponse {
-  bool success = 1;
-}
+// ForwardMessageResponse acknowledges the message delivery. The User grain
+// performs best-effort fan-out and never reports a business failure here;
+// a nil response (with no transport error) means the request was accepted.
+message ForwardMessageResponse {}
 
 // RoomEventType enumerates the types of room membership events.
 enum RoomEventType {
@@ -110,10 +107,9 @@ message NotifyRoomEventRequest {
   RoomEventType event_type = 3;
 }
 
-// NotifyRoomEventResponse acknowledges the event notification.
-message NotifyRoomEventResponse {
-  bool success = 1;
-}
+// NotifyRoomEventResponse acknowledges the event notification. Same semantics
+// as ForwardMessageResponse — best-effort fan-out, no business failure.
+message NotifyRoomEventResponse {}
 
 // --- Queries ---
 

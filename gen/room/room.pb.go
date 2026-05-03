@@ -68,10 +68,10 @@ func (x *JoinRequest) GetUserId() string {
 }
 
 // JoinResponse indicates whether the join operation succeeded.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 type JoinResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Error         *common.ErrorDetail    `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -104,13 +104,6 @@ func (x *JoinResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use JoinResponse.ProtoReflect.Descriptor instead.
 func (*JoinResponse) Descriptor() ([]byte, []int) {
 	return file_room_room_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *JoinResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
 }
 
 func (x *JoinResponse) GetError() *common.ErrorDetail {
@@ -166,10 +159,10 @@ func (x *LeaveRequest) GetUserId() string {
 }
 
 // LeaveResponse indicates whether the leave operation succeeded.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 type LeaveResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Error         *common.ErrorDetail    `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -202,13 +195,6 @@ func (x *LeaveResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use LeaveResponse.ProtoReflect.Descriptor instead.
 func (*LeaveResponse) Descriptor() ([]byte, []int) {
 	return file_room_room_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *LeaveResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
 }
 
 func (x *LeaveResponse) GetError() *common.ErrorDetail {
@@ -272,12 +258,13 @@ func (x *PostMessageRequest) GetText() string {
 }
 
 // PostMessageResponse indicates whether the message was posted.
-// Includes a server-assigned timestamp (Unix milliseconds).
+// A nil error indicates success; a populated error indicates failure.
+// `timestamp` is the server-assigned Unix-ms timestamp on success and zero
+// on failure. See ADR-013.
 type PostMessageResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Timestamp     int64                  `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	Error         *common.ErrorDetail    `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	Timestamp     int64                  `protobuf:"varint,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -312,13 +299,6 @@ func (*PostMessageResponse) Descriptor() ([]byte, []int) {
 	return file_room_room_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *PostMessageResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
 func (x *PostMessageResponse) GetTimestamp() int64 {
 	if x != nil {
 		return x.Timestamp
@@ -339,22 +319,19 @@ const file_room_room_proto_rawDesc = "" +
 	"\n" +
 	"\x0froom/room.proto\x12\x04room\x1a\x13common/common.proto\"&\n" +
 	"\vJoinRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\tR\x06userId\"S\n" +
-	"\fJoinResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12)\n" +
-	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"'\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\"9\n" +
+	"\fJoinResponse\x12)\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"'\n" +
 	"\fLeaveRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\tR\x06userId\"T\n" +
-	"\rLeaveResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12)\n" +
-	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"A\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\":\n" +
+	"\rLeaveResponse\x12)\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"A\n" +
 	"\x12PostMessageRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"x\n" +
-	"\x13PostMessageResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1c\n" +
-	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\x12)\n" +
-	"\x05error\x18\x03 \x01(\v2\x13.common.ErrorDetailR\x05error2\xb0\x01\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"^\n" +
+	"\x13PostMessageResponse\x12\x1c\n" +
+	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp\x12)\n" +
+	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error2\xb0\x01\n" +
 	"\tRoomGrain\x12-\n" +
 	"\x04Join\x12\x11.room.JoinRequest\x1a\x12.room.JoinResponse\x120\n" +
 	"\x05Leave\x12\x12.room.LeaveRequest\x1a\x13.room.LeaveResponse\x12B\n" +

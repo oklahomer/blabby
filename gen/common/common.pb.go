@@ -23,8 +23,8 @@ const (
 
 // ErrorDetail is the canonical business-error carrier for grain RPC
 // responses. Every grain response that can fail with a domain outcome
-// embeds an `ErrorDetail` field that is non-nil exactly when `success`
-// is false.
+// embeds an `ErrorDetail` field; presence of that field is itself the
+// success/failure signal — nil means success, populated means failure.
 //
 // The numeric `code` and the `status` string come from the project's
 // error taxonomy; the `message` is a short human-readable description

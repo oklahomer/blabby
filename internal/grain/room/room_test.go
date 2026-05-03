@@ -91,8 +91,8 @@ func TestGrain_Join(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !resp.GetSuccess() {
-			t.Fatalf("Success: got false, want true (resp=%+v)", resp)
+		if resp.GetError() != nil {
+			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
 
 		if got := g.Members(); !reflect.DeepEqual(got, []string{"alice"}) {
@@ -118,8 +118,8 @@ func TestGrain_Join(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !resp.GetSuccess() {
-			t.Fatalf("Success: got false, want true")
+		if resp.GetError() != nil {
+			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
 
 		if len(notifier.notifyCalls) != 3 {
@@ -152,7 +152,7 @@ func TestGrain_Join(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4001, "INVALID_REQUEST")
+		assertErrResponse(t, resp.GetError(), 4001, "INVALID_REQUEST")
 		if len(notifier.notifyCalls) != 0 {
 			t.Errorf("notifyCalls: got %d, want 0", len(notifier.notifyCalls))
 		}
@@ -167,7 +167,7 @@ func TestGrain_Join(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 2002, "ROOM_ALREADY_MEMBER")
+		assertErrResponse(t, resp.GetError(), 2002, "ROOM_ALREADY_MEMBER")
 		if len(notifier.notifyCalls) != 0 {
 			t.Errorf("notifyCalls: got %d, want 0", len(notifier.notifyCalls))
 		}
@@ -188,8 +188,8 @@ func TestGrain_Leave(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !resp.GetSuccess() {
-			t.Fatalf("Success: got false, want true")
+		if resp.GetError() != nil {
+			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
 
 		if got := g.Members(); !reflect.DeepEqual(got, []string{"bob"}) {
@@ -218,7 +218,7 @@ func TestGrain_Leave(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4001, "INVALID_REQUEST")
+		assertErrResponse(t, resp.GetError(), 4001, "INVALID_REQUEST")
 		if len(notifier.notifyCalls) != 0 {
 			t.Errorf("notifyCalls: got %d, want 0", len(notifier.notifyCalls))
 		}
@@ -231,7 +231,7 @@ func TestGrain_Leave(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 2001, "ROOM_NOT_MEMBER")
+		assertErrResponse(t, resp.GetError(), 2001, "ROOM_NOT_MEMBER")
 		if len(notifier.notifyCalls) != 0 {
 			t.Errorf("notifyCalls: got %d, want 0", len(notifier.notifyCalls))
 		}
@@ -249,8 +249,8 @@ func TestGrain_PostMessage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !resp.GetSuccess() {
-			t.Fatalf("Success: got false, want true (err=%+v)", resp.GetError())
+		if resp.GetError() != nil {
+			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
 		if resp.GetTimestamp() == 0 {
 			t.Errorf("Timestamp: got 0, want non-zero")
@@ -297,7 +297,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4001, "INVALID_REQUEST")
+		assertErrResponse(t, resp.GetError(), 4001, "INVALID_REQUEST")
 		if len(notifier.forwardCalls) != 0 {
 			t.Errorf("forwardCalls: got %d, want 0", len(notifier.forwardCalls))
 		}
@@ -315,7 +315,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4002, "MISSING_FIELD")
+		assertErrResponse(t, resp.GetError(), 4002, "MISSING_FIELD")
 		if len(notifier.forwardCalls) != 0 {
 			t.Errorf("forwardCalls: got %d, want 0", len(notifier.forwardCalls))
 		}
@@ -330,7 +330,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4002, "MISSING_FIELD")
+		assertErrResponse(t, resp.GetError(), 4002, "MISSING_FIELD")
 		if len(notifier.forwardCalls) != 0 {
 			t.Errorf("forwardCalls: got %d, want 0", len(notifier.forwardCalls))
 		}
@@ -343,7 +343,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 2001, "ROOM_NOT_MEMBER")
+		assertErrResponse(t, resp.GetError(), 2001, "ROOM_NOT_MEMBER")
 		if len(notifier.forwardCalls) != 0 {
 			t.Errorf("forwardCalls: got %d, want 0", len(notifier.forwardCalls))
 		}
@@ -369,8 +369,8 @@ func TestGrain_FanOutErrorIsLoggedNotFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !resp.GetSuccess() {
-		t.Errorf("expected success even when one fan-out fails (best-effort delivery)")
+	if resp.GetError() != nil {
+		t.Errorf("expected success even when one fan-out fails (best-effort delivery), got error: %+v", resp.GetError())
 	}
 	if len(notifier.forwardCalls) != 2 {
 		t.Errorf("forwardCalls: got %d, want 2 (loop must continue past error)", len(notifier.forwardCalls))
@@ -388,7 +388,7 @@ func TestGrain_Init_DefaultsClockWhenAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !resp.GetSuccess() {
+	if resp.GetError() != nil {
 		t.Fatalf("PostMessage failed: %+v", resp.GetError())
 	}
 	if resp.GetTimestamp() <= 0 {
@@ -441,8 +441,8 @@ func TestGrain_FanOutNotifyError_LoggedNotFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !resp.GetSuccess() {
-		t.Errorf("expected Success=true even when fan-out errors (best-effort)")
+	if resp.GetError() != nil {
+		t.Errorf("expected success even when fan-out errors (best-effort), got error: %+v", resp.GetError())
 	}
 	if len(notifier.notifyCalls) != 2 {
 		t.Errorf("notifyCalls: got %d, want 2 (loop must not abort on error)", len(notifier.notifyCalls))
@@ -475,16 +475,13 @@ func mustJoin(t *testing.T, g *room.Grain, userID string) {
 	if err != nil {
 		t.Fatalf("Join(%q) unexpected error: %v", userID, err)
 	}
-	if !resp.GetSuccess() {
+	if resp.GetError() != nil {
 		t.Fatalf("Join(%q) failed: %+v", userID, resp.GetError())
 	}
 }
 
-func assertErrResponse(t *testing.T, success bool, ed *commonpb.ErrorDetail, wantCode int32, wantStatus string) {
+func assertErrResponse(t *testing.T, ed *commonpb.ErrorDetail, wantCode int32, wantStatus string) {
 	t.Helper()
-	if success {
-		t.Errorf("Success: got true, want false")
-	}
 	if ed == nil {
 		t.Fatal("Error detail: got nil, want populated")
 	}

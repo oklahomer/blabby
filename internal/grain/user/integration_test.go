@@ -28,18 +28,18 @@ func (s *stubRoomGrain) ReceiveDefault(cluster.GrainContext) {}
 
 func (s *stubRoomGrain) Join(*roompb.JoinRequest, cluster.GrainContext) (*roompb.JoinResponse, error) {
 	atomic.AddInt64(s.joinCount, 1)
-	return &roompb.JoinResponse{Success: true}, nil
+	return &roompb.JoinResponse{}, nil
 }
 func (s *stubRoomGrain) Leave(*roompb.LeaveRequest, cluster.GrainContext) (*roompb.LeaveResponse, error) {
 	atomic.AddInt64(s.leaveCount, 1)
-	return &roompb.LeaveResponse{Success: true}, nil
+	return &roompb.LeaveResponse{}, nil
 }
 func (s *stubRoomGrain) PostMessage(*roompb.PostMessageRequest, cluster.GrainContext) (*roompb.PostMessageResponse, error) {
 	atomic.AddInt64(s.postCount, 1)
 	if s.postResponse != nil {
 		return s.postResponse, nil
 	}
-	return &roompb.PostMessageResponse{Success: true, Timestamp: time.Now().UnixMilli()}, nil
+	return &roompb.PostMessageResponse{Timestamp: time.Now().UnixMilli()}, nil
 }
 
 // TestUserGrain_Integration_RoutesCommandsThroughCluster drives the full
@@ -61,9 +61,8 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JoinRoom via cluster: %v", err)
 	}
-	if !joinResp.GetSuccess() {
-		ed := joinResp.GetError()
-		t.Fatalf("JoinRoom: success=false code=%d status=%q msg=%q",
+	if ed := joinResp.GetError(); ed != nil {
+		t.Fatalf("JoinRoom: error code=%d status=%q msg=%q",
 			ed.GetCode(), ed.GetStatus(), ed.GetMessage())
 	}
 	if got := atomic.LoadInt64(&stubRoomJoinCount); got != 1 {
@@ -85,9 +84,8 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SendMessage via cluster: %v", err)
 	}
-	if !sendResp.GetSuccess() {
-		ed := sendResp.GetError()
-		t.Fatalf("SendMessage: success=false code=%d status=%q msg=%q",
+	if ed := sendResp.GetError(); ed != nil {
+		t.Fatalf("SendMessage: error code=%d status=%q msg=%q",
 			ed.GetCode(), ed.GetStatus(), ed.GetMessage())
 	}
 	if sendResp.GetTimestamp() != stubPostTimestamp {
@@ -102,9 +100,8 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LeaveRoom via cluster: %v", err)
 	}
-	if !leaveResp.GetSuccess() {
-		ed := leaveResp.GetError()
-		t.Fatalf("LeaveRoom: success=false code=%d status=%q msg=%q",
+	if ed := leaveResp.GetError(); ed != nil {
+		t.Fatalf("LeaveRoom: error code=%d status=%q msg=%q",
 			ed.GetCode(), ed.GetStatus(), ed.GetMessage())
 	}
 	if got := atomic.LoadInt64(&stubRoomLeaveCount); got != 1 {
@@ -123,27 +120,19 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterConnection via cluster: %v", err)
 	}
-	if !regResp.GetSuccess() {
-		t.Fatalf("RegisterConnection: success=false code=%d", regResp.GetError().GetCode())
+	if ed := regResp.GetError(); ed != nil {
+		t.Fatalf("RegisterConnection: error code=%d", ed.GetCode())
 	}
 
-	fwdResp, err := uc.ForwardMessage(&userpb.ForwardMessageRequest{
+	if _, err := uc.ForwardMessage(&userpb.ForwardMessageRequest{
 		RoomId: "general", SenderId: userID, Text: "hi", Timestamp: 1,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("ForwardMessage via cluster: %v", err)
 	}
-	if !fwdResp.GetSuccess() {
-		t.Errorf("ForwardMessage: success=false")
-	}
 
-	notifyResp, err := uc.NotifyRoomEvent(&userpb.NotifyRoomEventRequest{
+	if _, err := uc.NotifyRoomEvent(&userpb.NotifyRoomEventRequest{
 		RoomId: "general", UserId: "bob", EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("NotifyRoomEvent via cluster: %v", err)
-	}
-	if !notifyResp.GetSuccess() {
-		t.Errorf("NotifyRoomEvent: success=false")
 	}
 }

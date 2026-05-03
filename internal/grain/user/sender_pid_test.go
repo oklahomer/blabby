@@ -83,8 +83,7 @@ func registerSelfWithPID(t *testing.T, c *cluster.Cluster, pid *actor.PID, r *re
 	if r.registerErr != nil {
 		t.Fatalf("RegisterConnection transport error for %s: %v", pid.GetId(), r.registerErr)
 	}
-	if !r.registerResp.GetSuccess() {
-		ed := r.registerResp.GetError()
+	if ed := r.registerResp.GetError(); ed != nil {
 		t.Fatalf("RegisterConnection for %s failed: code=%d status=%q msg=%q",
 			pid.GetId(), ed.GetCode(), ed.GetStatus(), ed.GetMessage())
 	}
@@ -158,12 +157,8 @@ func TestUserGrain_SenderPID(t *testing.T) {
 		fwdReq := &userpb.ForwardMessageRequest{
 			RoomId: "general", SenderId: userID, Text: "hi", Timestamp: 1,
 		}
-		resp, err := uc.ForwardMessage(fwdReq)
-		if err != nil {
+		if _, err := uc.ForwardMessage(fwdReq); err != nil {
 			t.Fatalf("ForwardMessage via cluster: %v", err)
-		}
-		if !resp.GetSuccess() {
-			t.Fatalf("ForwardMessage success=false")
 		}
 
 		waitForReceived(t, r, 1)
@@ -187,12 +182,8 @@ func TestUserGrain_SenderPID(t *testing.T) {
 		fwdReq := &userpb.ForwardMessageRequest{
 			RoomId: "general", SenderId: userID, Text: "multi-device", Timestamp: 42,
 		}
-		resp, err := uc.ForwardMessage(fwdReq)
-		if err != nil {
+		if _, err := uc.ForwardMessage(fwdReq); err != nil {
 			t.Fatalf("ForwardMessage via cluster: %v", err)
-		}
-		if !resp.GetSuccess() {
-			t.Fatalf("ForwardMessage success=false")
 		}
 
 		waitForReceived(t, rA, 1)

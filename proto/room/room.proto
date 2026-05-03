@@ -11,9 +11,9 @@ message JoinRequest {
 }
 
 // JoinResponse indicates whether the join operation succeeded.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 message JoinResponse {
-  bool success = 1;
-  common.ErrorDetail error = 2;
+  common.ErrorDetail error = 1;
 }
 
 // LeaveRequest is sent when a user wants to leave a room.
@@ -22,9 +22,9 @@ message LeaveRequest {
 }
 
 // LeaveResponse indicates whether the leave operation succeeded.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 message LeaveResponse {
-  bool success = 1;
-  common.ErrorDetail error = 2;
+  common.ErrorDetail error = 1;
 }
 
 // PostMessageRequest is sent when a user posts a message to a room.
@@ -34,11 +34,12 @@ message PostMessageRequest {
 }
 
 // PostMessageResponse indicates whether the message was posted.
-// Includes a server-assigned timestamp (Unix milliseconds).
+// A nil error indicates success; a populated error indicates failure.
+// `timestamp` is the server-assigned Unix-ms timestamp on success and zero
+// on failure. See ADR-013.
 message PostMessageResponse {
-  bool success = 1;
-  int64 timestamp = 2;
-  common.ErrorDetail error = 3;
+  int64 timestamp = 1;
+  common.ErrorDetail error = 2;
 }
 
 // RoomGrain defines the Room virtual actor service.

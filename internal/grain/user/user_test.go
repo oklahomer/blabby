@@ -62,7 +62,7 @@ func (f *fakeRoomClient) Join(roomID string, req *roompb.JoinRequest) (*roompb.J
 	if def != nil {
 		return def, nil
 	}
-	return &roompb.JoinResponse{Success: true}, nil
+	return &roompb.JoinResponse{}, nil
 }
 
 func (f *fakeRoomClient) Leave(roomID string, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error) {
@@ -77,7 +77,7 @@ func (f *fakeRoomClient) Leave(roomID string, req *roompb.LeaveRequest) (*roompb
 	if def != nil {
 		return def, nil
 	}
-	return &roompb.LeaveResponse{Success: true}, nil
+	return &roompb.LeaveResponse{}, nil
 }
 
 func (f *fakeRoomClient) PostMessage(roomID string, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error) {
@@ -92,7 +92,7 @@ func (f *fakeRoomClient) PostMessage(roomID string, req *roompb.PostMessageReque
 	if def != nil {
 		return def, nil
 	}
-	return &roompb.PostMessageResponse{Success: true, Timestamp: 12345}, nil
+	return &roompb.PostMessageResponse{Timestamp: 12345}, nil
 }
 
 // recordingSender captures every fan-out call so tests can assert delivery
@@ -160,8 +160,8 @@ func TestGrain_RegisterConnection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !resp.GetSuccess() {
-			t.Fatalf("Success: got false, want true (resp=%+v)", resp)
+		if resp.GetError() != nil {
+			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
 		if got := h.g.Connections(); !reflect.DeepEqual(got, []*actor.PID{pid}) {
 			t.Errorf("Connections: got %v, want [%v]", got, pid)
@@ -181,7 +181,7 @@ func TestGrain_RegisterConnection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4001, "INVALID_REQUEST")
+		assertErrResponse(t, resp.GetError(), 4001, "INVALID_REQUEST")
 		if got := h.watcher.PIDs(); len(got) != 0 {
 			t.Errorf("Watch PIDs on validation failure: got %v, want []", got)
 		}
@@ -199,7 +199,7 @@ func TestGrain_RegisterConnection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4001, "INVALID_REQUEST")
+		assertErrResponse(t, resp.GetError(), 4001, "INVALID_REQUEST")
 	})
 
 	t.Run("missing requester_pid.id returns 4001", func(t *testing.T) {
@@ -214,7 +214,7 @@ func TestGrain_RegisterConnection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4001, "INVALID_REQUEST")
+		assertErrResponse(t, resp.GetError(), 4001, "INVALID_REQUEST")
 	})
 
 	t.Run("re-register same PID is idempotent", func(t *testing.T) {
@@ -226,8 +226,8 @@ func TestGrain_RegisterConnection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error on re-register: %v", err)
 		}
-		if !resp.GetSuccess() {
-			t.Fatalf("Success: got false, want true (re-register must succeed)")
+		if resp.GetError() != nil {
+			t.Fatalf("expected re-register to succeed, got error: %+v", resp.GetError())
 		}
 		if got := h.g.Connections(); !reflect.DeepEqual(got, []*actor.PID{pid}) {
 			t.Errorf("Connections: got %v, want [%v] (size unchanged)", got, pid)
@@ -301,8 +301,8 @@ func TestGrain_JoinRoom(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !resp.GetSuccess() {
-			t.Fatalf("Success: got false, want true (resp=%+v)", resp)
+		if resp.GetError() != nil {
+			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
 		if got := h.g.JoinedRooms(); !reflect.DeepEqual(got, []string{"general"}) {
 			t.Errorf("JoinedRooms: got %v, want [general]", got)
@@ -319,7 +319,7 @@ func TestGrain_JoinRoom(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4001, "INVALID_REQUEST")
+		assertErrResponse(t, resp.GetError(), 4001, "INVALID_REQUEST")
 		if len(h.rooms.joinCalls) != 0 {
 			t.Errorf("joinCalls: got %d, want 0", len(h.rooms.joinCalls))
 		}
@@ -328,15 +328,14 @@ func TestGrain_JoinRoom(t *testing.T) {
 	t.Run("Room grain business error is copied through and joined_rooms unchanged", func(t *testing.T) {
 		h := newGrain(t)
 		h.rooms.defaultJoin = &roompb.JoinResponse{
-			Success: false,
-			Error:   &commonpb.ErrorDetail{Code: 2002, Status: "ROOM_ALREADY_MEMBER", Message: "already a member"},
+			Error: &commonpb.ErrorDetail{Code: 2002, Status: "ROOM_ALREADY_MEMBER", Message: "already a member"},
 		}
 
 		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, graintest.NewFakeGrainContext("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 2002, "ROOM_ALREADY_MEMBER")
+		assertErrResponse(t, resp.GetError(), 2002, "ROOM_ALREADY_MEMBER")
 		if got := h.g.JoinedRooms(); len(got) != 0 {
 			t.Errorf("JoinedRooms: got %v, want [] (must not record on failure)", got)
 		}
@@ -352,7 +351,7 @@ func TestGrain_JoinRoom(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 5001, "INTERNAL_ERROR")
+		assertErrResponse(t, resp.GetError(), 5001, "INTERNAL_ERROR")
 		if got := h.g.JoinedRooms(); len(got) != 0 {
 			t.Errorf("JoinedRooms: got %v, want []", got)
 		}
@@ -371,8 +370,8 @@ func TestGrain_LeaveRoom(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !resp.GetSuccess() {
-			t.Fatalf("Success: got false, want true")
+		if resp.GetError() != nil {
+			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
 		if got := h.g.JoinedRooms(); len(got) != 0 {
 			t.Errorf("JoinedRooms: got %v, want []", got)
@@ -389,7 +388,7 @@ func TestGrain_LeaveRoom(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4001, "INVALID_REQUEST")
+		assertErrResponse(t, resp.GetError(), 4001, "INVALID_REQUEST")
 		if len(h.rooms.leaveCalls) != 0 {
 			t.Errorf("leaveCalls: got %d, want 0", len(h.rooms.leaveCalls))
 		}
@@ -398,15 +397,14 @@ func TestGrain_LeaveRoom(t *testing.T) {
 	t.Run("Room grain returns 2001 propagates inline", func(t *testing.T) {
 		h := newGrain(t)
 		h.rooms.defaultLeave = &roompb.LeaveResponse{
-			Success: false,
-			Error:   &commonpb.ErrorDetail{Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member"},
+			Error: &commonpb.ErrorDetail{Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member"},
 		}
 
 		resp, err := h.g.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: "general"}, graintest.NewFakeGrainContext("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 2001, "ROOM_NOT_MEMBER")
+		assertErrResponse(t, resp.GetError(), 2001, "ROOM_NOT_MEMBER")
 	})
 
 	t.Run("transport error becomes 5001", func(t *testing.T) {
@@ -419,7 +417,7 @@ func TestGrain_LeaveRoom(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 5001, "INTERNAL_ERROR")
+		assertErrResponse(t, resp.GetError(), 5001, "INTERNAL_ERROR")
 	})
 }
 
@@ -429,14 +427,14 @@ func TestGrain_SendMessage(t *testing.T) {
 	t.Run("success returns Room grain timestamp without local fan-out", func(t *testing.T) {
 		h := newGrain(t)
 		mustRegister(t, h, actor.NewPID("addr", "conn-1"))
-		h.rooms.defaultPost = &roompb.PostMessageResponse{Success: true, Timestamp: 9999}
+		h.rooms.defaultPost = &roompb.PostMessageResponse{Timestamp: 9999}
 
 		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, graintest.NewFakeGrainContext("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !resp.GetSuccess() || resp.GetTimestamp() != 9999 {
-			t.Fatalf("got %+v, want success=true ts=9999", resp)
+		if resp.GetError() != nil || resp.GetTimestamp() != 9999 {
+			t.Fatalf("got %+v, want error=nil ts=9999", resp)
 		}
 		if len(h.rooms.postCalls) != 1 || h.rooms.postCalls[0] != (postCall{RoomID: "general", UserID: "alice", Text: "hi"}) {
 			t.Errorf("postCalls: got %+v, want one call with alice/hi", h.rooms.postCalls)
@@ -453,7 +451,7 @@ func TestGrain_SendMessage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4002, "MISSING_FIELD")
+		assertErrResponse(t, resp.GetError(), 4002, "MISSING_FIELD")
 		if len(h.rooms.postCalls) != 0 {
 			t.Errorf("postCalls: got %d, want 0", len(h.rooms.postCalls))
 		}
@@ -466,21 +464,20 @@ func TestGrain_SendMessage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 4001, "INVALID_REQUEST")
+		assertErrResponse(t, resp.GetError(), 4001, "INVALID_REQUEST")
 	})
 
 	t.Run("Room grain returns 2001 propagates inline with timestamp 0", func(t *testing.T) {
 		h := newGrain(t)
 		h.rooms.defaultPost = &roompb.PostMessageResponse{
-			Success: false,
-			Error:   &commonpb.ErrorDetail{Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member"},
+			Error: &commonpb.ErrorDetail{Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member"},
 		}
 
 		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, graintest.NewFakeGrainContext("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 2001, "ROOM_NOT_MEMBER")
+		assertErrResponse(t, resp.GetError(), 2001, "ROOM_NOT_MEMBER")
 		if resp.GetTimestamp() != 0 {
 			t.Errorf("Timestamp: got %d, want 0 on failure", resp.GetTimestamp())
 		}
@@ -496,7 +493,7 @@ func TestGrain_SendMessage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetSuccess(), resp.GetError(), 5001, "INTERNAL_ERROR")
+		assertErrResponse(t, resp.GetError(), 5001, "INTERNAL_ERROR")
 	})
 }
 
@@ -514,8 +511,8 @@ func TestGrain_ForwardMessage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !resp.GetSuccess() {
-			t.Errorf("Success: got false, want true")
+		if resp == nil {
+			t.Errorf("expected non-nil response")
 		}
 
 		calls := h.sender.Calls()
@@ -536,8 +533,8 @@ func TestGrain_ForwardMessage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !resp.GetSuccess() {
-			t.Errorf("Success: got false, want true (Room grain delivers regardless of connection state)")
+		if resp == nil {
+			t.Errorf("expected non-nil response (Room grain delivers regardless of connection state)")
 		}
 		if got := h.sender.Calls(); len(got) != 0 {
 			t.Errorf("sender.Calls: got %d, want 0", len(got))
@@ -563,8 +560,8 @@ func TestGrain_NotifyRoomEvent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !resp.GetSuccess() {
-			t.Errorf("Success: got false, want true")
+		if resp == nil {
+			t.Errorf("expected non-nil response")
 		}
 		if calls := h.sender.Calls(); len(calls) != 2 {
 			t.Fatalf("sender.Calls: got %d, want 2", len(calls))
@@ -615,15 +612,15 @@ func TestGrain_MultiDeviceEcho(t *testing.T) {
 	pidB := actor.NewPID("addr", "device-B")
 	mustRegister(t, h, pidA)
 	mustRegister(t, h, pidB)
-	h.rooms.defaultPost = &roompb.PostMessageResponse{Success: true, Timestamp: 7}
+	h.rooms.defaultPost = &roompb.PostMessageResponse{Timestamp: 7}
 
 	// 1. SendMessage: alice posts "hi" — Room grain returns success.
 	sendResp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, graintest.NewFakeGrainContext("alice"))
 	if err != nil {
 		t.Fatalf("SendMessage unexpected error: %v", err)
 	}
-	if !sendResp.GetSuccess() {
-		t.Fatalf("SendMessage success: got false")
+	if sendResp.GetError() != nil {
+		t.Fatalf("SendMessage error: %+v", sendResp.GetError())
 	}
 	// 2. Critical: SendMessage MUST NOT echo locally — echo is the Room
 	// grain's job, delivered back via ForwardMessage.
@@ -749,8 +746,8 @@ func mustRegister(t *testing.T, h *grainHarness, pid *actor.PID) {
 	if err != nil {
 		t.Fatalf("RegisterConnection(%v) unexpected error: %v", pid, err)
 	}
-	if !resp.GetSuccess() {
-		t.Fatalf("RegisterConnection(%v) failed: %+v", pid, resp)
+	if resp.GetError() != nil {
+		t.Fatalf("RegisterConnection(%v) failed: %+v", pid, resp.GetError())
 	}
 }
 
@@ -774,15 +771,12 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-// assertErrResponse verifies a grain response's failure shape: success
-// must be false and the ErrorDetail must carry the expected code/status
-// and a non-empty message. One helper covers every response type now
-// that they all share commonpb.ErrorDetail (ADR-013).
-func assertErrResponse(t *testing.T, success bool, ed *commonpb.ErrorDetail, wantCode int32, wantStatus string) {
+// assertErrResponse verifies a grain response's failure shape: the
+// ErrorDetail must be populated with the expected code/status and a
+// non-empty message. One helper covers every response type now that they
+// all share commonpb.ErrorDetail (ADR-013).
+func assertErrResponse(t *testing.T, ed *commonpb.ErrorDetail, wantCode int32, wantStatus string) {
 	t.Helper()
-	if success {
-		t.Errorf("Success: got true, want false")
-	}
 	if ed == nil {
 		t.Fatal("Error: got nil, want populated")
 	}

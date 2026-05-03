@@ -50,7 +50,6 @@ func TestMain(m *testing.M) {
 			leaveCount: &stubRoomLeaveCount,
 			postCount:  &stubRoomPostCount,
 			postResponse: &roompb.PostMessageResponse{
-				Success:   true,
 				Timestamp: stubPostTimestamp,
 			},
 		}

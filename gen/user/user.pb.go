@@ -186,11 +186,10 @@ func (x *RegisterConnectionRequest) GetRequesterPid() *PID {
 }
 
 // RegisterConnectionResponse indicates whether the connection was registered.
-// `error` is non-nil exactly when `success` is false. See ADR-013.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 type RegisterConnectionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Error         *common.ErrorDetail    `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -223,13 +222,6 @@ func (x *RegisterConnectionResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RegisterConnectionResponse.ProtoReflect.Descriptor instead.
 func (*RegisterConnectionResponse) Descriptor() ([]byte, []int) {
 	return file_user_user_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *RegisterConnectionResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
 }
 
 func (x *RegisterConnectionResponse) GetError() *common.ErrorDetail {
@@ -285,11 +277,10 @@ func (x *JoinRoomRequest) GetRoomId() string {
 }
 
 // JoinRoomResponse indicates the result of the join command.
-// `error` is non-nil exactly when `success` is false. See ADR-013.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 type JoinRoomResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Error         *common.ErrorDetail    `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -322,13 +313,6 @@ func (x *JoinRoomResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use JoinRoomResponse.ProtoReflect.Descriptor instead.
 func (*JoinRoomResponse) Descriptor() ([]byte, []int) {
 	return file_user_user_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *JoinRoomResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
 }
 
 func (x *JoinRoomResponse) GetError() *common.ErrorDetail {
@@ -384,11 +368,10 @@ func (x *LeaveRoomRequest) GetRoomId() string {
 }
 
 // LeaveRoomResponse indicates the result of the leave command.
-// `error` is non-nil exactly when `success` is false. See ADR-013.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 type LeaveRoomResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Error         *common.ErrorDetail    `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -421,13 +404,6 @@ func (x *LeaveRoomResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use LeaveRoomResponse.ProtoReflect.Descriptor instead.
 func (*LeaveRoomResponse) Descriptor() ([]byte, []int) {
 	return file_user_user_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *LeaveRoomResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
 }
 
 func (x *LeaveRoomResponse) GetError() *common.ErrorDetail {
@@ -491,13 +467,13 @@ func (x *SendMessageRequest) GetText() string {
 }
 
 // SendMessageResponse indicates the result of the send command.
-// `error` is non-nil exactly when `success` is false. `timestamp` is
-// the server-assigned timestamp on success and zero on failure. See ADR-013.
+// A nil error indicates success; a populated error indicates failure.
+// `timestamp` is the server-assigned timestamp on success and zero on failure.
+// See ADR-013.
 type SendMessageResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Timestamp     int64                  `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	Error         *common.ErrorDetail    `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	Timestamp     int64                  `protobuf:"varint,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -530,13 +506,6 @@ func (x *SendMessageResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SendMessageResponse.ProtoReflect.Descriptor instead.
 func (*SendMessageResponse) Descriptor() ([]byte, []int) {
 	return file_user_user_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *SendMessageResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
 }
 
 func (x *SendMessageResponse) GetTimestamp() int64 {
@@ -622,10 +591,11 @@ func (x *ForwardMessageRequest) GetTimestamp() int64 {
 	return 0
 }
 
-// ForwardMessageResponse acknowledges the message delivery.
+// ForwardMessageResponse acknowledges the message delivery. The User grain
+// performs best-effort fan-out and never reports a business failure here;
+// a nil response (with no transport error) means the request was accepted.
 type ForwardMessageResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -658,13 +628,6 @@ func (x *ForwardMessageResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ForwardMessageResponse.ProtoReflect.Descriptor instead.
 func (*ForwardMessageResponse) Descriptor() ([]byte, []int) {
 	return file_user_user_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *ForwardMessageResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
 }
 
 // NotifyRoomEventRequest delivers a room event (join/leave) to the User grain.
@@ -728,10 +691,10 @@ func (x *NotifyRoomEventRequest) GetEventType() RoomEventType {
 	return RoomEventType_ROOM_EVENT_TYPE_UNSPECIFIED
 }
 
-// NotifyRoomEventResponse acknowledges the event notification.
+// NotifyRoomEventResponse acknowledges the event notification. Same semantics
+// as ForwardMessageResponse — best-effort fan-out, no business failure.
 type NotifyRoomEventResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -764,13 +727,6 @@ func (x *NotifyRoomEventResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use NotifyRoomEventResponse.ProtoReflect.Descriptor instead.
 func (*NotifyRoomEventResponse) Descriptor() ([]byte, []int) {
 	return file_user_user_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *NotifyRoomEventResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
 }
 
 // GetJoinedRoomsRequest queries which rooms the user has joined.
@@ -864,41 +820,35 @@ const file_user_user_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\"K\n" +
 	"\x19RegisterConnectionRequest\x12.\n" +
-	"\rrequester_pid\x18\x01 \x01(\v2\t.user.PIDR\frequesterPid\"a\n" +
-	"\x1aRegisterConnectionResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12)\n" +
-	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"*\n" +
+	"\rrequester_pid\x18\x01 \x01(\v2\t.user.PIDR\frequesterPid\"G\n" +
+	"\x1aRegisterConnectionResponse\x12)\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"*\n" +
 	"\x0fJoinRoomRequest\x12\x17\n" +
-	"\aroom_id\x18\x01 \x01(\tR\x06roomId\"W\n" +
-	"\x10JoinRoomResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12)\n" +
-	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"+\n" +
+	"\aroom_id\x18\x01 \x01(\tR\x06roomId\"=\n" +
+	"\x10JoinRoomResponse\x12)\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"+\n" +
 	"\x10LeaveRoomRequest\x12\x17\n" +
-	"\aroom_id\x18\x01 \x01(\tR\x06roomId\"X\n" +
-	"\x11LeaveRoomResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12)\n" +
-	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"A\n" +
+	"\aroom_id\x18\x01 \x01(\tR\x06roomId\">\n" +
+	"\x11LeaveRoomResponse\x12)\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"A\n" +
 	"\x12SendMessageRequest\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"x\n" +
-	"\x13SendMessageResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1c\n" +
-	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\x12)\n" +
-	"\x05error\x18\x03 \x01(\v2\x13.common.ErrorDetailR\x05error\"\x7f\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"^\n" +
+	"\x13SendMessageResponse\x12\x1c\n" +
+	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp\x12)\n" +
+	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"\x7f\n" +
 	"\x15ForwardMessageRequest\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x1b\n" +
 	"\tsender_id\x18\x02 \x01(\tR\bsenderId\x12\x12\n" +
 	"\x04text\x18\x03 \x01(\tR\x04text\x12\x1c\n" +
-	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\"2\n" +
-	"\x16ForwardMessageResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"~\n" +
+	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\"\x18\n" +
+	"\x16ForwardMessageResponse\"~\n" +
 	"\x16NotifyRoomEventRequest\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x122\n" +
 	"\n" +
-	"event_type\x18\x03 \x01(\x0e2\x13.user.RoomEventTypeR\teventType\"3\n" +
-	"\x17NotifyRoomEventResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x17\n" +
+	"event_type\x18\x03 \x01(\x0e2\x13.user.RoomEventTypeR\teventType\"\x19\n" +
+	"\x17NotifyRoomEventResponse\"\x17\n" +
 	"\x15GetJoinedRoomsRequest\"3\n" +
 	"\x16GetJoinedRoomsResponse\x12\x19\n" +
 	"\broom_ids\x18\x01 \x03(\tR\aroomIds*f\n" +

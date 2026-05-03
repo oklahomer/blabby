@@ -150,16 +150,16 @@ func (g *Grain) RegisterConnection(req *userpb.RegisterConnectionRequest, ctx cl
 
 	requesterPid := req.GetRequesterPid()
 	if requesterPid == nil {
-		return &userpb.RegisterConnectionResponse{Success: false, Error: errDetail(codeInvalidRequest, statusInvalidRequest, "requester_pid is required")}, nil
+		return &userpb.RegisterConnectionResponse{Error: errDetail(codeInvalidRequest, statusInvalidRequest, "requester_pid is required")}, nil
 	}
 	if requesterPid.GetAddress() == "" || requesterPid.GetId() == "" {
-		return &userpb.RegisterConnectionResponse{Success: false, Error: errDetail(codeInvalidRequest, statusInvalidRequest, "requester_pid.address and requester_pid.id are required")}, nil
+		return &userpb.RegisterConnectionResponse{Error: errDetail(codeInvalidRequest, statusInvalidRequest, "requester_pid.address and requester_pid.id are required")}, nil
 	}
 
 	pid := &actor.PID{Address: requesterPid.GetAddress(), Id: requesterPid.GetId()}
 	g.state.addConnection(pid)
 	ctx.Watch(pid)
-	return &userpb.RegisterConnectionResponse{Success: true}, nil
+	return &userpb.RegisterConnectionResponse{}, nil
 }
 
 // JoinRoom routes a join command to the Room grain identified by req.RoomId
@@ -174,7 +174,7 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 	)
 
 	if req.GetRoomId() == "" {
-		return &userpb.JoinRoomResponse{Success: false, Error: errDetail(codeInvalidRequest, statusInvalidRequest, "room_id is required")}, nil
+		return &userpb.JoinRoomResponse{Error: errDetail(codeInvalidRequest, statusInvalidRequest, "room_id is required")}, nil
 	}
 
 	roomResp, err := g.rooms.Join(req.GetRoomId(), &roompb.JoinRequest{UserId: ctx.Identity()})
@@ -189,14 +189,14 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 			"room_id", req.GetRoomId(),
 			"error", err,
 		)
-		return &userpb.JoinRoomResponse{Success: false, Error: errDetail(codeInternalError, statusInternalError, "failed to reach room")}, nil
+		return &userpb.JoinRoomResponse{Error: errDetail(codeInternalError, statusInternalError, "failed to reach room")}, nil
 	}
-	if !roomResp.GetSuccess() {
-		return &userpb.JoinRoomResponse{Success: false, Error: roomResp.GetError()}, nil
+	if roomResp.GetError() != nil {
+		return &userpb.JoinRoomResponse{Error: roomResp.GetError()}, nil
 	}
 
 	g.state.joinRoom(req.GetRoomId())
-	return &userpb.JoinRoomResponse{Success: true}, nil
+	return &userpb.JoinRoomResponse{}, nil
 }
 
 // LeaveRoom mirrors JoinRoom: routes to the Room grain and, on success,
@@ -210,7 +210,7 @@ func (g *Grain) LeaveRoom(req *userpb.LeaveRoomRequest, ctx cluster.GrainContext
 	)
 
 	if req.GetRoomId() == "" {
-		return &userpb.LeaveRoomResponse{Success: false, Error: errDetail(codeInvalidRequest, statusInvalidRequest, "room_id is required")}, nil
+		return &userpb.LeaveRoomResponse{Error: errDetail(codeInvalidRequest, statusInvalidRequest, "room_id is required")}, nil
 	}
 
 	roomResp, err := g.rooms.Leave(req.GetRoomId(), &roompb.LeaveRequest{UserId: ctx.Identity()})
@@ -222,14 +222,14 @@ func (g *Grain) LeaveRoom(req *userpb.LeaveRoomRequest, ctx cluster.GrainContext
 			"room_id", req.GetRoomId(),
 			"error", err,
 		)
-		return &userpb.LeaveRoomResponse{Success: false, Error: errDetail(codeInternalError, statusInternalError, "failed to reach room")}, nil
+		return &userpb.LeaveRoomResponse{Error: errDetail(codeInternalError, statusInternalError, "failed to reach room")}, nil
 	}
-	if !roomResp.GetSuccess() {
-		return &userpb.LeaveRoomResponse{Success: false, Error: roomResp.GetError()}, nil
+	if roomResp.GetError() != nil {
+		return &userpb.LeaveRoomResponse{Error: roomResp.GetError()}, nil
 	}
 
 	g.state.leaveRoom(req.GetRoomId())
-	return &userpb.LeaveRoomResponse{Success: true}, nil
+	return &userpb.LeaveRoomResponse{}, nil
 }
 
 // SendMessage routes a chat-message command to the Room grain. The User
@@ -245,10 +245,10 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 	)
 
 	if req.GetRoomId() == "" {
-		return &userpb.SendMessageResponse{Success: false, Error: errDetail(codeInvalidRequest, statusInvalidRequest, "room_id is required")}, nil
+		return &userpb.SendMessageResponse{Error: errDetail(codeInvalidRequest, statusInvalidRequest, "room_id is required")}, nil
 	}
 	if strings.TrimSpace(req.GetText()) == "" {
-		return &userpb.SendMessageResponse{Success: false, Error: errDetail(codeMissingField, statusMissingField, "text is required")}, nil
+		return &userpb.SendMessageResponse{Error: errDetail(codeMissingField, statusMissingField, "text is required")}, nil
 	}
 
 	roomResp, err := g.rooms.PostMessage(req.GetRoomId(), &roompb.PostMessageRequest{
@@ -263,13 +263,13 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 			"room_id", req.GetRoomId(),
 			"error", err,
 		)
-		return &userpb.SendMessageResponse{Success: false, Error: errDetail(codeInternalError, statusInternalError, "failed to reach room")}, nil
+		return &userpb.SendMessageResponse{Error: errDetail(codeInternalError, statusInternalError, "failed to reach room")}, nil
 	}
-	if !roomResp.GetSuccess() {
-		return &userpb.SendMessageResponse{Success: false, Error: roomResp.GetError()}, nil
+	if roomResp.GetError() != nil {
+		return &userpb.SendMessageResponse{Error: roomResp.GetError()}, nil
 	}
 
-	return &userpb.SendMessageResponse{Success: true, Timestamp: roomResp.GetTimestamp()}, nil
+	return &userpb.SendMessageResponse{Timestamp: roomResp.GetTimestamp()}, nil
 }
 
 // ForwardMessage receives a chat-message fan-out from a Room grain and
@@ -291,7 +291,7 @@ func (g *Grain) ForwardMessage(req *userpb.ForwardMessageRequest, ctx cluster.Gr
 	)
 
 	g.fanOut(ctx, req)
-	return &userpb.ForwardMessageResponse{Success: true}, nil
+	return &userpb.ForwardMessageResponse{}, nil
 }
 
 // NotifyRoomEvent receives a room membership event from a Room grain and
@@ -312,7 +312,7 @@ func (g *Grain) NotifyRoomEvent(req *userpb.NotifyRoomEventRequest, ctx cluster.
 	)
 
 	g.fanOut(ctx, req)
-	return &userpb.NotifyRoomEventResponse{Success: true}, nil
+	return &userpb.NotifyRoomEventResponse{}, nil
 }
 
 // GetJoinedRooms returns a sorted snapshot of the rooms this user has

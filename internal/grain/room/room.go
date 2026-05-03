@@ -12,7 +12,6 @@
 package room
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -62,23 +61,15 @@ type clusterUserNotifier struct {
 }
 
 func (n *clusterUserNotifier) NotifyRoomEvent(userID string, req *userpb.NotifyRoomEventRequest) error {
-	resp, err := userpb.GetUserGrainGrainClient(n.c, userID).NotifyRoomEvent(req)
-	if err != nil {
+	if _, err := userpb.GetUserGrainGrainClient(n.c, userID).NotifyRoomEvent(req); err != nil {
 		return fmt.Errorf("user grain NotifyRoomEvent: %w", err)
-	}
-	if resp == nil || !resp.GetSuccess() {
-		return errors.New("user grain NotifyRoomEvent reported failure")
 	}
 	return nil
 }
 
 func (n *clusterUserNotifier) ForwardMessage(userID string, req *userpb.ForwardMessageRequest) error {
-	resp, err := userpb.GetUserGrainGrainClient(n.c, userID).ForwardMessage(req)
-	if err != nil {
+	if _, err := userpb.GetUserGrainGrainClient(n.c, userID).ForwardMessage(req); err != nil {
 		return fmt.Errorf("user grain ForwardMessage: %w", err)
-	}
-	if resp == nil || !resp.GetSuccess() {
-		return errors.New("user grain ForwardMessage reported failure")
 	}
 	return nil
 }
@@ -171,7 +162,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 	recipients := g.state.memberIDs()
 	g.fanOutNotify(ctx, recipients, buildJoinedEvent(ctx.Identity(), req.GetUserId()), "Join.fanout")
 
-	return &roompb.JoinResponse{Success: true}, nil
+	return &roompb.JoinResponse{}, nil
 }
 
 // Leave removes the user from the room and fans out a LEFT event to the
@@ -198,7 +189,7 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 	g.state.removeMember(req.GetUserId())
 	g.fanOutNotify(ctx, recipients, buildLeftEvent(ctx.Identity(), req.GetUserId()), "Leave.fanout")
 
-	return &roompb.LeaveResponse{Success: true}, nil
+	return &roompb.LeaveResponse{}, nil
 }
 
 // PostMessage records the message, assigns the server-side timestamp, and
@@ -233,7 +224,7 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 	g.fanOutForward(ctx, recipients, payload, "PostMessage.fanout")
 
 	// Proto wire format is int64 Unix-ms; conversion at the response boundary.
-	return &roompb.PostMessageResponse{Success: true, Timestamp: timestamp.UnixMilli()}, nil
+	return &roompb.PostMessageResponse{Timestamp: timestamp.UnixMilli()}, nil
 }
 
 // fanOutNotify delivers a NotifyRoomEvent to each recipient. Failures are
@@ -274,21 +265,18 @@ func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []string, pay
 
 func joinErr(code int32, status, msg string) *roompb.JoinResponse {
 	return &roompb.JoinResponse{
-		Success: false,
-		Error:   &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
+		Error: &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
 	}
 }
 
 func leaveErr(code int32, status, msg string) *roompb.LeaveResponse {
 	return &roompb.LeaveResponse{
-		Success: false,
-		Error:   &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
+		Error: &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
 	}
 }
 
 func postErr(code int32, status, msg string) *roompb.PostMessageResponse {
 	return &roompb.PostMessageResponse{
-		Success: false,
-		Error:   &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
+		Error: &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
 	}
 }

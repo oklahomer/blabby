@@ -27,24 +27,24 @@ func (s *stubUserGrain) Terminate(cluster.GrainContext)      {}
 func (s *stubUserGrain) ReceiveDefault(cluster.GrainContext) {}
 
 func (s *stubUserGrain) RegisterConnection(*userpb.RegisterConnectionRequest, cluster.GrainContext) (*userpb.RegisterConnectionResponse, error) {
-	return &userpb.RegisterConnectionResponse{Success: true}, nil
+	return &userpb.RegisterConnectionResponse{}, nil
 }
 func (s *stubUserGrain) JoinRoom(*userpb.JoinRoomRequest, cluster.GrainContext) (*userpb.JoinRoomResponse, error) {
-	return &userpb.JoinRoomResponse{Success: true}, nil
+	return &userpb.JoinRoomResponse{}, nil
 }
 func (s *stubUserGrain) LeaveRoom(*userpb.LeaveRoomRequest, cluster.GrainContext) (*userpb.LeaveRoomResponse, error) {
-	return &userpb.LeaveRoomResponse{Success: true}, nil
+	return &userpb.LeaveRoomResponse{}, nil
 }
 func (s *stubUserGrain) SendMessage(*userpb.SendMessageRequest, cluster.GrainContext) (*userpb.SendMessageResponse, error) {
-	return &userpb.SendMessageResponse{Success: true}, nil
+	return &userpb.SendMessageResponse{}, nil
 }
 func (s *stubUserGrain) ForwardMessage(*userpb.ForwardMessageRequest, cluster.GrainContext) (*userpb.ForwardMessageResponse, error) {
 	atomic.AddInt64(s.forwardCount, 1)
-	return &userpb.ForwardMessageResponse{Success: true}, nil
+	return &userpb.ForwardMessageResponse{}, nil
 }
 func (s *stubUserGrain) NotifyRoomEvent(*userpb.NotifyRoomEventRequest, cluster.GrainContext) (*userpb.NotifyRoomEventResponse, error) {
 	atomic.AddInt64(s.notifyCount, 1)
-	return &userpb.NotifyRoomEventResponse{Success: true}, nil
+	return &userpb.NotifyRoomEventResponse{}, nil
 }
 func (s *stubUserGrain) GetJoinedRooms(*userpb.GetJoinedRoomsRequest, cluster.GrainContext) (*userpb.GetJoinedRoomsResponse, error) {
 	return &userpb.GetJoinedRoomsResponse{}, nil
@@ -78,16 +78,16 @@ func TestRoomGrain_Integration_FanOutThroughCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Join via cluster: %v", err)
 	}
-	if !joinResp.GetSuccess() {
-		t.Fatalf("Join: success=false err=%+v", joinResp.GetError())
+	if joinResp.GetError() != nil {
+		t.Fatalf("Join: error=%+v", joinResp.GetError())
 	}
 
 	postResp, err := roomClient.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "integration"})
 	if err != nil {
 		t.Fatalf("PostMessage via cluster: %v", err)
 	}
-	if !postResp.GetSuccess() {
-		t.Fatalf("PostMessage: success=false err=%+v", postResp.GetError())
+	if postResp.GetError() != nil {
+		t.Fatalf("PostMessage: error=%+v", postResp.GetError())
 	}
 	if postResp.GetTimestamp() <= 0 {
 		t.Errorf("Timestamp: got %d, want > 0", postResp.GetTimestamp())
