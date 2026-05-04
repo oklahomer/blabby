@@ -7,8 +7,10 @@
 package roompb
 
 import (
+	common "github.com/oklahomer/blabby/gen/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -21,69 +23,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// ErrorDetail is the canonical business error type for grain responses.
-// Error code taxonomy: 1000-1999 (Auth), 2000-2999 (Room/Membership),
-// 3000-3999 (Rate Limiting), 4000-4999 (Validation), 5000-5999 (System).
-type ErrorDetail struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ErrorDetail) Reset() {
-	*x = ErrorDetail{}
-	mi := &file_room_room_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ErrorDetail) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ErrorDetail) ProtoMessage() {}
-
-func (x *ErrorDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_room_room_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ErrorDetail.ProtoReflect.Descriptor instead.
-func (*ErrorDetail) Descriptor() ([]byte, []int) {
-	return file_room_room_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *ErrorDetail) GetCode() int32 {
-	if x != nil {
-		return x.Code
-	}
-	return 0
-}
-
-func (x *ErrorDetail) GetStatus() string {
-	if x != nil {
-		return x.Status
-	}
-	return ""
-}
-
-func (x *ErrorDetail) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
 // JoinRequest is sent when a user wants to join a room.
 type JoinRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -94,7 +33,7 @@ type JoinRequest struct {
 
 func (x *JoinRequest) Reset() {
 	*x = JoinRequest{}
-	mi := &file_room_room_proto_msgTypes[1]
+	mi := &file_room_room_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -106,7 +45,7 @@ func (x *JoinRequest) String() string {
 func (*JoinRequest) ProtoMessage() {}
 
 func (x *JoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_room_room_proto_msgTypes[1]
+	mi := &file_room_room_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -119,7 +58,7 @@ func (x *JoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinRequest.ProtoReflect.Descriptor instead.
 func (*JoinRequest) Descriptor() ([]byte, []int) {
-	return file_room_room_proto_rawDescGZIP(), []int{1}
+	return file_room_room_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *JoinRequest) GetUserId() string {
@@ -130,17 +69,17 @@ func (x *JoinRequest) GetUserId() string {
 }
 
 // JoinResponse indicates whether the join operation succeeded.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 type JoinResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Error         *ErrorDetail           `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *JoinResponse) Reset() {
 	*x = JoinResponse{}
-	mi := &file_room_room_proto_msgTypes[2]
+	mi := &file_room_room_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -152,7 +91,7 @@ func (x *JoinResponse) String() string {
 func (*JoinResponse) ProtoMessage() {}
 
 func (x *JoinResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_room_room_proto_msgTypes[2]
+	mi := &file_room_room_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -165,17 +104,10 @@ func (x *JoinResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinResponse.ProtoReflect.Descriptor instead.
 func (*JoinResponse) Descriptor() ([]byte, []int) {
-	return file_room_room_proto_rawDescGZIP(), []int{2}
+	return file_room_room_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *JoinResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *JoinResponse) GetError() *ErrorDetail {
+func (x *JoinResponse) GetError() *common.ErrorDetail {
 	if x != nil {
 		return x.Error
 	}
@@ -192,7 +124,7 @@ type LeaveRequest struct {
 
 func (x *LeaveRequest) Reset() {
 	*x = LeaveRequest{}
-	mi := &file_room_room_proto_msgTypes[3]
+	mi := &file_room_room_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -204,7 +136,7 @@ func (x *LeaveRequest) String() string {
 func (*LeaveRequest) ProtoMessage() {}
 
 func (x *LeaveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_room_room_proto_msgTypes[3]
+	mi := &file_room_room_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -217,7 +149,7 @@ func (x *LeaveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaveRequest.ProtoReflect.Descriptor instead.
 func (*LeaveRequest) Descriptor() ([]byte, []int) {
-	return file_room_room_proto_rawDescGZIP(), []int{3}
+	return file_room_room_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *LeaveRequest) GetUserId() string {
@@ -228,17 +160,17 @@ func (x *LeaveRequest) GetUserId() string {
 }
 
 // LeaveResponse indicates whether the leave operation succeeded.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 type LeaveResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Error         *ErrorDetail           `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LeaveResponse) Reset() {
 	*x = LeaveResponse{}
-	mi := &file_room_room_proto_msgTypes[4]
+	mi := &file_room_room_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -250,7 +182,7 @@ func (x *LeaveResponse) String() string {
 func (*LeaveResponse) ProtoMessage() {}
 
 func (x *LeaveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_room_room_proto_msgTypes[4]
+	mi := &file_room_room_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -263,17 +195,10 @@ func (x *LeaveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaveResponse.ProtoReflect.Descriptor instead.
 func (*LeaveResponse) Descriptor() ([]byte, []int) {
-	return file_room_room_proto_rawDescGZIP(), []int{4}
+	return file_room_room_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *LeaveResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *LeaveResponse) GetError() *ErrorDetail {
+func (x *LeaveResponse) GetError() *common.ErrorDetail {
 	if x != nil {
 		return x.Error
 	}
@@ -291,7 +216,7 @@ type PostMessageRequest struct {
 
 func (x *PostMessageRequest) Reset() {
 	*x = PostMessageRequest{}
-	mi := &file_room_room_proto_msgTypes[5]
+	mi := &file_room_room_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -303,7 +228,7 @@ func (x *PostMessageRequest) String() string {
 func (*PostMessageRequest) ProtoMessage() {}
 
 func (x *PostMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_room_room_proto_msgTypes[5]
+	mi := &file_room_room_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -316,7 +241,7 @@ func (x *PostMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostMessageRequest.ProtoReflect.Descriptor instead.
 func (*PostMessageRequest) Descriptor() ([]byte, []int) {
-	return file_room_room_proto_rawDescGZIP(), []int{5}
+	return file_room_room_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PostMessageRequest) GetUserId() string {
@@ -334,19 +259,20 @@ func (x *PostMessageRequest) GetText() string {
 }
 
 // PostMessageResponse indicates whether the message was posted.
-// Includes a server-assigned timestamp (Unix milliseconds).
+// A nil error indicates success; a populated error indicates failure.
+// `timestamp` is the server-assigned timestamp on success and nil on
+// failure. See ADR-013.
 type PostMessageResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Timestamp     int64                  `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	Error         *ErrorDetail           `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PostMessageResponse) Reset() {
 	*x = PostMessageResponse{}
-	mi := &file_room_room_proto_msgTypes[6]
+	mi := &file_room_room_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -358,7 +284,7 @@ func (x *PostMessageResponse) String() string {
 func (*PostMessageResponse) ProtoMessage() {}
 
 func (x *PostMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_room_room_proto_msgTypes[6]
+	mi := &file_room_room_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -371,24 +297,17 @@ func (x *PostMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostMessageResponse.ProtoReflect.Descriptor instead.
 func (*PostMessageResponse) Descriptor() ([]byte, []int) {
-	return file_room_room_proto_rawDescGZIP(), []int{6}
+	return file_room_room_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *PostMessageResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *PostMessageResponse) GetTimestamp() int64 {
+func (x *PostMessageResponse) GetTimestamp() *timestamppb.Timestamp {
 	if x != nil {
 		return x.Timestamp
 	}
-	return 0
+	return nil
 }
 
-func (x *PostMessageResponse) GetError() *ErrorDetail {
+func (x *PostMessageResponse) GetError() *common.ErrorDetail {
 	if x != nil {
 		return x.Error
 	}
@@ -399,28 +318,21 @@ var File_room_room_proto protoreflect.FileDescriptor
 
 const file_room_room_proto_rawDesc = "" +
 	"\n" +
-	"\x0froom/room.proto\x12\x04room\"S\n" +
-	"\vErrorDetail\x12\x12\n" +
-	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"&\n" +
+	"\x0froom/room.proto\x12\x04room\x1a\x13common/common.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"&\n" +
 	"\vJoinRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\tR\x06userId\"Q\n" +
-	"\fJoinResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12'\n" +
-	"\x05error\x18\x02 \x01(\v2\x11.room.ErrorDetailR\x05error\"'\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\"9\n" +
+	"\fJoinResponse\x12)\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"'\n" +
 	"\fLeaveRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\tR\x06userId\"R\n" +
-	"\rLeaveResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12'\n" +
-	"\x05error\x18\x02 \x01(\v2\x11.room.ErrorDetailR\x05error\"A\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\":\n" +
+	"\rLeaveResponse\x12)\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"A\n" +
 	"\x12PostMessageRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"v\n" +
-	"\x13PostMessageResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1c\n" +
-	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\x12'\n" +
-	"\x05error\x18\x03 \x01(\v2\x11.room.ErrorDetailR\x05error2\xb0\x01\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"z\n" +
+	"\x13PostMessageResponse\x128\n" +
+	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12)\n" +
+	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error2\xb0\x01\n" +
 	"\tRoomGrain\x12-\n" +
 	"\x04Join\x12\x11.room.JoinRequest\x1a\x12.room.JoinResponse\x120\n" +
 	"\x05Leave\x12\x12.room.LeaveRequest\x1a\x13.room.LeaveResponse\x12B\n" +
@@ -438,31 +350,33 @@ func file_room_room_proto_rawDescGZIP() []byte {
 	return file_room_room_proto_rawDescData
 }
 
-var file_room_room_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_room_room_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_room_room_proto_goTypes = []any{
-	(*ErrorDetail)(nil),         // 0: room.ErrorDetail
-	(*JoinRequest)(nil),         // 1: room.JoinRequest
-	(*JoinResponse)(nil),        // 2: room.JoinResponse
-	(*LeaveRequest)(nil),        // 3: room.LeaveRequest
-	(*LeaveResponse)(nil),       // 4: room.LeaveResponse
-	(*PostMessageRequest)(nil),  // 5: room.PostMessageRequest
-	(*PostMessageResponse)(nil), // 6: room.PostMessageResponse
+	(*JoinRequest)(nil),           // 0: room.JoinRequest
+	(*JoinResponse)(nil),          // 1: room.JoinResponse
+	(*LeaveRequest)(nil),          // 2: room.LeaveRequest
+	(*LeaveResponse)(nil),         // 3: room.LeaveResponse
+	(*PostMessageRequest)(nil),    // 4: room.PostMessageRequest
+	(*PostMessageResponse)(nil),   // 5: room.PostMessageResponse
+	(*common.ErrorDetail)(nil),    // 6: common.ErrorDetail
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_room_room_proto_depIdxs = []int32{
-	0, // 0: room.JoinResponse.error:type_name -> room.ErrorDetail
-	0, // 1: room.LeaveResponse.error:type_name -> room.ErrorDetail
-	0, // 2: room.PostMessageResponse.error:type_name -> room.ErrorDetail
-	1, // 3: room.RoomGrain.Join:input_type -> room.JoinRequest
-	3, // 4: room.RoomGrain.Leave:input_type -> room.LeaveRequest
-	5, // 5: room.RoomGrain.PostMessage:input_type -> room.PostMessageRequest
-	2, // 6: room.RoomGrain.Join:output_type -> room.JoinResponse
-	4, // 7: room.RoomGrain.Leave:output_type -> room.LeaveResponse
-	6, // 8: room.RoomGrain.PostMessage:output_type -> room.PostMessageResponse
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	6, // 0: room.JoinResponse.error:type_name -> common.ErrorDetail
+	6, // 1: room.LeaveResponse.error:type_name -> common.ErrorDetail
+	7, // 2: room.PostMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
+	6, // 3: room.PostMessageResponse.error:type_name -> common.ErrorDetail
+	0, // 4: room.RoomGrain.Join:input_type -> room.JoinRequest
+	2, // 5: room.RoomGrain.Leave:input_type -> room.LeaveRequest
+	4, // 6: room.RoomGrain.PostMessage:input_type -> room.PostMessageRequest
+	1, // 7: room.RoomGrain.Join:output_type -> room.JoinResponse
+	3, // 8: room.RoomGrain.Leave:output_type -> room.LeaveResponse
+	5, // 9: room.RoomGrain.PostMessage:output_type -> room.PostMessageResponse
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_room_room_proto_init() }
@@ -476,7 +390,7 @@ func file_room_room_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_room_room_proto_rawDesc), len(file_room_room_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

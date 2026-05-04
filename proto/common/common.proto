@@ -1,0 +1,28 @@
+syntax = "proto3";
+package common;
+
+option go_package = "github.com/oklahomer/blabby/gen/common;commonpb";
+
+// ErrorDetail is the canonical business-error carrier for grain RPC
+// responses. Every grain response that can fail with a domain outcome
+// embeds an `ErrorDetail` field; presence of that field is itself the
+// success/failure signal — nil means success, populated means failure.
+//
+// The numeric `code` and the `status` string come from the project's
+// error taxonomy; the `message` is a short human-readable description
+// safe to surface to clients (no actor paths, no internal details).
+//
+// Code ranges:
+//   1000-1999  Authentication
+//   2000-2999  Room / Membership
+//   3000-3999  Rate Limiting
+//   4000-4999  Validation
+//   5000-5999  System / Internal
+//
+// See ADR-013 for why business failures travel as response values
+// instead of through gRPC's status model.
+message ErrorDetail {
+  int32 code = 1;
+  string status = 2;
+  string message = 3;
+}

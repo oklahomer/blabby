@@ -1,44 +1,56 @@
 syntax = "proto3";
 package user;
 
+import "common/common.proto";
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/oklahomer/blabby/gen/user;userpb";
 
 // --- Connection Lifecycle ---
 
+// PID identifies a protoactor PID by its address and id. Both fields are
+// required and must be set together — a PID with only one half is invalid.
+//
+// Callers populate this from `ctx.Self()` (or another known actor PID).
+// Receivers MUST NOT derive PIDs from `ctx.Sender()` on cluster RPCs,
+// because cluster requests arrive on a transient future PID rather than
+// the calling actor. See ADR-011 for the full rationale.
+message PID {
+  string address = 1;
+  string id = 2;
+}
+
 // RegisterConnectionRequest registers a UserConnection actor with the User grain.
+//
+// The User grain stores the supplied PID and watches it; deregistration is
+// implicit via protoactor's Terminated signal when the actor stops, so this
+// service intentionally has no Deregister RPC. See ADR-012.
+//
+// requester_pid identifies the calling actor's persistent PID. It MUST be
+// set by the caller (typically from `ctx.Self()`) — the User grain cannot
+// derive it from `ctx.Sender()`, because a cluster RPC arrives on a
+// transient future PID, not the calling actor. See ADR-011.
 message RegisterConnectionRequest {
-  string connection_id = 1;
+  PID requester_pid = 1;
 }
 
 // RegisterConnectionResponse indicates whether the connection was registered.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 message RegisterConnectionResponse {
-  bool success = 1;
-}
-
-// DeregisterConnectionRequest removes a UserConnection actor from the User grain.
-message DeregisterConnectionRequest {
-  string connection_id = 1;
-}
-
-// DeregisterConnectionResponse indicates whether the connection was deregistered.
-message DeregisterConnectionResponse {
-  bool success = 1;
+  common.ErrorDetail error = 1;
 }
 
 // --- Command Routing (gateway commands routed to Room grain) ---
 
 // JoinRoomRequest routes a room join command through the User grain.
-// Uses inline error fields instead of ErrorDetail (RB1 constraint).
 message JoinRoomRequest {
   string room_id = 1;
 }
 
 // JoinRoomResponse indicates the result of the join command.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 message JoinRoomResponse {
-  bool success = 1;
-  int32 error_code = 2;
-  string error_status = 3;
-  string error_message = 4;
+  common.ErrorDetail error = 1;
 }
 
 // LeaveRoomRequest routes a room leave command through the User grain.
@@ -47,11 +59,9 @@ message LeaveRoomRequest {
 }
 
 // LeaveRoomResponse indicates the result of the leave command.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
 message LeaveRoomResponse {
-  bool success = 1;
-  int32 error_code = 2;
-  string error_status = 3;
-  string error_message = 4;
+  common.ErrorDetail error = 1;
 }
 
 // SendMessageRequest routes a message send command through the User grain.
@@ -61,12 +71,12 @@ message SendMessageRequest {
 }
 
 // SendMessageResponse indicates the result of the send command.
+// A nil error indicates success; a populated error indicates failure.
+// `timestamp` is the server-assigned timestamp on success and nil on failure.
+// See ADR-013.
 message SendMessageResponse {
-  bool success = 1;
-  int64 timestamp = 2;
-  int32 error_code = 3;
-  string error_status = 4;
-  string error_message = 5;
+  google.protobuf.Timestamp timestamp = 1;
+  common.ErrorDetail error = 2;
 }
 
 // --- Event Delivery (Room grain fan-out to User's connections) ---
@@ -76,13 +86,13 @@ message ForwardMessageRequest {
   string room_id = 1;
   string sender_id = 2;
   string text = 3;
-  int64 timestamp = 4;
+  google.protobuf.Timestamp timestamp = 4;
 }
 
-// ForwardMessageResponse acknowledges the message delivery.
-message ForwardMessageResponse {
-  bool success = 1;
-}
+// ForwardMessageResponse acknowledges the message delivery. The User grain
+// performs best-effort fan-out and never reports a business failure here;
+// a nil response (with no transport error) means the request was accepted.
+message ForwardMessageResponse {}
 
 // RoomEventType enumerates the types of room membership events.
 enum RoomEventType {
@@ -98,10 +108,9 @@ message NotifyRoomEventRequest {
   RoomEventType event_type = 3;
 }
 
-// NotifyRoomEventResponse acknowledges the event notification.
-message NotifyRoomEventResponse {
-  bool success = 1;
-}
+// NotifyRoomEventResponse acknowledges the event notification. Same semantics
+// as ForwardMessageResponse — best-effort fan-out, no business failure.
+message NotifyRoomEventResponse {}
 
 // --- Queries ---
 
@@ -115,9 +124,9 @@ message GetJoinedRoomsResponse {
 
 // UserGrain defines the User virtual actor service.
 service UserGrain {
-  // Connection lifecycle
+  // Connection lifecycle. Deregistration is implicit via Watch; no
+  // Deregister RPC. See ADR-012.
   rpc RegisterConnection(RegisterConnectionRequest) returns (RegisterConnectionResponse);
-  rpc DeregisterConnection(DeregisterConnectionRequest) returns (DeregisterConnectionResponse);
 
   // Command routing
   rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
