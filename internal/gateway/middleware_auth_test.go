@@ -161,7 +161,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := NewGateway(&stubAuthenticator{validateTokenFn: tt.validateTokenFn})
+			g := NewGateway(&stubAuthenticator{validateTokenFn: tt.validateTokenFn}, nil, nil)
 
 			downstreamInvoked := false
 			var capturedUserID string
@@ -228,7 +228,7 @@ func TestAuthMiddleware_DoesNotLeakTokenToLogs(t *testing.T) {
 		validateTokenFn: func(ctx context.Context, token string) (*auth.Claims, error) {
 			return nil, fmt.Errorf("%w: detail", auth.ErrTokenInvalid)
 		},
-	})
+	}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
 	req.Header.Set("Authorization", "Bearer "+secretToken)
@@ -251,7 +251,7 @@ func TestGateway_Protected_WrapsHandlerFunc(t *testing.T) {
 		validateTokenFn: func(ctx context.Context, token string) (*auth.Claims, error) {
 			return &auth.Claims{Subject: "alice"}, nil
 		},
-	})
+	}, nil, nil)
 
 	handler := g.protected(func(w http.ResponseWriter, r *http.Request) {
 		uid, ok := auth.UserIDFromContext(r.Context())
@@ -272,7 +272,7 @@ func TestGateway_Protected_WrapsHandlerFunc(t *testing.T) {
 }
 
 func TestGateway_Protected_RejectsMissingHeader(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{})
+	g := NewGateway(&stubAuthenticator{}, nil, nil)
 	handler := g.protected(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler must not run when auth fails")
 	})
@@ -299,7 +299,7 @@ func TestAuthMiddleware_RejectsTokenWithWhitespace(t *testing.T) {
 			t.Fatalf("authenticator must not be called for whitespace token, got %q", token)
 			return nil, nil
 		},
-	})
+	}, nil, nil)
 
 	for _, header := range []string{
 		"Bearer abc def",

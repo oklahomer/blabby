@@ -8,6 +8,13 @@ import (
 
 // Authenticator defines the contract for authentication providers.
 // Implementations must be safe for concurrent use.
+//
+// Latency is the implementer's responsibility. Callers may pass
+// context.Background and trust the implementation to bound its own work:
+// CPU-bound impls (local JWT verification) return promptly without using
+// the context; IO-bound impls (JWKS, OIDC introspection, DB lookups) MUST
+// enforce a deadline internally — typically via http.Client.Timeout or a
+// derived context.WithTimeout — so a slow backend cannot wedge the caller.
 type Authenticator interface {
 	// Authenticate validates credentials and returns a token result.
 	Authenticate(ctx context.Context, params AuthParams) (*Result, error)
