@@ -81,12 +81,16 @@ func (g *Gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleLoginMethodNotAllowed responds with a JSON error envelope when /login
-// is requested with a method other than POST. Registered as a fallback for the
-// /login path; Go 1.22+ mux dispatches POST /login to handleLogin first.
-func (g *Gateway) handleLoginMethodNotAllowed(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Allow", "POST")
-	WriteErrorResponse(w, http.StatusMethodNotAllowed, ErrInvalidRequest("method not allowed"))
+// handleMethodNotAllowed returns a handler that responds 405 with the
+// given Allow header. Used as the mux fallback for path-only patterns
+// (e.g. "/login" alongside "POST /login"); Go 1.22+ mux dispatches the
+// more specific method+path pattern first and falls through here when
+// the method does not match.
+func (g *Gateway) handleMethodNotAllowed(allowed string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Allow", allowed)
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, ErrInvalidRequest("method not allowed"))
+	}
 }
 
 // handleNotFound responds with a JSON error envelope for any unmatched path,
