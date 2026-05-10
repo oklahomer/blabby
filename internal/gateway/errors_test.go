@@ -266,6 +266,130 @@ func TestFromProtoErrorDetail(t *testing.T) {
 	})
 }
 
+func TestErrorCodeHTTPStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		code ErrorCode
+		want int
+	}{
+		{"AuthInvalidToken→401", CodeAuthInvalidToken, http.StatusUnauthorized},
+		{"AuthExpiredToken→401", CodeAuthExpiredToken, http.StatusUnauthorized},
+		{"AuthMissingToken→401", CodeAuthMissingToken, http.StatusUnauthorized},
+		{"RoomNotMember→403", CodeRoomNotMember, http.StatusForbidden},
+		{"RoomAlreadyMember→409", CodeRoomAlreadyMember, http.StatusConflict},
+		{"RoomNotFound→404", CodeRoomNotFound, http.StatusNotFound},
+		{"RateLimitExceeded→429", CodeRateLimitExceeded, http.StatusTooManyRequests},
+		{"InvalidRequest→400", CodeInvalidRequest, http.StatusBadRequest},
+		{"MissingField→400", CodeMissingField, http.StatusBadRequest},
+		{"InternalError→500", CodeInternalError, http.StatusInternalServerError},
+		{"ServiceUnavailable→503", CodeServiceUnavailable, http.StatusServiceUnavailable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.code.HTTPStatus(); got != tt.want {
+				t.Errorf("ErrorCode(%d).HTTPStatus() = %d, want %d", tt.code, got, tt.want)
+			}
+		})
+	}
+
+	t.Run("unknown code falls through to 500", func(t *testing.T) {
+		if got := ErrorCode(9999).HTTPStatus(); got != http.StatusInternalServerError {
+			t.Errorf("ErrorCode(9999).HTTPStatus() = %d, want %d", got, http.StatusInternalServerError)
+		}
+	})
+}
+
+func TestStatusForProtoError(t *testing.T) {
+	t.Run("nil proto returns ErrNilProtoErrorDetail", func(t *testing.T) {
+		_, _, err := statusForProtoError(nil)
+		if !errors.Is(err, ErrNilProtoErrorDetail) {
+			t.Fatalf("err = %v, want %v", err, ErrNilProtoErrorDetail)
+		}
+	})
+
+	tests := []struct {
+		name           string
+		proto          *commonpb.ErrorDetail
+		wantHTTPStatus int
+		wantCode       int
+		wantStatus     string
+		wantMessage    string
+	}{
+		{
+			name: "ROOM_NOT_MEMBER → 403",
+			proto: &commonpb.ErrorDetail{
+				Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member",
+			},
+			wantHTTPStatus: http.StatusForbidden,
+			wantCode:       2001,
+			wantStatus:     "ROOM_NOT_MEMBER",
+			wantMessage:    "not a member",
+		},
+		{
+			name: "ROOM_ALREADY_MEMBER → 409",
+			proto: &commonpb.ErrorDetail{
+				Code: 2002, Status: "ROOM_ALREADY_MEMBER", Message: "already member",
+			},
+			wantHTTPStatus: http.StatusConflict,
+			wantCode:       2002,
+			wantStatus:     "ROOM_ALREADY_MEMBER",
+			wantMessage:    "already member",
+		},
+		{
+			name: "ROOM_NOT_FOUND → 404",
+			proto: &commonpb.ErrorDetail{
+				Code: 2003, Status: "ROOM_NOT_FOUND", Message: "no such room",
+			},
+			wantHTTPStatus: http.StatusNotFound,
+			wantCode:       2003,
+			wantStatus:     "ROOM_NOT_FOUND",
+			wantMessage:    "no such room",
+		},
+		{
+			name: "INVALID_REQUEST → 400",
+			proto: &commonpb.ErrorDetail{
+				Code: 4001, Status: "INVALID_REQUEST", Message: "bad text",
+			},
+			wantHTTPStatus: http.StatusBadRequest,
+			wantCode:       4001,
+			wantStatus:     "INVALID_REQUEST",
+			wantMessage:    "bad text",
+		},
+		{
+			name: "INTERNAL_ERROR → 500",
+			proto: &commonpb.ErrorDetail{
+				Code: 5001, Status: "INTERNAL_ERROR", Message: "boom",
+			},
+			wantHTTPStatus: http.StatusInternalServerError,
+			wantCode:       5001,
+			wantStatus:     "INTERNAL_ERROR",
+			wantMessage:    "boom",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotStatus, gotDetail, err := statusForProtoError(tt.proto)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotStatus != tt.wantHTTPStatus {
+				t.Errorf("httpStatus = %d, want %d", gotStatus, tt.wantHTTPStatus)
+			}
+			if gotDetail.Code != tt.wantCode {
+				t.Errorf("code = %d, want %d", gotDetail.Code, tt.wantCode)
+			}
+			if gotDetail.Status != tt.wantStatus {
+				t.Errorf("status = %q, want %q", gotDetail.Status, tt.wantStatus)
+			}
+			if gotDetail.Message != tt.wantMessage {
+				t.Errorf("message = %q, want %q", gotDetail.Message, tt.wantMessage)
+			}
+		})
+	}
+}
+
 func TestConvenienceErrorFunctions(t *testing.T) {
 	tests := []struct {
 		name       string

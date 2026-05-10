@@ -1,0 +1,310 @@
+package gateway
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"mime"
+	"net/http"
+	"strings"
+	"unicode"
+
+	commonpb "github.com/oklahomer/blabby/gen/common"
+	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/auth"
+)
+
+const (
+	maxRoomMessageBodyBytes = 8 * 1024 // 8 KiB request body cap
+	maxRoomMessageTextBytes = 4 * 1024 // 4 KiB text cap
+	maxRoomIDBytes          = 256      // path-id sanity cap
+)
+
+// Endpoint labels double as both the mux pattern in RegisterRoutes and
+// the structured-log endpoint field. Defining them once keeps the route
+// table and log lines from drifting apart on rename.
+const (
+	endpointRoomList    = "GET /rooms"
+	endpointRoomJoined  = "GET /rooms/joined"
+	endpointRoomJoin    = "POST /rooms/{id}/join"
+	endpointRoomLeave   = "POST /rooms/{id}/leave"
+	endpointRoomMessage = "POST /rooms/{id}/messages"
+)
+
+// Outcome labels for the structured exit log on every room handler.
+const (
+	outcomeOK             = "ok"
+	outcomeBusinessError  = "business_error"
+	outcomeTransportError = "transport_error"
+)
+
+type sendMessageRequest struct {
+	Text string `json:"text"`
+}
+
+type successResponse struct {
+	Success bool `json:"success"`
+}
+
+type sendMessageSuccessResponse struct {
+	Success   bool  `json:"success"`
+	Timestamp int64 `json:"timestamp"`
+}
+
+// handleRoomJoin dispatches POST /rooms/{id}/join to the user's grain.
+//
+// Note: Go 1.22+ mux dispatches POST /rooms//join to the catch-all "/"
+// pattern (handleNotFound), so the empty-segment case never reaches this
+// handler. The TrimSpace guard inside validateRoomID covers URL-encoded
+// whitespace (e.g. POST /rooms/%20/join), which the mux does match.
+func (g *Gateway) handleRoomJoin(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authenticatedUserID(w, r, endpointRoomJoin)
+	if !ok {
+		return
+	}
+	roomID, ok := requireRoomID(w, r, endpointRoomJoin, userID)
+	if !ok {
+		return
+	}
+	logRoomEntry(endpointRoomJoin, r.Method, userID, roomID)
+	resp, err := g.userGrainFor(userID).JoinRoom(&userpb.JoinRoomRequest{RoomId: roomID})
+	if err != nil {
+		logRoomTransportError(endpointRoomJoin, r.Method, userID, roomID)
+		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
+		return
+	}
+	if pe := resp.GetError(); pe != nil {
+		writeBusinessErrorResponse(w, endpointRoomJoin, r.Method, userID, roomID, pe)
+		return
+	}
+	logRoomExit(endpointRoomJoin, r.Method, userID, roomID, outcomeOK, 0)
+	writeJSON(w, http.StatusOK, successResponse{Success: true})
+}
+
+// handleRoomLeave dispatches POST /rooms/{id}/leave to the user's grain.
+func (g *Gateway) handleRoomLeave(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authenticatedUserID(w, r, endpointRoomLeave)
+	if !ok {
+		return
+	}
+	roomID, ok := requireRoomID(w, r, endpointRoomLeave, userID)
+	if !ok {
+		return
+	}
+	logRoomEntry(endpointRoomLeave, r.Method, userID, roomID)
+	resp, err := g.userGrainFor(userID).LeaveRoom(&userpb.LeaveRoomRequest{RoomId: roomID})
+	if err != nil {
+		logRoomTransportError(endpointRoomLeave, r.Method, userID, roomID)
+		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
+		return
+	}
+	if pe := resp.GetError(); pe != nil {
+		writeBusinessErrorResponse(w, endpointRoomLeave, r.Method, userID, roomID, pe)
+		return
+	}
+	logRoomExit(endpointRoomLeave, r.Method, userID, roomID, outcomeOK, 0)
+	writeJSON(w, http.StatusOK, successResponse{Success: true})
+}
+
+// handleRoomSendMessage dispatches POST /rooms/{id}/messages to the
+// user's grain. The request body is JSON `{"text":"..."}` capped at
+// maxRoomMessageBodyBytes; the text payload is capped at
+// maxRoomMessageTextBytes. The returned timestamp is converted to int64
+// Unix milliseconds at this boundary.
+func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authenticatedUserID(w, r, endpointRoomMessage)
+	if !ok {
+		return
+	}
+	roomID, ok := requireRoomID(w, r, endpointRoomMessage, userID)
+	if !ok {
+		return
+	}
+	req, decodeErr, decoded := decodeSendMessageRequest(r, w)
+	if !decoded {
+		slog.Warn("room handler rejected request",
+			"endpoint", endpointRoomMessage, "method", r.Method,
+			"user_id", userID, "room_id", roomID, "reason", decodeErr.Status)
+		WriteErrorResponse(w, http.StatusBadRequest, decodeErr)
+		return
+	}
+
+	slog.Info("room handler enter",
+		"endpoint", endpointRoomMessage, "method", r.Method,
+		"user_id", userID, "room_id", roomID, "text_len", len(req.Text))
+
+	resp, err := g.userGrainFor(userID).SendMessage(&userpb.SendMessageRequest{
+		RoomId: roomID, Text: req.Text,
+	})
+	if err != nil {
+		slog.Warn("room handler transport error",
+			"endpoint", endpointRoomMessage, "method", r.Method,
+			"user_id", userID, "room_id", roomID,
+			"outcome", outcomeTransportError, "text_len", len(req.Text))
+		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
+		return
+	}
+	if pe := resp.GetError(); pe != nil {
+		ed := ErrorDetail{
+			Code:    int(pe.GetCode()),
+			Status:  pe.GetStatus(),
+			Message: pe.GetMessage(),
+		}
+		slog.Info("room handler exit",
+			"endpoint", endpointRoomMessage, "method", r.Method,
+			"user_id", userID, "room_id", roomID,
+			"outcome", outcomeBusinessError, "code", ed.Code, "text_len", len(req.Text))
+		WriteErrorResponse(w, ErrorCode(ed.Code).HTTPStatus(), ed)
+		return
+	}
+
+	var ts int64
+	if pt := resp.GetTimestamp(); pt != nil {
+		ts = pt.AsTime().UnixMilli()
+	}
+	slog.Info("room handler exit",
+		"endpoint", endpointRoomMessage, "method", r.Method,
+		"user_id", userID, "room_id", roomID,
+		"outcome", outcomeOK, "code", 0, "text_len", len(req.Text))
+	writeJSON(w, http.StatusOK, sendMessageSuccessResponse{Success: true, Timestamp: ts})
+}
+
+// authenticatedUserID extracts the user ID from the request context that
+// authMiddleware has populated. Behind the middleware the boolean is
+// always true; the defensive 5001 path covers tests that invoke the
+// handler directly without the middleware.
+func authenticatedUserID(w http.ResponseWriter, r *http.Request, endpoint string) (string, bool) {
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok || strings.TrimSpace(userID) == "" {
+		slog.Error("auth context missing on protected route",
+			"endpoint", endpoint, "method", r.Method)
+		WriteErrorResponse(w, http.StatusInternalServerError,
+			ErrInternalError("authentication context unavailable"))
+		return "", false
+	}
+	return userID, true
+}
+
+// requireRoomID extracts and validates {id} from the request path.
+func requireRoomID(w http.ResponseWriter, r *http.Request, endpoint, userID string) (string, bool) {
+	roomID, ok := validateRoomID(r.PathValue("id"))
+	if !ok {
+		slog.Warn("room handler rejected request",
+			"endpoint", endpoint, "method", r.Method,
+			"user_id", userID, "reason", "invalid_room_id")
+		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("room_id is required"))
+		return "", false
+	}
+	return roomID, true
+}
+
+// validateRoomID trims the raw path value, length-caps it, and rejects
+// control bytes and Unicode whitespace inside the id. Room IDs are
+// application-level identifiers; the strict rule keeps routing
+// predictable.
+func validateRoomID(raw string) (string, bool) {
+	id := strings.TrimSpace(raw)
+	if id == "" || len(id) > maxRoomIDBytes {
+		return "", false
+	}
+	for _, r := range id {
+		if r < 0x20 || r == 0x7F || unicode.IsSpace(r) {
+			return "", false
+		}
+	}
+	return id, true
+}
+
+// decodeSendMessageRequest parses and validates the POST body for
+// handleRoomSendMessage. It returns the parsed request on success, or a
+// gateway ErrorDetail describing the rejection reason on failure.
+//
+// The MaxBytesReader is installed on r.Body before decoding so an
+// oversize body fails at decode time with the same INVALID_REQUEST
+// envelope as a malformed body.
+func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (sendMessageRequest, ErrorDetail, bool) {
+	if !contentTypeIsJSON(r.Header.Get("Content-Type")) {
+		return sendMessageRequest{}, ErrInvalidRequest("content-type must be application/json"), false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRoomMessageBodyBytes)
+
+	var req sendMessageRequest
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil {
+		return sendMessageRequest{}, ErrInvalidRequest("malformed request body"), false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return sendMessageRequest{}, ErrInvalidRequest("malformed request body"), false
+	}
+	if strings.TrimSpace(req.Text) == "" {
+		return sendMessageRequest{}, ErrInvalidRequest("text is required"), false
+	}
+	if len(req.Text) > maxRoomMessageTextBytes {
+		return sendMessageRequest{}, ErrInvalidRequest("text exceeds maximum length"), false
+	}
+	return req, ErrorDetail{}, true
+}
+
+// contentTypeIsJSON parses the Content-Type header and returns true if
+// the media type is application/json. Charset variants are accepted.
+func contentTypeIsJSON(header string) bool {
+	if header == "" {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(header)
+	if err != nil {
+		return false
+	}
+	return mediaType == "application/json"
+}
+
+// writeJSON writes v as a JSON body with the given HTTP status. Used by
+// the success path of every room command handler.
+func writeJSON(w http.ResponseWriter, httpStatus int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(httpStatus)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("failed to write room handler response", "error", err)
+	}
+}
+
+// writeBusinessErrorResponse converts a non-nil grain ErrorDetail into
+// the gateway envelope and writes it with the mapped HTTP status. The
+// matching exit log line is emitted before the write so it appears in
+// chronological order with the entry log.
+//
+// Callers MUST pass a non-nil pe; every call site already checks
+// `resp.GetError() != nil` before invoking this helper.
+func writeBusinessErrorResponse(w http.ResponseWriter, endpoint, method, userID, roomID string, pe *commonpb.ErrorDetail) {
+	ed := ErrorDetail{
+		Code:    int(pe.GetCode()),
+		Status:  pe.GetStatus(),
+		Message: pe.GetMessage(),
+	}
+	slog.Info("room handler exit",
+		"endpoint", endpoint, "method", method,
+		"user_id", userID, "room_id", roomID,
+		"outcome", outcomeBusinessError, "code", ed.Code)
+	WriteErrorResponse(w, ErrorCode(ed.Code).HTTPStatus(), ed)
+}
+
+func logRoomEntry(endpoint, method, userID, roomID string) {
+	slog.Info("room handler enter",
+		"endpoint", endpoint, "method", method,
+		"user_id", userID, "room_id", roomID)
+}
+
+func logRoomExit(endpoint, method, userID, roomID, outcome string, code int) {
+	slog.Info("room handler exit",
+		"endpoint", endpoint, "method", method,
+		"user_id", userID, "room_id", roomID,
+		"outcome", outcome, "code", code)
+}
+
+func logRoomTransportError(endpoint, method, userID, roomID string) {
+	slog.Warn("room handler transport error",
+		"endpoint", endpoint, "method", method,
+		"user_id", userID, "room_id", roomID,
+		"outcome", outcomeTransportError)
+}

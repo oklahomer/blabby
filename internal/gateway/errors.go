@@ -73,6 +73,32 @@ func (c ErrorCode) Status() string {
 	}
 }
 
+// HTTPStatus returns the canonical HTTP status code for the error code.
+// It is the single source of truth for the gateway's code → HTTP mapping;
+// every handler that translates a grain error into an HTTP response uses
+// this method (directly or via statusForProtoError) so the mapping cannot
+// drift across endpoints.
+func (c ErrorCode) HTTPStatus() int {
+	switch c {
+	case CodeAuthInvalidToken, CodeAuthExpiredToken, CodeAuthMissingToken:
+		return http.StatusUnauthorized
+	case CodeRoomNotMember:
+		return http.StatusForbidden
+	case CodeRoomAlreadyMember:
+		return http.StatusConflict
+	case CodeRoomNotFound:
+		return http.StatusNotFound
+	case CodeRateLimitExceeded:
+		return http.StatusTooManyRequests
+	case CodeInvalidRequest, CodeMissingField:
+		return http.StatusBadRequest
+	case CodeServiceUnavailable:
+		return http.StatusServiceUnavailable
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
 // ErrorDetail holds the error information for an API error response.
 type ErrorDetail struct {
 	Code    int    `json:"code"`
@@ -121,6 +147,19 @@ func FromProtoErrorDetail(proto *commonpb.ErrorDetail) (ErrorDetail, error) {
 		Status:  proto.Status,
 		Message: proto.Message,
 	}, nil
+}
+
+// statusForProtoError converts a *commonpb.ErrorDetail returned by a
+// grain response into the (httpStatus, ErrorDetail) pair that
+// WriteErrorResponse expects. It returns ErrNilProtoErrorDetail if the
+// proto is nil; callers must check resp.GetError() != nil before
+// invoking it.
+func statusForProtoError(p *commonpb.ErrorDetail) (int, ErrorDetail, error) {
+	ed, err := FromProtoErrorDetail(p)
+	if err != nil {
+		return 0, ErrorDetail{}, err
+	}
+	return ErrorCode(ed.Code).HTTPStatus(), ed, nil
 }
 
 // Convenience constructors for common errors.

@@ -1,0 +1,596 @@
+package gateway
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/asynkron/protoactor-go/actor"
+	"github.com/asynkron/protoactor-go/cluster"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	commonpb "github.com/oklahomer/blabby/gen/common"
+	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/auth"
+)
+
+// sentinelCluster / sentinelActorRoot return non-nil zero-value
+// instances purely to satisfy the triple-nil dependency guard. Tests
+// that exercise handlers behind the userGrainCaller seam never reach
+// any cluster method, so the empty values are safe.
+func sentinelCluster() *cluster.Cluster     { return new(cluster.Cluster) }
+func sentinelActorRoot() *actor.RootContext { return new(actor.RootContext) }
+
+// withUserContext returns a request with the userID injected via the
+// auth context — mimicking what authMiddleware does in production.
+func withUserContext(req *http.Request, userID string) *http.Request {
+	if userID == "" {
+		return req
+	}
+	return req.WithContext(auth.ContextWithUserID(req.Context(), userID))
+}
+
+// gatewayWithFake builds a Gateway whose userGrainFor returns the given
+// fake. cluster and actorRoot are non-nil sentinels so the triple-nil
+// guard does not fire; the fields are typed pointers and remain unused
+// because the seam intercepts the call before any cluster method runs.
+func gatewayWithFake(fake userGrainCaller) *Gateway {
+	return &Gateway{
+		auth:      &stubAuthenticator{},
+		cluster:   sentinelCluster(),
+		actorRoot: sentinelActorRoot(),
+		userGrain: func(string) userGrainCaller { return fake },
+	}
+}
+
+// servePath dispatches the request through a one-route mux so PathValue
+// captures {id} the same way the production mux does.
+func servePath(t *testing.T, g *Gateway, method, pattern, path, body, contentType, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	switch pattern {
+	case "POST /rooms/{id}/join":
+		mux.HandleFunc(pattern, g.handleRoomJoin)
+	case "POST /rooms/{id}/leave":
+		mux.HandleFunc(pattern, g.handleRoomLeave)
+	case "POST /rooms/{id}/messages":
+		mux.HandleFunc(pattern, g.handleRoomSendMessage)
+	default:
+		t.Fatalf("unsupported pattern: %q", pattern)
+	}
+
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	req = withUserContext(req, userID)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec
+}
+
+func decodeSuccess(t *testing.T, body io.Reader, into any) {
+	t.Helper()
+	if err := json.NewDecoder(body).Decode(into); err != nil {
+		t.Fatalf("decode success body: %v", err)
+	}
+}
+
+// captureSlog redirects slog output to a buffer for the duration of fn,
+// then returns the captured bytes. Used to assert the NFR1 logging
+// invariants (text never logged, text_len always logged).
+func captureSlog(t *testing.T, fn func()) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	fn()
+	return buf.Bytes()
+}
+
+// ---- handleRoomJoin ----------------------------------------------------
+
+func TestHandleRoomJoin(t *testing.T) {
+	const okUser = "alice"
+	const okRoom = "general"
+
+	tests := []struct {
+		name        string
+		path        string
+		userID      string
+		stubResp    *userpb.JoinRoomResponse
+		stubErr     error
+		wantStatus  int
+		wantCode    int
+		assertCalls func(t *testing.T, fake *fakeUserGrainCaller)
+	}{
+		{
+			name:       "happy path returns 200 success",
+			path:       "/rooms/" + okRoom + "/join",
+			userID:     okUser,
+			stubResp:   &userpb.JoinRoomResponse{},
+			wantStatus: http.StatusOK,
+			assertCalls: func(t *testing.T, f *fakeUserGrainCaller) {
+				if f.joinReq == nil || f.joinReq.GetRoomId() != okRoom {
+					t.Fatalf("expected JoinRoom called with room_id=%q, got %+v", okRoom, f.joinReq)
+				}
+			},
+		},
+		{
+			name:   "business error 2001 → 403",
+			path:   "/rooms/" + okRoom + "/join",
+			userID: okUser,
+			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
+				Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member",
+			}},
+			wantStatus: http.StatusForbidden,
+			wantCode:   2001,
+		},
+		{
+			name:   "business error 2002 → 409",
+			path:   "/rooms/" + okRoom + "/join",
+			userID: okUser,
+			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
+				Code: 2002, Status: "ROOM_ALREADY_MEMBER", Message: "already member",
+			}},
+			wantStatus: http.StatusConflict,
+			wantCode:   2002,
+		},
+		{
+			name:   "business error 2003 → 404",
+			path:   "/rooms/" + okRoom + "/join",
+			userID: okUser,
+			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
+				Code: 2003, Status: "ROOM_NOT_FOUND", Message: "no such room",
+			}},
+			wantStatus: http.StatusNotFound,
+			wantCode:   2003,
+		},
+		{
+			name:   "business error 4001 → 400",
+			path:   "/rooms/" + okRoom + "/join",
+			userID: okUser,
+			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
+				Code: 4001, Status: "INVALID_REQUEST", Message: "bad",
+			}},
+			wantStatus: http.StatusBadRequest,
+			wantCode:   4001,
+		},
+		{
+			name:       "transport error → 503 + 5002",
+			path:       "/rooms/" + okRoom + "/join",
+			userID:     okUser,
+			stubErr:    errors.New("cluster down"),
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   5002,
+		},
+		{
+			name:       "missing user_id in context → 500 + 5001",
+			path:       "/rooms/" + okRoom + "/join",
+			userID:     "",
+			stubResp:   &userpb.JoinRoomResponse{},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   5001,
+			assertCalls: func(t *testing.T, f *fakeUserGrainCaller) {
+				if f.calls != 0 {
+					t.Fatalf("expected no grain calls when auth context missing, got %d", f.calls)
+				}
+			},
+		},
+		{
+			name:       "URL-encoded space room_id → 400 + 4001",
+			path:       "/rooms/%20/join",
+			userID:     okUser,
+			stubResp:   &userpb.JoinRoomResponse{},
+			wantStatus: http.StatusBadRequest,
+			wantCode:   4001,
+			assertCalls: func(t *testing.T, f *fakeUserGrainCaller) {
+				if f.calls != 0 {
+					t.Fatalf("expected no grain call for whitespace id, got %d", f.calls)
+				}
+			},
+		},
+		{
+			name:       "URL-encoded ideographic space room_id → 400 + 4001",
+			path:       "/rooms/%E3%80%80/join",
+			userID:     okUser,
+			stubResp:   &userpb.JoinRoomResponse{},
+			wantStatus: http.StatusBadRequest,
+			wantCode:   4001,
+		},
+		{
+			name:       "overlong room_id → 400 + 4001",
+			path:       "/rooms/" + strings.Repeat("a", maxRoomIDBytes+1) + "/join",
+			userID:     okUser,
+			stubResp:   &userpb.JoinRoomResponse{},
+			wantStatus: http.StatusBadRequest,
+			wantCode:   4001,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakeUserGrainCaller{joinResp: tt.stubResp, joinErr: tt.stubErr}
+			g := gatewayWithFake(fake)
+
+			rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/join", tt.path, "", "", tt.userID)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d (body=%s)", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if tt.wantStatus == http.StatusOK {
+				var resp successResponse
+				decodeSuccess(t, rec.Body, &resp)
+				if !resp.Success {
+					t.Fatalf("expected success=true, got %+v", resp)
+				}
+			} else {
+				resp := decodeErrorResponse(t, rec.Body)
+				if resp.Error.Code != tt.wantCode {
+					t.Errorf("error.code = %d, want %d", resp.Error.Code, tt.wantCode)
+				}
+			}
+			if tt.assertCalls != nil {
+				tt.assertCalls(t, fake)
+			}
+		})
+	}
+}
+
+// ---- handleRoomLeave ---------------------------------------------------
+
+func TestHandleRoomLeave(t *testing.T) {
+	const okUser = "alice"
+	const okRoom = "general"
+
+	tests := []struct {
+		name       string
+		stubResp   *userpb.LeaveRoomResponse
+		stubErr    error
+		wantStatus int
+		wantCode   int
+	}{
+		{
+			name:       "happy path",
+			stubResp:   &userpb.LeaveRoomResponse{},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "business error 2001 → 403",
+			stubResp: &userpb.LeaveRoomResponse{Error: &commonpb.ErrorDetail{
+				Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member",
+			}},
+			wantStatus: http.StatusForbidden,
+			wantCode:   2001,
+		},
+		{
+			name:       "transport error → 503",
+			stubErr:    errors.New("cluster down"),
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   5002,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakeUserGrainCaller{leaveResp: tt.stubResp, leaveErr: tt.stubErr}
+			g := gatewayWithFake(fake)
+			rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/leave",
+				"/rooms/"+okRoom+"/leave", "", "", okUser)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if tt.wantStatus == http.StatusOK {
+				var resp successResponse
+				decodeSuccess(t, rec.Body, &resp)
+				if !resp.Success {
+					t.Fatalf("expected success=true, got %+v", resp)
+				}
+				if fake.leaveReq == nil || fake.leaveReq.GetRoomId() != okRoom {
+					t.Fatalf("expected LeaveRoom called with room_id=%q, got %+v", okRoom, fake.leaveReq)
+				}
+			} else if tt.wantCode != 0 {
+				resp := decodeErrorResponse(t, rec.Body)
+				if resp.Error.Code != tt.wantCode {
+					t.Errorf("error.code = %d, want %d", resp.Error.Code, tt.wantCode)
+				}
+			}
+		})
+	}
+}
+
+// ---- handleRoomSendMessage --------------------------------------------
+
+func TestHandleRoomSendMessage_HappyPath(t *testing.T) {
+	const okUser = "alice"
+	const okRoom = "general"
+	const okText = "hi"
+	wantTSMillis := int64(1234567890)
+
+	fake := &fakeUserGrainCaller{sendResp: &userpb.SendMessageResponse{
+		Timestamp: timestamppb.New(time.UnixMilli(wantTSMillis)),
+	}}
+	g := gatewayWithFake(fake)
+	rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
+		"/rooms/"+okRoom+"/messages", `{"text":"`+okText+`"}`, "application/json", okUser)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+	var resp sendMessageSuccessResponse
+	decodeSuccess(t, rec.Body, &resp)
+	if !resp.Success {
+		t.Errorf("success = false, want true")
+	}
+	if resp.Timestamp != wantTSMillis {
+		t.Errorf("timestamp = %d, want %d", resp.Timestamp, wantTSMillis)
+	}
+	if fake.sendReq == nil || fake.sendReq.GetText() != okText || fake.sendReq.GetRoomId() != okRoom {
+		t.Fatalf("SendMessage called with %+v, want room=%q text=%q", fake.sendReq, okRoom, okText)
+	}
+}
+
+func TestHandleRoomSendMessage_NilTimestampWritesZero(t *testing.T) {
+	fake := &fakeUserGrainCaller{sendResp: &userpb.SendMessageResponse{}}
+	g := gatewayWithFake(fake)
+	rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
+		"/rooms/general/messages", `{"text":"hi"}`, "application/json", "alice")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var resp sendMessageSuccessResponse
+	decodeSuccess(t, rec.Body, &resp)
+	if resp.Timestamp != 0 {
+		t.Errorf("timestamp = %d, want 0 for nil proto timestamp", resp.Timestamp)
+	}
+}
+
+func TestHandleRoomSendMessage_BusinessAndTransportErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		stubResp   *userpb.SendMessageResponse
+		stubErr    error
+		wantStatus int
+		wantCode   int
+	}{
+		{
+			name: "business 2001 → 403",
+			stubResp: &userpb.SendMessageResponse{Error: &commonpb.ErrorDetail{
+				Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member",
+			}},
+			wantStatus: http.StatusForbidden,
+			wantCode:   2001,
+		},
+		{
+			name: "business 4001 → 400",
+			stubResp: &userpb.SendMessageResponse{Error: &commonpb.ErrorDetail{
+				Code: 4001, Status: "INVALID_REQUEST", Message: "bad text",
+			}},
+			wantStatus: http.StatusBadRequest,
+			wantCode:   4001,
+		},
+		{
+			name:       "transport → 503 + 5002",
+			stubErr:    errors.New("cluster down"),
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   5002,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakeUserGrainCaller{sendResp: tt.stubResp, sendErr: tt.stubErr}
+			g := gatewayWithFake(fake)
+			rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
+				"/rooms/general/messages", `{"text":"hi"}`, "application/json", "alice")
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			resp := decodeErrorResponse(t, rec.Body)
+			if resp.Error.Code != tt.wantCode {
+				t.Errorf("error.code = %d, want %d", resp.Error.Code, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestHandleRoomSendMessage_BodyValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		contentType string
+		wantStatus  int
+		wantCode    int
+		wantMessage string // substring match
+	}{
+		{
+			name:        "missing content-type → 400",
+			body:        `{"text":"hi"}`,
+			contentType: "",
+			wantStatus:  http.StatusBadRequest,
+			wantCode:    4001,
+			wantMessage: "content-type",
+		},
+		{
+			name:        "wrong content-type → 400",
+			body:        `{"text":"hi"}`,
+			contentType: "text/plain",
+			wantStatus:  http.StatusBadRequest,
+			wantCode:    4001,
+			wantMessage: "content-type",
+		},
+		{
+			name:        "json with charset accepted",
+			body:        `{"text":"hi"}`,
+			contentType: "application/json; charset=utf-8",
+			wantStatus:  http.StatusOK,
+		},
+		{
+			name:        "malformed JSON → 400",
+			body:        `{`,
+			contentType: "application/json",
+			wantStatus:  http.StatusBadRequest,
+			wantCode:    4001,
+			wantMessage: "malformed",
+		},
+		{
+			name:        "trailing JSON → 400",
+			body:        `{"text":"hi"}{"x":1}`,
+			contentType: "application/json",
+			wantStatus:  http.StatusBadRequest,
+			wantCode:    4001,
+			wantMessage: "malformed",
+		},
+		{
+			name:        "empty text → 400",
+			body:        `{"text":"   "}`,
+			contentType: "application/json",
+			wantStatus:  http.StatusBadRequest,
+			wantCode:    4001,
+			wantMessage: "text is required",
+		},
+		{
+			name:        "text over 4 KiB → 400",
+			body:        `{"text":"` + strings.Repeat("a", maxRoomMessageTextBytes+1) + `"}`,
+			contentType: "application/json",
+			wantStatus:  http.StatusBadRequest,
+			wantCode:    4001,
+			wantMessage: "text exceeds maximum length",
+		},
+		{
+			name:        "body over MaxBytesReader cap → 400",
+			body:        `{"text":"` + strings.Repeat("a", maxRoomMessageBodyBytes+10) + `"}`,
+			contentType: "application/json",
+			wantStatus:  http.StatusBadRequest,
+			wantCode:    4001,
+			wantMessage: "malformed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakeUserGrainCaller{sendResp: &userpb.SendMessageResponse{
+				Timestamp: timestamppb.New(time.UnixMilli(1)),
+			}}
+			g := gatewayWithFake(fake)
+			rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
+				"/rooms/general/messages", tt.body, tt.contentType, "alice")
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d (body=%s)", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if tt.wantStatus == http.StatusOK {
+				return
+			}
+			resp := decodeErrorResponse(t, rec.Body)
+			if resp.Error.Code != tt.wantCode {
+				t.Errorf("error.code = %d, want %d", resp.Error.Code, tt.wantCode)
+			}
+			if tt.wantMessage != "" && !strings.Contains(resp.Error.Message, tt.wantMessage) {
+				t.Errorf("error.message = %q, want substring %q", resp.Error.Message, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestHandleRoomSendMessage_LoggingNFR1(t *testing.T) {
+	const secretText = "do-not-log-this-secret-text-payload"
+	const bearerToken = "tok-must-not-leak"
+
+	fake := &fakeUserGrainCaller{sendResp: &userpb.SendMessageResponse{
+		Timestamp: timestamppb.New(time.UnixMilli(1)),
+	}}
+	g := gatewayWithFake(fake)
+
+	logBytes := captureSlog(t, func() {
+		body := `{"text":"` + secretText + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/rooms/general/messages", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+bearerToken) // defense in depth
+		req = withUserContext(req, "alice")
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /rooms/{id}/messages", g.handleRoomSendMessage)
+		mux.ServeHTTP(httptest.NewRecorder(), req)
+	})
+
+	logs := string(logBytes)
+	if strings.Contains(logs, secretText) {
+		t.Errorf("text body leaked into logs: %s", logs)
+	}
+	if strings.Contains(logs, bearerToken) {
+		t.Errorf("bearer token leaked into logs: %s", logs)
+	}
+	if !strings.Contains(logs, `"text_len":`+itoa(len(secretText))) {
+		t.Errorf("expected text_len=%d in logs, got: %s", len(secretText), logs)
+	}
+}
+
+// itoa avoids dragging in strconv just for the log assertion.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	negative := n < 0
+	if negative {
+		n = -n
+	}
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if negative {
+		i--
+		b[i] = '-'
+	}
+	return string(b[i:])
+}
+
+// ---- mux-level path-not-found regression test --------------------------
+
+// Go's ServeMux normalises double-slash paths and returns a 307 redirect
+// to the cleaned path. The important invariants for this story are
+// (a) the handler is never invoked with an empty {id} capture, and
+// (b) the response is not a 200 from one of our handlers.
+func TestRoomMux_EmptyIDSegmentNeverReachesHandler(t *testing.T) {
+	fake := &fakeUserGrainCaller{
+		joinResp:  &userpb.JoinRoomResponse{},
+		leaveResp: &userpb.LeaveRoomResponse{},
+	}
+	g := gatewayWithFake(fake)
+	handler := g.RegisterRoutes()
+
+	for _, path := range []string{"/rooms//join", "/rooms//leave"} {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		// Either a redirect (Go normalises //) or a 404; both are fine.
+		// The forbidden case is a 200, which would mean the handler
+		// dispatched with an empty {id} capture.
+		if rec.Code != http.StatusTemporaryRedirect && rec.Code != http.StatusMovedPermanently && rec.Code != http.StatusNotFound {
+			t.Errorf("path %q: unexpected status %d (body=%s)", path, rec.Code, rec.Body.String())
+		}
+		if fake.calls != 0 {
+			t.Errorf("path %q: handler invoked despite empty {id} segment (calls=%d)", path, fake.calls)
+		}
+	}
+}

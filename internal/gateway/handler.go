@@ -17,6 +17,11 @@ const (
 	maxPasswordBytes  = 256
 )
 
+// endpointLogin is the mux pattern for handleLogin. Defined alongside
+// the handler so the route table in RegisterRoutes references the same
+// string the handler is registered under.
+const endpointLogin = "POST /login"
+
 // LoginRequest is the JSON payload accepted by POST /login.
 type LoginRequest struct {
 	Username string `json:"username"`
