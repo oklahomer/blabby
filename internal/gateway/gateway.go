@@ -34,7 +34,7 @@ func NewGateway(authenticator auth.Authenticator, c *cluster.Cluster, root *acto
 // emits a JSON 405 for non-POST requests against /login. Go 1.22+ mux selects
 // the most specific pattern, so "POST /login" wins over "/login" for POSTs.
 //
-// /ws is intentionally NOT wrapped with g.protected: WebSocket auth runs
+// /ws is intentionally NOT wrapped with g.requireAuth: WebSocket auth runs
 // after upgrade as a first-frame protocol message, not via the
 // Authorization header.
 func (g *Gateway) RegisterRoutes() http.Handler {
@@ -47,11 +47,11 @@ func (g *Gateway) RegisterRoutes() http.Handler {
 	mux.HandleFunc(loginPath, g.handleMethodNotAllowed(loginMethod))
 	mux.HandleFunc(endpointWS, g.handleWS)
 	mux.HandleFunc(wsPath, g.handleMethodNotAllowed(wsMethod))
-	mux.Handle(endpointRoomList, g.protected(g.handleRoomList))
-	mux.Handle(endpointRoomJoined, g.protected(g.handleRoomJoined))
-	mux.Handle(endpointRoomJoin, g.protected(g.handleRoomJoin))
-	mux.Handle(endpointRoomLeave, g.protected(g.handleRoomLeave))
-	mux.Handle(endpointRoomMessage, g.protected(g.handleRoomSendMessage))
+	mux.Handle(endpointRoomList, g.requireAuth(g.handleRoomList))
+	mux.Handle(endpointRoomJoined, g.requireAuth(g.handleRoomJoined))
+	mux.Handle(endpointRoomJoin, g.requireAuth(g.handleRoomJoin))
+	mux.Handle(endpointRoomLeave, g.requireAuth(g.handleRoomLeave))
+	mux.Handle(endpointRoomMessage, g.requireAuth(g.handleRoomSendMessage))
 	mux.HandleFunc("/", g.handleNotFound)
 	return mux
 }
