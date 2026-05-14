@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -536,32 +537,9 @@ func TestHandleRoomSendMessage_LoggingNFR1(t *testing.T) {
 	if strings.Contains(logs, bearerToken) {
 		t.Errorf("bearer token leaked into logs: %s", logs)
 	}
-	if !strings.Contains(logs, `"text_len":`+itoa(len(secretText))) {
+	if !strings.Contains(logs, `"text_len":`+strconv.Itoa(len(secretText))) {
 		t.Errorf("expected text_len=%d in logs, got: %s", len(secretText), logs)
 	}
-}
-
-// itoa avoids dragging in strconv just for the log assertion.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	negative := n < 0
-	if negative {
-		n = -n
-	}
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if negative {
-		i--
-		b[i] = '-'
-	}
-	return string(b[i:])
 }
 
 // ---- mux-level path-not-found regression test --------------------------
