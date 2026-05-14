@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	userpb "github.com/oklahomer/blabby/gen/user"
@@ -54,26 +55,24 @@ func (f *fakeUserGrainCaller) GetJoinedRooms(req *userpb.GetJoinedRoomsRequest) 
 }
 
 func TestUserGrainFor_FallsThroughToClusterAdapter_WhenSeamUnset(t *testing.T) {
-	g := &Gateway{}
-	// With no test seam and a nil cluster, calling userGrainFor returns
-	// a non-nil caller that wraps a nil cluster — using it would panic
-	// from the generated client. We assert only the wiring path here:
-	// the caller is non-nil and is the per-user adapter type.
-	caller := func() (c userGrainCaller) {
-		defer func() {
-			if r := recover(); r != nil {
-				// GetUserGrainGrainClient panics on nil cluster — this is
-				// the production client's contract, not a wiring bug. Treat
-				// the panic as proof the production path was taken.
-				c = nil
-			}
-		}()
-		return g.userGrainFor("user-1")
+	g := &Gateway{} // userGrain seam unset, cluster nil
+
+	// The production fall-through reaches the generated cluster client
+	// constructor, which panics on a nil cluster. Asserting that panic
+	// proves three things at once: the userGrain seam was nil, the
+	// fall-through ran, and the panic is the expected guard rather than
+	// an unrelated crash.
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected nil-cluster panic from production fall-through; got no panic")
+		}
+		err, ok := r.(error)
+		if !ok || !strings.Contains(err.Error(), "nil cluster") {
+			t.Errorf("expected nil-cluster panic from GetUserGrainGrainClient, got %v", r)
+		}
 	}()
-	// Either we got a nil-cluster panic (production path attempted) or
-	// we got a non-nil wrapper. Both prove userGrain was nil and the
-	// fall-through ran.
-	_ = caller
+	g.userGrainFor("user-1")
 }
 
 func TestUserGrainFor_UsesTestSeamWhenSet(t *testing.T) {
