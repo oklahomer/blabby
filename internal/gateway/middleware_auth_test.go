@@ -246,14 +246,14 @@ func TestAuthMiddleware_DoesNotLeakTokenToLogs(t *testing.T) {
 	}
 }
 
-func TestGateway_Protected_WrapsHandlerFunc(t *testing.T) {
+func TestGateway_RequireAuth_WrapsHandlerFunc(t *testing.T) {
 	g := NewGateway(&stubAuthenticator{
 		validateTokenFn: func(ctx context.Context, token string) (*auth.Claims, error) {
 			return &auth.Claims{Subject: "alice"}, nil
 		},
 	}, nil, nil)
 
-	handler := g.protected(func(w http.ResponseWriter, r *http.Request) {
+	handler := g.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		uid, ok := auth.UserIDFromContext(r.Context())
 		if !ok || uid != "alice" {
 			t.Errorf("expected alice in context, got %q ok=%v", uid, ok)
@@ -271,9 +271,9 @@ func TestGateway_Protected_WrapsHandlerFunc(t *testing.T) {
 	}
 }
 
-func TestGateway_Protected_RejectsMissingHeader(t *testing.T) {
+func TestGateway_RequireAuth_RejectsMissingHeader(t *testing.T) {
 	g := NewGateway(&stubAuthenticator{}, nil, nil)
-	handler := g.protected(func(w http.ResponseWriter, r *http.Request) {
+	handler := g.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler must not run when auth fails")
 	})
 

@@ -37,7 +37,7 @@ func ContextWithUserID(ctx context.Context, userID string) context.Context {
 // message) should accept userID as an explicit parameter instead of reading
 // it from a context they happen to have a reference to. If ok is false at a
 // call site that runs behind authMiddleware, that is a wiring bug (route
-// registered without g.protected), not a runtime condition to recover from.
+// registered without g.requireAuth), not a runtime condition to recover from.
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(userIDContextKey).(string)
 	if !ok {

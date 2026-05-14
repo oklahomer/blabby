@@ -79,6 +79,32 @@ func TestRegisterRoutes_WrongMethodReturns405WithJSONEnvelope(t *testing.T) {
 	}
 }
 
+func TestSplitMethodPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		pattern    string
+		wantMethod string
+		wantPath   string
+	}{
+		{"POST + path", "POST /login", "POST", "/login"},
+		{"GET + path", "GET /ws", "GET", "/ws"},
+		{"POST + path with capture", "POST /rooms/{id}/join", "POST", "/rooms/{id}/join"},
+		{"path only", "/login", "", "/login"},
+		{"root", "/", "", "/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			method, path := splitMethodPath(tt.pattern)
+			if method != tt.wantMethod {
+				t.Errorf("method = %q, want %q", method, tt.wantMethod)
+			}
+			if path != tt.wantPath {
+				t.Errorf("path = %q, want %q", path, tt.wantPath)
+			}
+		})
+	}
+}
+
 func TestRegisterRoutes_UnknownPathReturns404WithJSONEnvelope(t *testing.T) {
 	g := NewGateway(&stubAuthenticator{}, nil, nil)
 	handler := g.RegisterRoutes()

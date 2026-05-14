@@ -10,6 +10,11 @@ import (
 	"github.com/oklahomer/blabby/internal/actor/connection"
 )
 
+// endpointWS is the mux pattern for handleWS. Defined alongside the
+// handler so the route table in RegisterRoutes references the same
+// string the handler is registered under.
+const endpointWS = "GET /ws"
+
 // wsUpgrader is the package-private upgrader used by every /ws request.
 //
 // CheckOrigin currently accepts every origin. The Phase 1 client is a TUI
@@ -29,18 +34,7 @@ var wsUpgrader = websocket.Upgrader{
 // a UserConnection actor to manage the session. Auth happens on the
 // upgraded socket as the first text frame, not via the Authorization
 // header — see ADR-004.
-//
-// If the gateway is missing its cluster or actor-root dependencies, the
-// handler responds 503 + 5002 with a JSON envelope BEFORE attempting the
-// upgrade. After a failed upgrade gorilla writes its own response, so we
-// must not call WriteErrorResponse on that path.
 func (g *Gateway) handleWS(w http.ResponseWriter, r *http.Request) {
-	if g.auth == nil || g.cluster == nil || g.actorRoot == nil {
-		WriteErrorResponse(w, http.StatusServiceUnavailable,
-			ErrServiceUnavailable("websocket endpoint not available"))
-		return
-	}
-
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Warn("ws.upgrade.failed",

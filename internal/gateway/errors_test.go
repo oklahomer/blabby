@@ -266,6 +266,40 @@ func TestFromProtoErrorDetail(t *testing.T) {
 	})
 }
 
+func TestErrorCodeHTTPStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		code ErrorCode
+		want int
+	}{
+		{"AuthInvalidToken→401", CodeAuthInvalidToken, http.StatusUnauthorized},
+		{"AuthExpiredToken→401", CodeAuthExpiredToken, http.StatusUnauthorized},
+		{"AuthMissingToken→401", CodeAuthMissingToken, http.StatusUnauthorized},
+		{"RoomNotMember→403", CodeRoomNotMember, http.StatusForbidden},
+		{"RoomAlreadyMember→409", CodeRoomAlreadyMember, http.StatusConflict},
+		{"RoomNotFound→404", CodeRoomNotFound, http.StatusNotFound},
+		{"RateLimitExceeded→429", CodeRateLimitExceeded, http.StatusTooManyRequests},
+		{"InvalidRequest→400", CodeInvalidRequest, http.StatusBadRequest},
+		{"MissingField→400", CodeMissingField, http.StatusBadRequest},
+		{"InternalError→500", CodeInternalError, http.StatusInternalServerError},
+		{"ServiceUnavailable→503", CodeServiceUnavailable, http.StatusServiceUnavailable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.code.HTTPStatus(); got != tt.want {
+				t.Errorf("ErrorCode(%d).HTTPStatus() = %d, want %d", tt.code, got, tt.want)
+			}
+		})
+	}
+
+	t.Run("unknown code falls through to 500", func(t *testing.T) {
+		if got := ErrorCode(9999).HTTPStatus(); got != http.StatusInternalServerError {
+			t.Errorf("ErrorCode(9999).HTTPStatus() = %d, want %d", got, http.StatusInternalServerError)
+		}
+	})
+}
+
 func TestConvenienceErrorFunctions(t *testing.T) {
 	tests := []struct {
 		name       string
