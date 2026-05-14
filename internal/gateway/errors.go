@@ -33,8 +33,9 @@ const (
 
 // Error codes — Validation (4000-4999)
 const (
-	CodeInvalidRequest ErrorCode = 4001
-	CodeMissingField   ErrorCode = 4002
+	CodeInvalidRequest  ErrorCode = 4001
+	CodeMissingField    ErrorCode = 4002
+	CodePayloadTooLarge ErrorCode = 4003
 )
 
 // Error codes — System / Internal (5000-5999)
@@ -64,6 +65,8 @@ func (c ErrorCode) Status() string {
 		return "INVALID_REQUEST"
 	case CodeMissingField:
 		return "MISSING_FIELD"
+	case CodePayloadTooLarge:
+		return "PAYLOAD_TOO_LARGE"
 	case CodeInternalError:
 		return "INTERNAL_ERROR"
 	case CodeServiceUnavailable:
@@ -91,6 +94,8 @@ func (c ErrorCode) HTTPStatus() int {
 		return http.StatusTooManyRequests
 	case CodeInvalidRequest, CodeMissingField:
 		return http.StatusBadRequest
+	case CodePayloadTooLarge:
+		return http.StatusRequestEntityTooLarge
 	case CodeServiceUnavailable:
 		return http.StatusServiceUnavailable
 	default:
@@ -159,6 +164,7 @@ func ErrRoomNotFound(msg string) ErrorDetail      { return NewErrorDetail(CodeRo
 func ErrRateLimitExceeded(msg string) ErrorDetail { return NewErrorDetail(CodeRateLimitExceeded, msg) }
 func ErrInvalidRequest(msg string) ErrorDetail    { return NewErrorDetail(CodeInvalidRequest, msg) }
 func ErrMissingField(msg string) ErrorDetail      { return NewErrorDetail(CodeMissingField, msg) }
+func ErrPayloadTooLarge(msg string) ErrorDetail   { return NewErrorDetail(CodePayloadTooLarge, msg) }
 func ErrInternalError(msg string) ErrorDetail     { return NewErrorDetail(CodeInternalError, msg) }
 func ErrServiceUnavailable(msg string) ErrorDetail {
 	return NewErrorDetail(CodeServiceUnavailable, msg)

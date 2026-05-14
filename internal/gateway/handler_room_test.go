@@ -473,12 +473,12 @@ func TestHandleRoomSendMessage_BodyValidation(t *testing.T) {
 			wantMessage: "text exceeds maximum length",
 		},
 		{
-			name:        "body over MaxBytesReader cap → 400",
+			name:        "body over MaxBytesReader cap → 413",
 			body:        `{"text":"` + strings.Repeat("a", maxRoomMessageBodyBytes+10) + `"}`,
 			contentType: "application/json",
-			wantStatus:  http.StatusBadRequest,
-			wantCode:    4001,
-			wantMessage: "malformed",
+			wantStatus:  http.StatusRequestEntityTooLarge,
+			wantCode:    4003,
+			wantMessage: "request body exceeds maximum size",
 		},
 	}
 

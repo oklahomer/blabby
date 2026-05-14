@@ -126,7 +126,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 		slog.Warn("room handler rejected request",
 			"endpoint", endpointRoomMessage, "method", r.Method,
 			"user_id", userID, "room_id", roomID, "reason", decodeErr.Status)
-		WriteErrorResponse(w, http.StatusBadRequest, decodeErr)
+		WriteErrorResponse(w, ErrorCode(decodeErr.Code).HTTPStatus(), decodeErr)
 		return
 	}
 
@@ -232,6 +232,10 @@ func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (sendMessa
 	var req sendMessageRequest
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return sendMessageRequest{}, ErrPayloadTooLarge("request body exceeds maximum size"), false
+		}
 		return sendMessageRequest{}, ErrInvalidRequest("malformed request body"), false
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {

@@ -83,6 +83,7 @@ func TestErrorCodeConstants(t *testing.T) {
 		{"CodeRateLimitExceeded", CodeRateLimitExceeded, 3001},
 		{"CodeInvalidRequest", CodeInvalidRequest, 4001},
 		{"CodeMissingField", CodeMissingField, 4002},
+		{"CodePayloadTooLarge", CodePayloadTooLarge, 4003},
 		{"CodeInternalError", CodeInternalError, 5001},
 		{"CodeServiceUnavailable", CodeServiceUnavailable, 5002},
 	}
@@ -110,6 +111,7 @@ func TestErrorCodeStatus(t *testing.T) {
 		{CodeRateLimitExceeded, "RATE_LIMIT_EXCEEDED"},
 		{CodeInvalidRequest, "INVALID_REQUEST"},
 		{CodeMissingField, "MISSING_FIELD"},
+		{CodePayloadTooLarge, "PAYLOAD_TOO_LARGE"},
 		{CodeInternalError, "INTERNAL_ERROR"},
 		{CodeServiceUnavailable, "SERVICE_UNAVAILABLE"},
 	}
@@ -134,7 +136,7 @@ func TestErrorCodeExhaustiveness(t *testing.T) {
 		CodeAuthInvalidToken, CodeAuthExpiredToken, CodeAuthMissingToken,
 		CodeRoomNotMember, CodeRoomAlreadyMember, CodeRoomNotFound,
 		CodeRateLimitExceeded,
-		CodeInvalidRequest, CodeMissingField,
+		CodeInvalidRequest, CodeMissingField, CodePayloadTooLarge,
 		CodeInternalError, CodeServiceUnavailable,
 	}
 
@@ -281,6 +283,7 @@ func TestErrorCodeHTTPStatus(t *testing.T) {
 		{"RateLimitExceeded→429", CodeRateLimitExceeded, http.StatusTooManyRequests},
 		{"InvalidRequest→400", CodeInvalidRequest, http.StatusBadRequest},
 		{"MissingField→400", CodeMissingField, http.StatusBadRequest},
+		{"PayloadTooLarge→413", CodePayloadTooLarge, http.StatusRequestEntityTooLarge},
 		{"InternalError→500", CodeInternalError, http.StatusInternalServerError},
 		{"ServiceUnavailable→503", CodeServiceUnavailable, http.StatusServiceUnavailable},
 	}
@@ -316,6 +319,7 @@ func TestConvenienceErrorFunctions(t *testing.T) {
 		{"ErrRateLimitExceeded", ErrRateLimitExceeded, 3001, "RATE_LIMIT_EXCEEDED"},
 		{"ErrInvalidRequest", ErrInvalidRequest, 4001, "INVALID_REQUEST"},
 		{"ErrMissingField", ErrMissingField, 4002, "MISSING_FIELD"},
+		{"ErrPayloadTooLarge", ErrPayloadTooLarge, 4003, "PAYLOAD_TOO_LARGE"},
 		{"ErrInternalError", ErrInternalError, 5001, "INTERNAL_ERROR"},
 		{"ErrServiceUnavailable", ErrServiceUnavailable, 5002, "SERVICE_UNAVAILABLE"},
 	}
