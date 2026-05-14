@@ -63,10 +63,10 @@ func (g *Gateway) handleRoomJoined(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ids := resp.GetRoomIds()
-	if ids == nil {
-		ids = []string{}
-	}
+	// Copy the slice so the JSON envelope never aliases the proto
+	// message's internal storage. Also normalises a nil proto slice to
+	// an empty JSON array rather than `null`.
+	ids := append([]string{}, resp.GetRoomIds()...)
 	logRoomExit(endpointRoomJoined, r.Method, userID, "", outcomeOK, 0)
 	writeJSON(w, http.StatusOK, joinedRoomsResponse{RoomIDs: ids})
 }
