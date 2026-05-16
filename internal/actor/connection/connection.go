@@ -21,6 +21,36 @@ import (
 
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/middleware"
+)
+
+// actorType is the canonical actor_type value emitted by every log call from
+// this package and passed to middleware.ActorLogging. Pinned at one site so
+// the envelope contract cannot drift.
+const actorType = "UserConnection"
+
+// Event-name constants for every log line this actor emits. The happy-path
+// state transition (authenticated) and the lifecycle terminal (closed)
+// follow the N3 past-tense action-verb convention. The failure/observation
+// events keep their existing names (they describe failure types, not RPC
+// outcomes, so the past-tense rule does not apply). Middleware-owned
+// envelope events live in internal/middleware as exported constants.
+const (
+	eventConnectionAuthenticated          = "connection.authenticated"
+	eventConnectionClosed                 = "connection.closed"
+	eventConnectionWriteMessage           = "connection.write.message"
+	eventConnectionAuthRejected           = "connection.auth.rejected"
+	eventConnectionAuthContractViolation  = "connection.auth.contract_violation"
+	eventConnectionAuthNoUserClient       = "connection.auth.no_user_client"
+	eventConnectionProtocolViolation      = "connection.protocol.violation"
+	eventConnectionDecodeFailed           = "connection.decode.failed"
+	eventConnectionRegisterInlineError    = "connection.register.inline_error"
+	eventConnectionRegisterTransportError = "connection.register.transport_error"
+	eventConnectionWriteError             = "connection.write.error"
+	eventConnectionWriteBackpressure      = "connection.write.backpressure"
+	eventConnectionEventUnknown           = "connection.event.unknown"
+	eventConnectionCloseFrameError        = "connection.close_frame.error"
+	eventConnectionReadPumpPanic          = "connection.read_pump.panic"
 )
 
 // errorKind pairs the on-wire numeric code with its on-wire status string.
@@ -68,6 +98,23 @@ type UserConnection struct {
 
 	outbound chan any
 	shutdown func()
+}
+
+// currentUserID returns the authenticated user id from a *UserConnection
+// receiver, or the empty string before auth completes. It is wired into
+// the actor-logging middleware via middleware.WithUserIDProvider so log
+// lines carry user_id once the actor is post-auth without recurring lookups.
+//
+// The actor model's single-threaded guarantee makes the direct field read
+// safe — no synchronization is needed. Any non-UserConnection actor reaching
+// this code is a programming error in the caller; the empty fallback keeps
+// the middleware non-fatal in that case.
+func currentUserID(ctx actor.ReceiverContext) string {
+	uc, ok := ctx.Actor().(*UserConnection)
+	if !ok {
+		return ""
+	}
+	return uc.userID.String()
 }
 
 // Option configures the UserConnection at construction time. See
@@ -124,6 +171,10 @@ func NewProps(conn *websocket.Conn, a auth.Authenticator, c *cluster.Cluster, op
 	if cfg.heartbeat.enabled() {
 		middlewares = append(middlewares, appHeartbeatMiddleware(cfg.heartbeat))
 	}
+	middlewares = append(middlewares, middleware.ActorLogging(
+		actorType,
+		middleware.WithUserIDProvider(currentUserID),
+	))
 
 	return actor.PropsFromProducer(
 		func() actor.Actor {
@@ -216,7 +267,6 @@ func (uc *UserConnection) Receive(ctx actor.Context) {
 	// Proto.Actor lifecycle.
 	case *actor.Started:
 		uc.behavior.Become(uc.preAuthBehavior)
-		uc.logEvent(ctx, "started", msg)
 
 		pumpCtx, cancel := context.WithCancel(context.Background())
 		uc.shutdown = func() {
@@ -233,10 +283,8 @@ func (uc *UserConnection) Receive(ctx actor.Context) {
 		go runReadPump(pumpCtx, uc.conn, notify)
 		go runWritePump(pumpCtx, uc.conn, uc.outbound, notify)
 	case *actor.Stopping:
-		uc.logEvent(ctx, "stopping", msg)
 		uc.shutdown()
 	case *actor.Stopped:
-		uc.logEvent(ctx, "stopped", msg)
 
 	// Transport tear-down signals from the pumps. These mean the connection
 	// is already gone or cannot make forward progress, so the actor stops
@@ -256,8 +304,8 @@ func (uc *UserConnection) Receive(ctx actor.Context) {
 		uc.stop(ctx)
 	case *WritePumpClosed:
 		if msg.CloseFrameErr != "" {
-			slog.Warn("connection.close_frame.error",
-				"actor_type", "UserConnection",
+			slog.Warn(eventConnectionCloseFrameError,
+				"actor_type", actorType,
 				"pid", ctx.Self().String(),
 				"user_id", uc.userID.String(),
 				"reason", msg.CloseFrameErr,
@@ -303,8 +351,8 @@ func (uc *UserConnection) preAuthBehavior(ctx actor.Context) {
 		}
 		uc.userID = *uid
 		uc.sendOutbound(ctx, &AuthSucceeded{})
-		slog.Info("connection.authed",
-			"actor_type", "UserConnection",
+		slog.Info(eventConnectionAuthenticated,
+			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 			"user_id", uid.String(),
 		)
@@ -361,8 +409,8 @@ func (uc *UserConnection) postAuthBehavior(ctx actor.Context) {
 	case *DecodeFailed:
 		uc.logDecodeFailure(ctx, msg)
 	case *ProtocolViolation:
-		slog.Warn("connection.protocol.violation",
-			"actor_type", "UserConnection",
+		slog.Warn(eventConnectionProtocolViolation,
+			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 			"user_id", uc.userID.String(),
 			"reason", msg.Reason,
@@ -414,8 +462,8 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*User
 	}
 
 	if claims == nil {
-		slog.Error("connection.auth.contract_violation",
-			"actor_type", "UserConnection",
+		slog.Error(eventConnectionAuthContractViolation,
+			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 			"reason", "claims_nil",
 		)
@@ -428,8 +476,8 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*User
 	}
 
 	if uc.userClient == nil {
-		slog.Error("connection.auth.no_user_client",
-			"actor_type", "UserConnection",
+		slog.Error(eventConnectionAuthNoUserClient,
+			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 		)
 		return nil, &authRejectionError{Kind: errInternalError, Message: "service unavailable", Reason: "no_user_client"}
@@ -439,8 +487,8 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*User
 		RequesterPid: &userpb.PID{Address: ctx.Self().Address, Id: ctx.Self().Id},
 	})
 	if err != nil {
-		slog.Warn("connection.register.transport_error",
-			"actor_type", "UserConnection",
+		slog.Warn(eventConnectionRegisterTransportError,
+			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 			"user_id", userID.String(),
 			"reason", "transport_error",
@@ -452,8 +500,8 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*User
 		// grain's Message is logged server-side for ops debuggability but
 		// replaced by a fixed in-actor lookup before crossing the wire so
 		// grain-supplied prose never leaks to the client.
-		slog.Warn("connection.register.inline_error",
-			"actor_type", "UserConnection",
+		slog.Warn(eventConnectionRegisterInlineError,
+			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 			"user_id", userID.String(),
 			"code", respErr.GetCode(),
@@ -490,8 +538,8 @@ func inlineErrorClientMessage(status string) string {
 }
 
 func (uc *UserConnection) logAuthRejected(ctx actor.Context, reason string, code int32) {
-	slog.Warn("connection.auth.rejected",
-		"actor_type", "UserConnection",
+	slog.Warn(eventConnectionAuthRejected,
+		"actor_type", actorType,
 		"pid", ctx.Self().String(),
 		"reason", reason,
 		"code", code,
@@ -509,8 +557,8 @@ func (uc *UserConnection) forwardMessage(ctx actor.Context, req *userpb.ForwardM
 		Text:      req.GetText(),
 		Timestamp: timestamp,
 	})
-	slog.Debug("connection.write.message",
-		"actor_type", "UserConnection",
+	slog.Debug(eventConnectionWriteMessage,
+		"actor_type", actorType,
 		"pid", ctx.Self().String(),
 		"user_id", uc.userID.String(),
 		"room_id", req.GetRoomId(),
@@ -527,8 +575,8 @@ func (uc *UserConnection) forwardRoomEvent(ctx actor.Context, req *userpb.Notify
 	case userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT:
 		out = &RoomLeft{RoomID: req.GetRoomId(), UserID: req.GetUserId()}
 	default:
-		slog.Warn("connection.event.unknown",
-			"actor_type", "UserConnection",
+		slog.Warn(eventConnectionEventUnknown,
+			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 			"user_id", uc.userID.String(),
 			"event_type", req.GetEventType().String(),
@@ -548,8 +596,8 @@ func (uc *UserConnection) sendOutbound(ctx actor.Context, msg any) {
 	select {
 	case uc.outbound <- msg:
 	default:
-		slog.Warn("connection.write.backpressure",
-			"actor_type", "UserConnection",
+		slog.Warn(eventConnectionWriteBackpressure,
+			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 			"user_id", uc.userID.String(),
 		)
@@ -564,8 +612,8 @@ func (uc *UserConnection) sendOutboundBestEffort(ctx actor.Context, msg any) {
 	select {
 	case uc.outbound <- msg:
 	default:
-		slog.Warn("connection.write.backpressure",
-			"actor_type", "UserConnection",
+		slog.Warn(eventConnectionWriteBackpressure,
+			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 			"user_id", uc.userID.String(),
 			"dropped_kind", typeName(msg),
@@ -581,8 +629,8 @@ func (uc *UserConnection) stop(ctx actor.Context) {
 }
 
 func (uc *UserConnection) logDecodeFailure(ctx actor.Context, msg *DecodeFailed) {
-	slog.Warn("connection.decode.failed",
-		"actor_type", "UserConnection",
+	slog.Warn(eventConnectionDecodeFailed,
+		"actor_type", actorType,
 		"pid", ctx.Self().String(),
 		"user_id", uc.userID.String(),
 		"reason", msg.Reason,
@@ -590,8 +638,8 @@ func (uc *UserConnection) logDecodeFailure(ctx actor.Context, msg *DecodeFailed)
 }
 
 func (uc *UserConnection) logReadPumpPanic(ctx actor.Context, _ *ReadPumpPanicked) {
-	slog.Error("connection.read_pump.panic",
-		"actor_type", "UserConnection",
+	slog.Error(eventConnectionReadPumpPanic,
+		"actor_type", actorType,
 		"pid", ctx.Self().String(),
 		"user_id", uc.userID.String(),
 		"reason", "read_pump_panicked",
@@ -600,7 +648,7 @@ func (uc *UserConnection) logReadPumpPanic(ctx actor.Context, _ *ReadPumpPanicke
 
 func (uc *UserConnection) logClosed(ctx actor.Context, msg *ConnectionClosed) {
 	args := []any{
-		"actor_type", "UserConnection",
+		"actor_type", actorType,
 		"pid", ctx.Self().String(),
 		"msg_type", typeName(msg),
 		"reason", msg.Reason,
@@ -608,24 +656,12 @@ func (uc *UserConnection) logClosed(ctx actor.Context, msg *ConnectionClosed) {
 	if uid := uc.userID.String(); uid != "" {
 		args = append(args, "user_id", uid)
 	}
-	slog.Info("connection.closed", args...)
-}
-
-func (uc *UserConnection) logEvent(ctx actor.Context, event string, msg any) {
-	args := []any{
-		"actor_type", "UserConnection",
-		"pid", ctx.Self().String(),
-		"msg_type", typeName(msg),
-	}
-	if uid := uc.userID.String(); uid != "" {
-		args = append(args, "user_id", uid)
-	}
-	slog.Info("connection."+event, args...)
+	slog.Info(eventConnectionClosed, args...)
 }
 
 func (uc *UserConnection) logWriteError(ctx actor.Context, eventKind string) {
-	slog.Warn("connection.write.error",
-		"actor_type", "UserConnection",
+	slog.Warn(eventConnectionWriteError,
+		"actor_type", actorType,
 		"pid", ctx.Self().String(),
 		"user_id", uc.userID.String(),
 		"reason", "write_error",

@@ -399,19 +399,9 @@ func TestGrain_Init_DefaultsClockWhenAbsent(t *testing.T) {
 	}
 }
 
-func TestGrain_Terminate_EmitsLog(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	g, _, _ := newGrain(t)
-	g.Terminate(graintest.NewFakeGrainContext("general"))
-
-	if !strings.Contains(buf.String(), "grain.terminate") {
-		t.Errorf("Terminate did not emit grain.terminate log: %s", buf.String())
-	}
-}
+// Note: lifecycle logs (grain.activated / grain.passivated) are emitted by
+// the receiver middleware, not the grain body. See
+// internal/middleware/logging_test.go for those assertions.
 
 func TestGrain_ReceiveDefault_LogsUnhandled(t *testing.T) {
 	var buf bytes.Buffer
@@ -452,7 +442,7 @@ func TestGrain_FanOutNotifyError_LoggedNotFatal(t *testing.T) {
 	}
 }
 
-func TestGrain_LogsCarryGrainTypeAndMsgType(t *testing.T) {
+func TestGrain_DomainLogsCarryEnvelopeAttrs(t *testing.T) {
 	var buf bytes.Buffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
@@ -462,11 +452,23 @@ func TestGrain_LogsCarryGrainTypeAndMsgType(t *testing.T) {
 	mustJoin(t, g, "alice")
 
 	out := buf.String()
+	if !strings.Contains(out, `msg=room.member.joined`) {
+		t.Errorf("logs missing room.member.joined line: %s", out)
+	}
 	if !strings.Contains(out, `grain_type=RoomGrain`) {
 		t.Errorf("logs missing grain_type=RoomGrain: %s", out)
 	}
-	if !strings.Contains(out, `msg_type=Join`) {
-		t.Errorf("logs missing msg_type=Join: %s", out)
+	if !strings.Contains(out, `user_id=alice`) {
+		t.Errorf("logs missing user_id=alice: %s", out)
+	}
+	if !strings.Contains(out, `msg=grain.fanout`) {
+		t.Errorf("logs missing grain.fanout trace line: %s", out)
+	}
+	if !strings.Contains(out, `msg_type=Join.fanout`) {
+		t.Errorf("logs missing msg_type=Join.fanout: %s", out)
+	}
+	if !strings.Contains(out, `target_count=1`) {
+		t.Errorf("logs missing target_count=1: %s", out)
 	}
 }
 

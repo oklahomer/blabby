@@ -17,12 +17,34 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/middleware"
+)
+
+// kindName is the canonical grain_type value emitted by every log call from
+// this package and passed to middleware.GrainLogging. Pinned at one site so
+// the envelope contract cannot drift.
+const kindName = "RoomGrain"
+
+// Event-name constants for every log line this package emits. Follow the
+// N3 past-tense action-verb convention: <package>.<object>.<past-verb> for
+// happy paths, <package>.<object>.<base-verb>_rejected for validation
+// refusals. Cross-cutting events (grain.fanout, grain.fanout.error,
+// grain.unhandled) live in internal/middleware as exported constants and
+// are referenced via middleware.EventXxx.
+const (
+	eventRoomMemberJoined        = "room.member.joined"
+	eventRoomMemberJoinRejected  = "room.member.join_rejected"
+	eventRoomMemberLeft          = "room.member.left"
+	eventRoomMemberLeaveRejected = "room.member.leave_rejected"
+	eventRoomMessagePosted       = "room.message.posted"
+	eventRoomMessagePostRejected = "room.message.post_rejected"
 )
 
 // Error code constants mirror the canonical taxonomy in
@@ -102,7 +124,9 @@ type Grain struct {
 func NewKind() *cluster.Kind {
 	return roompb.NewRoomGrainKind(func() roompb.RoomGrain {
 		return &Grain{}
-	}, passivationTimeout)
+	}, passivationTimeout,
+		actor.WithReceiverMiddleware(middleware.GrainLogging(kindName)),
+	)
 }
 
 // Init prepares an empty state for a freshly activated Room grain. When the
@@ -117,26 +141,15 @@ func (g *Grain) Init(ctx cluster.GrainContext) {
 	if g.notifier == nil {
 		g.notifier = &clusterUserNotifier{c: ctx.Cluster()}
 	}
-	slog.Info("grain.init",
-		"grain_type", "RoomGrain",
-		"grain_id", ctx.Identity(),
-		"msg_type", "Init",
-	)
 }
 
 // Terminate is a passivation hook; Phase 1 does not persist state.
-func (g *Grain) Terminate(ctx cluster.GrainContext) {
-	slog.Info("grain.terminate",
-		"grain_type", "RoomGrain",
-		"grain_id", ctx.Identity(),
-		"msg_type", "Terminate",
-	)
-}
+func (g *Grain) Terminate(_ cluster.GrainContext) {}
 
 // ReceiveDefault logs unexpected messages without crashing the grain.
 func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
-	slog.Warn("grain.unhandled",
-		"grain_type", "RoomGrain",
+	slog.Warn(middleware.EventGrainUnhandled,
+		"grain_type", kindName,
 		"grain_id", ctx.Identity(),
 		"msg_type", fmt.Sprintf("%T", ctx.Message()),
 	)
@@ -145,22 +158,39 @@ func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
 // Join adds the user to the room and fans out a JOINED event to every
 // current member (including the joiner — multi-device echo, FR4).
 func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb.JoinResponse, error) {
-	slog.Info("grain.msg",
-		"grain_type", "RoomGrain",
-		"grain_id", ctx.Identity(),
-		"msg_type", "Join",
-		"user_id", req.GetUserId(),
-	)
-
 	if req.GetUserId() == "" {
+		slog.Warn(eventRoomMemberJoinRejected,
+			"grain_type", kindName,
+			"grain_id", ctx.Identity(),
+			"user_id", req.GetUserId(),
+			"reason", statusInvalidRequest,
+		)
 		return joinErr(codeInvalidRequest, statusInvalidRequest, "user_id is required"), nil
 	}
 	if g.state.isMember(req.GetUserId()) {
+		slog.Warn(eventRoomMemberJoinRejected,
+			"grain_type", kindName,
+			"grain_id", ctx.Identity(),
+			"user_id", req.GetUserId(),
+			"reason", statusRoomAlreadyMember,
+		)
 		return joinErr(codeRoomAlreadyMember, statusRoomAlreadyMember, "already a member of this room"), nil
 	}
 
 	g.state.addMember(req.GetUserId())
 	recipients := g.state.memberIDs()
+	slog.Info(eventRoomMemberJoined,
+		"grain_type", kindName,
+		"grain_id", ctx.Identity(),
+		"user_id", req.GetUserId(),
+	)
+	slog.Info(middleware.EventGrainFanout,
+		"grain_type", kindName,
+		"grain_id", ctx.Identity(),
+		"msg_type", "Join.fanout",
+		"sender_id", req.GetUserId(),
+		"target_count", len(recipients),
+	)
 	g.fanOutNotify(ctx, recipients, buildJoinedEvent(ctx.Identity(), req.GetUserId()), "Join.fanout")
 
 	return &roompb.JoinResponse{}, nil
@@ -170,24 +200,40 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 // pre-removal member snapshot (including the leaver, so their connection
 // can update UI state symmetrically with Join).
 func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*roompb.LeaveResponse, error) {
-	slog.Info("grain.msg",
-		"grain_type", "RoomGrain",
-		"grain_id", ctx.Identity(),
-		"msg_type", "Leave",
-		"user_id", req.GetUserId(),
-	)
-
 	if req.GetUserId() == "" {
+		slog.Warn(eventRoomMemberLeaveRejected,
+			"grain_type", kindName,
+			"grain_id", ctx.Identity(),
+			"user_id", req.GetUserId(),
+			"reason", statusInvalidRequest,
+		)
 		return leaveErr(codeInvalidRequest, statusInvalidRequest, "user_id is required"), nil
 	}
 	if !g.state.isMember(req.GetUserId()) {
+		slog.Warn(eventRoomMemberLeaveRejected,
+			"grain_type", kindName,
+			"grain_id", ctx.Identity(),
+			"user_id", req.GetUserId(),
+			"reason", statusRoomNotMember,
+		)
 		return leaveErr(codeRoomNotMember, statusRoomNotMember, "not a member of this room"), nil
 	}
 
-	// Snapshot before removal so the leaver also receives the LEFT event
-	// (architecture decision documented in story 3.1 task 5).
+	// Snapshot before removal so the leaver also receives the LEFT event.
 	recipients := g.state.memberIDs()
 	g.state.removeMember(req.GetUserId())
+	slog.Info(eventRoomMemberLeft,
+		"grain_type", kindName,
+		"grain_id", ctx.Identity(),
+		"user_id", req.GetUserId(),
+	)
+	slog.Info(middleware.EventGrainFanout,
+		"grain_type", kindName,
+		"grain_id", ctx.Identity(),
+		"msg_type", "Leave.fanout",
+		"sender_id", req.GetUserId(),
+		"target_count", len(recipients),
+	)
 	g.fanOutNotify(ctx, recipients, buildLeftEvent(ctx.Identity(), req.GetUserId()), "Leave.fanout")
 
 	return &roompb.LeaveResponse{}, nil
@@ -196,20 +242,32 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 // PostMessage records the message, assigns the server-side timestamp, and
 // fans the message out unconditionally to every current member (FR4).
 func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainContext) (*roompb.PostMessageResponse, error) {
-	slog.Info("grain.msg",
-		"grain_type", "RoomGrain",
-		"grain_id", ctx.Identity(),
-		"msg_type", "PostMessage",
-		"user_id", req.GetUserId(),
-	)
-
 	if req.GetUserId() == "" {
+		slog.Warn(eventRoomMessagePostRejected,
+			"grain_type", kindName,
+			"grain_id", ctx.Identity(),
+			"user_id", req.GetUserId(),
+			"reason", statusInvalidRequest,
+		)
 		return postErr(codeInvalidRequest, statusInvalidRequest, "user_id is required"), nil
 	}
 	if strings.TrimSpace(req.GetText()) == "" {
+		slog.Warn(eventRoomMessagePostRejected,
+			"grain_type", kindName,
+			"grain_id", ctx.Identity(),
+			"user_id", req.GetUserId(),
+			"text_len", len(req.GetText()),
+			"reason", statusMissingField,
+		)
 		return postErr(codeMissingField, statusMissingField, "text is required"), nil
 	}
 	if !g.state.isMember(req.GetUserId()) {
+		slog.Warn(eventRoomMessagePostRejected,
+			"grain_type", kindName,
+			"grain_id", ctx.Identity(),
+			"user_id", req.GetUserId(),
+			"reason", statusRoomNotMember,
+		)
 		return postErr(codeRoomNotMember, statusRoomNotMember, "not a member of this room"), nil
 	}
 
@@ -221,6 +279,20 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 	})
 
 	recipients := g.state.memberIDs()
+	textLen := len(req.GetText())
+	slog.Info(eventRoomMessagePosted,
+		"grain_type", kindName,
+		"grain_id", ctx.Identity(),
+		"user_id", req.GetUserId(),
+	)
+	slog.Info(middleware.EventGrainFanout,
+		"grain_type", kindName,
+		"grain_id", ctx.Identity(),
+		"msg_type", "PostMessage.fanout",
+		"sender_id", req.GetUserId(),
+		"target_count", len(recipients),
+		"text_len", textLen,
+	)
 	payload := buildForwardMessage(ctx.Identity(), req.GetUserId(), req.GetText(), timestamp)
 	g.fanOutForward(ctx, recipients, payload, "PostMessage.fanout")
 
@@ -236,8 +308,8 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 func (g *Grain) fanOutNotify(ctx cluster.GrainContext, recipients []string, payload *userpb.NotifyRoomEventRequest, msgType string) {
 	for _, recipientID := range recipients {
 		if err := g.notifier.NotifyRoomEvent(recipientID, payload); err != nil {
-			slog.Warn("grain.fanout.error",
-				"grain_type", "RoomGrain",
+			slog.Warn(middleware.EventGrainFanoutError,
+				"grain_type", kindName,
 				"grain_id", ctx.Identity(),
 				"msg_type", msgType,
 				"recipient_id", recipientID,
@@ -252,8 +324,8 @@ func (g *Grain) fanOutNotify(ctx cluster.GrainContext, recipients []string, payl
 func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []string, payload *userpb.ForwardMessageRequest, msgType string) {
 	for _, recipientID := range recipients {
 		if err := g.notifier.ForwardMessage(recipientID, payload); err != nil {
-			slog.Warn("grain.fanout.error",
-				"grain_type", "RoomGrain",
+			slog.Warn(middleware.EventGrainFanoutError,
+				"grain_type", kindName,
 				"grain_id", ctx.Identity(),
 				"msg_type", msgType,
 				"recipient_id", recipientID,

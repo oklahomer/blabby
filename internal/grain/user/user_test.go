@@ -658,17 +658,20 @@ func TestGrain_MultiDeviceEcho(t *testing.T) {
 
 // --- Logging compliance --------------------------------------------------
 
-func TestGrain_LogsCarryGrainTypeAndMsgType(t *testing.T) {
+func TestGrain_DomainLogsCarryGrainTypeAndOutcome(t *testing.T) {
 	buf := captureLogs(t)
 	h := newGrain(t)
 	mustRegister(t, h, actor.NewPID("addr", "conn-1"))
 
 	out := buf.String()
+	if !strings.Contains(out, `msg=user.connection.registered`) {
+		t.Errorf("logs missing user.connection.registered: %s", out)
+	}
 	if !strings.Contains(out, `grain_type=UserGrain`) {
 		t.Errorf("logs missing grain_type=UserGrain: %s", out)
 	}
-	if !strings.Contains(out, `msg_type=RegisterConnection`) {
-		t.Errorf("logs missing msg_type=RegisterConnection: %s", out)
+	if !strings.Contains(out, `pid_address=addr`) || !strings.Contains(out, `pid_id=conn-1`) {
+		t.Errorf("logs missing pid_address/pid_id: %s", out)
 	}
 }
 
@@ -712,15 +715,9 @@ func TestGrain_DoesNotLogMessageText(t *testing.T) {
 
 // --- Lifecycle / boilerplate --------------------------------------------
 
-func TestGrain_Terminate_EmitsLog(t *testing.T) {
-	buf := captureLogs(t)
-	h := newGrain(t)
-	h.g.Terminate(graintest.NewFakeGrainContext("alice"))
-
-	if !strings.Contains(buf.String(), "grain.terminate") {
-		t.Errorf("Terminate did not emit grain.terminate log: %s", buf.String())
-	}
-}
+// Note: lifecycle logs (grain.activated / grain.passivated) are emitted by
+// the receiver middleware, not the grain body. See
+// internal/middleware/logging_test.go for those assertions.
 
 func TestGrain_ReceiveDefault_LogsUnhandled(t *testing.T) {
 	buf := captureLogs(t)

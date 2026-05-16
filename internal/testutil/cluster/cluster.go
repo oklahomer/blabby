@@ -53,6 +53,13 @@ type TB interface {
 	Fatalf(format string, args ...any)
 }
 
+// defaultRequestTimeout is the per-cluster-call timeout for tests that
+// use the simple Start constructor. Tests that exercise multiple distinct
+// grain identities in a single run may need a longer timeout because each
+// fresh identity pays an activation cost; those tests should call
+// StartWithTimeout instead.
+const defaultRequestTimeout = 2 * time.Second
+
 // Start brings up a single-member in-process cluster suitable for unit and
 // integration tests. It registers tb.Cleanup so the cluster is shut down
 // automatically when the test (or TestMain) ends.
@@ -63,6 +70,14 @@ type TB interface {
 // Start is for in-process integration tests only; do not use it in production
 // wiring.
 func Start(tb TB, kinds ...*cluster.Kind) *cluster.Cluster {
+	return StartWithTimeout(tb, defaultRequestTimeout, kinds...)
+}
+
+// StartWithTimeout is the Start variant that lets callers raise the
+// per-cluster-call request timeout above the default. Useful for tests
+// that exercise multiple fresh grain identities and therefore pay the
+// activation cost on every distinct call.
+func StartWithTimeout(tb TB, requestTimeout time.Duration, kinds ...*cluster.Kind) *cluster.Cluster {
 	tb.Helper()
 
 	autoPort, err := freeTCPPort()
@@ -79,16 +94,23 @@ func Start(tb TB, kinds ...*cluster.Kind) *cluster.Cluster {
 	)
 	lookup := disthash.New()
 
-	cfg := cluster.Configure(
+	// cluster.Config.RequestLog must remain false. The cluster's built-in
+	// RequestLog formatter logs whole proto request bodies via slog.Any,
+	// which would leak message text, bearer tokens, and other payload
+	// fields into the log stream. Protoactor defaults RequestLog to false,
+	// so the invariant is preserved by inaction here — but it is the same
+	// invariant the production wiring at cmd/server/main.go pins, and
+	// integration tests that assert the no-payload contract rely on it.
+	clusterCfg := cluster.Configure(
 		"blabby-test",
 		provider,
 		lookup,
 		remoteCfg,
 		cluster.WithKinds(kinds...),
-		cluster.WithRequestTimeout(2*time.Second),
+		cluster.WithRequestTimeout(requestTimeout),
 	)
 
-	c := cluster.New(system, cfg)
+	c := cluster.New(system, clusterCfg)
 	c.StartMember()
 
 	tb.Cleanup(func() { c.Shutdown(true) })
