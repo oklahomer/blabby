@@ -27,25 +27,6 @@ func (t AuthToken) String() string {
 	return t.value
 }
 
-var errEmptyUserID = errors.New("user id must not be empty")
-
-// UserID is the authenticated subject this connection registered under.
-type UserID struct {
-	value string
-}
-
-func NewUserID(value string) (UserID, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return UserID{}, errEmptyUserID
-	}
-	return UserID{value: value}, nil
-}
-
-func (id UserID) String() string {
-	return id.value
-}
-
 // Inbound protocol messages.
 type InboundAuth struct {
 	Token AuthToken

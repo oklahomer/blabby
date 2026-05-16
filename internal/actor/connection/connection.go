@@ -21,6 +21,7 @@ import (
 
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/ids"
 	"github.com/oklahomer/blabby/internal/middleware"
 )
 
@@ -94,7 +95,7 @@ type UserConnection struct {
 	auth       auth.Authenticator
 	userClient UserGrainCaller
 
-	userID UserID
+	userID ids.UserID
 
 	outbound chan any
 	shutdown func()
@@ -452,7 +453,7 @@ func newAuthFailed(k errorKind, message string) *AuthFailed {
 // returns the resolved UserID and a nil error. On failure it returns a nil
 // UserID and an *authRejectionError describing the rejection so the caller can
 // build the appropriate AuthFailed and transition.
-func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*UserID, error) {
+func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*ids.UserID, error) {
 	claims, err := uc.auth.ValidateToken(context.Background(), msg.Token.String())
 	if err != nil {
 		if errors.Is(err, auth.ErrTokenExpired) {
@@ -469,11 +470,7 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*User
 		)
 		return nil, &authRejectionError{Kind: errAuthInvalidToken, Message: "invalid token", Reason: "contract_violation"}
 	}
-
-	userID, err := NewUserID(claims.Subject)
-	if err != nil {
-		return nil, &authRejectionError{Kind: errAuthInvalidToken, Message: "invalid token", Reason: "empty_subject"}
-	}
+	userID := claims.UserID
 
 	if uc.userClient == nil {
 		slog.Error(eventConnectionAuthNoUserClient,

@@ -20,6 +20,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/ids"
 )
 
 // stubAuthenticator implements auth.Authenticator with caller-supplied
@@ -144,8 +145,13 @@ func writeAuthFrame(t *testing.T, c *websocket.Conn, token string) {
 	}
 }
 
-func aliceClaims() *auth.Claims { return &auth.Claims{Subject: "alice"} }
-func emptyClaims() *auth.Claims { return &auth.Claims{Subject: " "} }
+func aliceClaims() *auth.Claims {
+	uid, err := ids.NewUserID("alice")
+	if err != nil {
+		panic(err)
+	}
+	return &auth.Claims{UserID: uid}
+}
 
 // expectActorStops asserts that within d the spawned actor PID has been
 // terminated. Uses Watch + *actor.Terminated via a probe actor.
@@ -263,20 +269,6 @@ func TestAuth_ContractViolationNilClaimsYields1001(t *testing.T) {
 	got := readJSON(t, sess.client)
 	if got["code"].(float64) != 1001 {
 		t.Errorf("code: got %v, want 1001 for nil-claims", got["code"])
-	}
-	expectActorStops(t, sess.system, sess.pid, time.Second)
-}
-
-func TestAuth_EmptySubjectYields1001(t *testing.T) {
-	authStub := &stubAuthenticator{validateFn: func(_ context.Context, _ string) (*auth.Claims, error) {
-		return emptyClaims(), nil
-	}}
-	sess := startSession(t, authStub, &recordingGrainCaller{})
-	writeAuthFrame(t, sess.client, "tok")
-
-	got := readJSON(t, sess.client)
-	if got["code"].(float64) != 1001 {
-		t.Errorf("code: got %v, want 1001 for empty subject", got["code"])
 	}
 	expectActorStops(t, sess.system, sess.pid, time.Second)
 }

@@ -4,6 +4,8 @@ package auth
 import (
 	"context"
 	"time"
+
+	"github.com/oklahomer/blabby/internal/ids"
 )
 
 // Authenticator defines the contract for authentication providers.
@@ -29,17 +31,23 @@ type AuthParams struct {
 	Password string
 }
 
-// Result holds the outcome of a successful authentication.
+// Result holds the outcome of a successful authentication. UserID is the
+// parsed identifier of the authenticated user; the JWT Subject claim
+// carries the same value on the wire.
 type Result struct {
-	UserID string
+	UserID ids.UserID
 	Token  string
 }
 
-// Claims holds the standard RFC 7519 claims extracted from a validated token.
+// Claims holds the standard RFC 7519 claims extracted from a validated
+// token. UserID is the parsed JWT Subject claim — it carries the typed
+// identifier so downstream consumers cannot bypass the structural rules.
+// A structurally invalid Subject causes ValidateToken to fail with
+// ErrTokenInvalid before a Claims value is constructed.
 type Claims struct {
-	Subject   string    `json:"sub"`
-	Issuer    string    `json:"iss"`
-	Audience  []string  `json:"aud"`
-	ExpiresAt time.Time `json:"exp"`
-	IssuedAt  time.Time `json:"iat"`
+	UserID    ids.UserID
+	Issuer    string
+	Audience  []string
+	ExpiresAt time.Time
+	IssuedAt  time.Time
 }

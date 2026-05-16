@@ -9,6 +9,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/oklahomer/blabby/internal/ids"
 )
 
 const (
@@ -66,7 +68,11 @@ func NewJWTAuthenticator(signingKey []byte, store UserStore, opts ...Option) *JW
 	return a
 }
 
-// Authenticate validates credentials and returns a signed JWT.
+// Authenticate validates credentials and returns a signed JWT. The
+// store's user ID is parsed into an ids.UserID before signing — a
+// structurally invalid stored ID is a server-side data-integrity issue
+// and surfaces to the client as a generic credential failure, with the
+// underlying cause logged for operators.
 func (a *JWTAuthenticator) Authenticate(_ context.Context, params AuthParams) (*Result, error) {
 	user, err := a.store.Lookup(params.Username)
 	if err != nil {
@@ -79,9 +85,15 @@ func (a *JWTAuthenticator) Authenticate(_ context.Context, params AuthParams) (*
 		return nil, errors.New("failed to authenticate: invalid credentials")
 	}
 
+	userID, err := ids.NewUserID(user.ID)
+	if err != nil {
+		slog.Error("authentication failed", "username", params.Username, "reason", "store_user_id_invalid", "error", err)
+		return nil, errors.New("failed to authenticate: invalid credentials")
+	}
+
 	now := time.Now()
 	claims := &jwt.RegisteredClaims{
-		Subject:   user.ID,
+		Subject:   userID.String(),
 		Issuer:    Issuer,
 		Audience:  jwt.ClaimStrings{Audience},
 		ExpiresAt: jwt.NewNumericDate(now.Add(a.expiration)),
@@ -94,10 +106,10 @@ func (a *JWTAuthenticator) Authenticate(_ context.Context, params AuthParams) (*
 		return nil, fmt.Errorf("failed to sign token: %w", err)
 	}
 
-	slog.Info("authentication successful", "user_id", user.ID)
+	slog.Info("authentication successful", "user_id", userID.String())
 
 	return &Result{
-		UserID: user.ID,
+		UserID: userID,
 		Token:  tokenString,
 	}, nil
 }
@@ -108,6 +120,11 @@ func (a *JWTAuthenticator) Authenticate(_ context.Context, params AuthParams) (*
 // ErrTokenInvalid so callers can classify the failure via errors.Is without
 // importing the underlying JWT library. The underlying jwt error is preserved
 // in the chain so callers asserting on it continue to work.
+//
+// A structurally invalid Subject claim (empty, control characters, etc.)
+// is treated as an invalid token rather than a separate failure mode —
+// the JWT carried bytes that cannot identify a user, which is what
+// ErrTokenInvalid means at this boundary.
 func (a *JWTAuthenticator) ValidateToken(_ context.Context, tokenString string) (*Claims, error) {
 	if tokenString == "" {
 		return nil, fmt.Errorf("%w: empty token", ErrTokenInvalid)
@@ -131,8 +148,13 @@ func (a *JWTAuthenticator) ValidateToken(_ context.Context, tokenString string) 
 		return nil, fmt.Errorf("%w: invalid claims", ErrTokenInvalid)
 	}
 
+	userID, err := ids.NewUserID(claims.Subject)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
+	}
+
 	return &Claims{
-		Subject:   claims.Subject,
+		UserID:    userID,
 		Issuer:    claims.Issuer,
 		Audience:  claims.Audience,
 		ExpiresAt: claims.ExpiresAt.Time,

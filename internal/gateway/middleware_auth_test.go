@@ -12,7 +12,20 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/ids"
 )
+
+// mustUserID is a test helper that panics on construction failure. Used
+// to build fake Claims with valid UserIDs without inflating every table
+// row with error-handling boilerplate.
+func mustUserID(t *testing.T, raw string) ids.UserID {
+	t.Helper()
+	uid, err := ids.NewUserID(raw)
+	if err != nil {
+		t.Fatalf("mustUserID(%q): %v", raw, err)
+	}
+	return uid
+}
 
 func TestAuthMiddleware(t *testing.T) {
 	const validToken = "valid-token"
@@ -84,7 +97,7 @@ func TestAuthMiddleware(t *testing.T) {
 				if token != validToken {
 					return nil, fmt.Errorf("unexpected token passed to authenticator: %q", token)
 				}
-				return &auth.Claims{Subject: validUserID}, nil
+				return &auth.Claims{UserID: mustUserID(t, validUserID)}, nil
 			},
 			wantStatus:       http.StatusOK,
 			wantDownstream:   true,
@@ -130,28 +143,6 @@ func TestAuthMiddleware(t *testing.T) {
 			authHeader: "Bearer ok",
 			validateTokenFn: func(ctx context.Context, token string) (*auth.Claims, error) {
 				return nil, nil
-			},
-			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthInvalidToken),
-			wantDownstream: false,
-		},
-		{
-			name:       "empty subject claim returns 401 with code 1001",
-			setHeader:  true,
-			authHeader: "Bearer ok",
-			validateTokenFn: func(ctx context.Context, token string) (*auth.Claims, error) {
-				return &auth.Claims{Subject: ""}, nil
-			},
-			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthInvalidToken),
-			wantDownstream: false,
-		},
-		{
-			name:       "whitespace-only subject claim returns 401 with code 1001",
-			setHeader:  true,
-			authHeader: "Bearer ok",
-			validateTokenFn: func(ctx context.Context, token string) (*auth.Claims, error) {
-				return &auth.Claims{Subject: " \t "}, nil
 			},
 			wantStatus:     http.StatusUnauthorized,
 			wantErrorCode:  int(CodeAuthInvalidToken),
@@ -249,7 +240,7 @@ func TestAuthMiddleware_DoesNotLeakTokenToLogs(t *testing.T) {
 func TestGateway_RequireAuth_WrapsHandlerFunc(t *testing.T) {
 	g := NewGateway(&stubAuthenticator{
 		validateTokenFn: func(ctx context.Context, token string) (*auth.Claims, error) {
-			return &auth.Claims{Subject: "alice"}, nil
+			return &auth.Claims{UserID: mustUserID(t, "alice")}, nil
 		},
 	}, nil, nil)
 
