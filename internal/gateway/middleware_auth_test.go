@@ -155,7 +155,7 @@ func TestAuthMiddleware(t *testing.T) {
 			g := NewGateway(&stubAuthenticator{validateTokenFn: tt.validateTokenFn}, nil, nil)
 
 			downstreamInvoked := false
-			var capturedUserID string
+			var capturedUserID ids.UserID
 			var capturedUserOK bool
 			downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				downstreamInvoked = true
@@ -183,8 +183,8 @@ func TestAuthMiddleware(t *testing.T) {
 				if !capturedUserOK {
 					t.Errorf("expected UserIDFromContext ok=true, got false")
 				}
-				if capturedUserID != tt.wantContextUser {
-					t.Errorf("user ID in context: got %q, want %q", capturedUserID, tt.wantContextUser)
+				if capturedUserID.String() != tt.wantContextUser {
+					t.Errorf("user ID in context: got %q, want %q", capturedUserID.String(), tt.wantContextUser)
 				}
 			}
 
@@ -246,8 +246,8 @@ func TestGateway_RequireAuth_WrapsHandlerFunc(t *testing.T) {
 
 	handler := g.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		uid, ok := auth.UserIDFromContext(r.Context())
-		if !ok || uid != "alice" {
-			t.Errorf("expected alice in context, got %q ok=%v", uid, ok)
+		if !ok || uid.String() != "alice" {
+			t.Errorf("expected alice in context, got %q ok=%v", uid.String(), ok)
 		}
 		w.WriteHeader(http.StatusOK)
 	})

@@ -23,7 +23,7 @@ func serveQuery(t *testing.T, g *Gateway, pattern, path, userID string) *httptes
 		t.Fatalf("unsupported pattern: %q", pattern)
 	}
 	req := httptest.NewRequest(http.MethodGet, path, nil)
-	req = withUserContext(req, userID)
+	req = withUserContext(t, req, userID)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	return rec

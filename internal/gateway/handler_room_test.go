@@ -20,6 +20,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/ids"
 )
 
 // sentinelCluster / sentinelActorRoot return non-nil zero-value
@@ -31,11 +32,12 @@ func sentinelActorRoot() *actor.RootContext { return new(actor.RootContext) }
 
 // withUserContext returns a request with the userID injected via the
 // auth context — mimicking what authMiddleware does in production.
-func withUserContext(req *http.Request, userID string) *http.Request {
+func withUserContext(t *testing.T, req *http.Request, userID string) *http.Request {
+	t.Helper()
 	if userID == "" {
 		return req
 	}
-	return req.WithContext(auth.ContextWithUserID(req.Context(), userID))
+	return req.WithContext(auth.ContextWithUserID(req.Context(), mustUserID(t, userID)))
 }
 
 // gatewayWithFake builds a Gateway whose userGrainFor returns the given
@@ -47,7 +49,7 @@ func gatewayWithFake(fake userGrainCaller) *Gateway {
 		auth:      &stubAuthenticator{},
 		cluster:   sentinelCluster(),
 		actorRoot: sentinelActorRoot(),
-		userGrain: func(string) userGrainCaller { return fake },
+		userGrain: func(ids.UserID) userGrainCaller { return fake },
 	}
 }
 
@@ -75,7 +77,7 @@ func servePath(t *testing.T, g *Gateway, method, pattern, path, body, contentTyp
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	req = withUserContext(req, userID)
+	req = withUserContext(t, req, userID)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	return rec
@@ -213,7 +215,7 @@ func TestHandleRoomJoin(t *testing.T) {
 		},
 		{
 			name:       "overlong room_id → 400 + 4001",
-			path:       "/rooms/" + strings.Repeat("a", maxRoomIDBytes+1) + "/join",
+			path:       "/rooms/" + strings.Repeat("a", ids.MaxIdentifierBytes+1) + "/join",
 			userID:     okUser,
 			stubResp:   &userpb.JoinRoomResponse{},
 			wantStatus: http.StatusBadRequest,
@@ -523,7 +525,7 @@ func TestHandleRoomSendMessage_LoggingNFR1(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/rooms/general/messages", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+bearerToken) // defense in depth
-		req = withUserContext(req, "alice")
+		req = withUserContext(t, req, "alice")
 
 		mux := http.NewServeMux()
 		mux.HandleFunc("POST /rooms/{id}/messages", g.handleRoomSendMessage)

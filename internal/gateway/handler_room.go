@@ -8,17 +8,16 @@ import (
 	"mime"
 	"net/http"
 	"strings"
-	"unicode"
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/ids"
 )
 
 const (
 	maxRoomMessageBodyBytes = 8 * 1024 // 8 KiB request body cap
 	maxRoomMessageTextBytes = 4 * 1024 // 4 KiB text cap
-	maxRoomIDBytes          = 256      // path-id sanity cap
 )
 
 // Endpoint labels double as both the mux pattern in RegisterRoutes and
@@ -56,8 +55,9 @@ type sendMessageSuccessResponse struct {
 //
 // Note: Go 1.22+ mux dispatches POST /rooms//join to the catch-all "/"
 // pattern (handleNotFound), so the empty-segment case never reaches this
-// handler. The TrimSpace guard inside validateRoomID covers URL-encoded
-// whitespace (e.g. POST /rooms/%20/join), which the mux does match.
+// handler. The trim and structural checks inside ids.NewRoomID cover
+// URL-encoded whitespace (e.g. POST /rooms/%20/join), which the mux
+// does match.
 func (g *Gateway) handleRoomJoin(w http.ResponseWriter, r *http.Request) {
 	userID, ok := authenticatedUserID(w, r, endpointRoomJoin)
 	if !ok {
@@ -68,7 +68,7 @@ func (g *Gateway) handleRoomJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logRoomEntry(endpointRoomJoin, r.Method, userID, roomID)
-	resp, err := g.userGrainFor(userID).JoinRoom(&userpb.JoinRoomRequest{RoomId: roomID})
+	resp, err := g.userGrainFor(userID).JoinRoom(&userpb.JoinRoomRequest{RoomId: roomID.String()})
 	if err != nil {
 		logRoomTransportError(endpointRoomJoin, r.Method, userID, roomID)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
@@ -93,7 +93,7 @@ func (g *Gateway) handleRoomLeave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logRoomEntry(endpointRoomLeave, r.Method, userID, roomID)
-	resp, err := g.userGrainFor(userID).LeaveRoom(&userpb.LeaveRoomRequest{RoomId: roomID})
+	resp, err := g.userGrainFor(userID).LeaveRoom(&userpb.LeaveRoomRequest{RoomId: roomID.String()})
 	if err != nil {
 		logRoomTransportError(endpointRoomLeave, r.Method, userID, roomID)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
@@ -135,7 +135,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 		"user_id", userID, "room_id", roomID, "text_len", len(req.Text))
 
 	resp, err := g.userGrainFor(userID).SendMessage(&userpb.SendMessageRequest{
-		RoomId: roomID, Text: req.Text,
+		RoomId: roomID.String(), Text: req.Text,
 	})
 	if err != nil {
 		slog.Warn("room handler transport error",
@@ -174,46 +174,31 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 // authMiddleware has populated. Behind the middleware the boolean is
 // always true; the defensive 5001 path covers tests that invoke the
 // handler directly without the middleware.
-func authenticatedUserID(w http.ResponseWriter, r *http.Request, endpoint string) (string, bool) {
+func authenticatedUserID(w http.ResponseWriter, r *http.Request, endpoint string) (ids.UserID, bool) {
 	userID, ok := auth.UserIDFromContext(r.Context())
-	if !ok || strings.TrimSpace(userID) == "" {
+	if !ok {
 		slog.Error("auth context missing on protected route",
 			"endpoint", endpoint, "method", r.Method)
 		WriteErrorResponse(w, http.StatusInternalServerError,
 			ErrInternalError("authentication context unavailable"))
-		return "", false
+		return ids.UserID{}, false
 	}
 	return userID, true
 }
 
-// requireRoomID extracts and validates {id} from the request path.
-func requireRoomID(w http.ResponseWriter, r *http.Request, endpoint, userID string) (string, bool) {
-	roomID, ok := validateRoomID(r.PathValue("id"))
-	if !ok {
+// requireRoomID extracts and parses {id} from the request path. The
+// structural rules (length cap, control chars, slash, etc.) live on
+// ids.NewRoomID and apply uniformly across every consumer.
+func requireRoomID(w http.ResponseWriter, r *http.Request, endpoint string, userID ids.UserID) (ids.RoomID, bool) {
+	roomID, err := ids.NewRoomID(r.PathValue("id"))
+	if err != nil {
 		slog.Warn("room handler rejected request",
 			"endpoint", endpoint, "method", r.Method,
 			"user_id", userID, "reason", "invalid_room_id")
 		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("room_id is required"))
-		return "", false
+		return ids.RoomID{}, false
 	}
 	return roomID, true
-}
-
-// validateRoomID trims the raw path value, length-caps it, and rejects
-// control bytes and Unicode whitespace inside the id. Room IDs are
-// application-level identifiers; the strict rule keeps routing
-// predictable.
-func validateRoomID(raw string) (string, bool) {
-	id := strings.TrimSpace(raw)
-	if id == "" || len(id) > maxRoomIDBytes {
-		return "", false
-	}
-	for _, r := range id {
-		if r < 0x20 || r == 0x7F || unicode.IsSpace(r) {
-			return "", false
-		}
-	}
-	return id, true
 }
 
 // roomBodyError carries both the user-facing gateway ErrorDetail and a
@@ -313,7 +298,7 @@ func writeJSON(w http.ResponseWriter, httpStatus int, v any) {
 //
 // Callers MUST pass a non-nil pe; every call site already checks
 // `resp.GetError() != nil` before invoking this helper.
-func writeBusinessErrorResponse(w http.ResponseWriter, endpoint, method, userID, roomID string, pe *commonpb.ErrorDetail) {
+func writeBusinessErrorResponse(w http.ResponseWriter, endpoint, method string, userID ids.UserID, roomID ids.RoomID, pe *commonpb.ErrorDetail) {
 	ed := ErrorDetail{
 		Code:    int(pe.GetCode()),
 		Status:  pe.GetStatus(),
@@ -326,20 +311,20 @@ func writeBusinessErrorResponse(w http.ResponseWriter, endpoint, method, userID,
 	WriteErrorResponse(w, ErrorCode(ed.Code).HTTPStatus(), ed)
 }
 
-func logRoomEntry(endpoint, method, userID, roomID string) {
+func logRoomEntry(endpoint, method string, userID ids.UserID, roomID ids.RoomID) {
 	slog.Info("room handler enter",
 		"endpoint", endpoint, "method", method,
 		"user_id", userID, "room_id", roomID)
 }
 
-func logRoomExit(endpoint, method, userID, roomID, outcome string, code int) {
+func logRoomExit(endpoint, method string, userID ids.UserID, roomID ids.RoomID, outcome string, code int) {
 	slog.Info("room handler exit",
 		"endpoint", endpoint, "method", method,
 		"user_id", userID, "room_id", roomID,
 		"outcome", outcome, "code", code)
 }
 
-func logRoomTransportError(endpoint, method, userID, roomID string) {
+func logRoomTransportError(endpoint, method string, userID ids.UserID, roomID ids.RoomID) {
 	slog.Warn("room handler transport error",
 		"endpoint", endpoint, "method", method,
 		"user_id", userID, "room_id", roomID,

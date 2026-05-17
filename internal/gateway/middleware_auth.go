@@ -80,7 +80,7 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := auth.ContextWithUserID(r.Context(), claims.UserID.String())
+		ctx := auth.ContextWithUserID(r.Context(), claims.UserID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

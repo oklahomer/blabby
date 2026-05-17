@@ -1,6 +1,9 @@
 package ids
 
-import "fmt"
+import (
+	"fmt"
+	"log/slog"
+)
 
 // UserID identifies an authenticated user across the system. Its value
 // is opaque to consumers; only [UserID.String] exposes the underlying
@@ -27,3 +30,10 @@ func NewUserID(raw string) (UserID, error) {
 // String returns the underlying identifier string. The empty string is
 // returned only for the zero value.
 func (id UserID) String() string { return id.value }
+
+// LogValue implements slog.LogValuer so log handlers (including the
+// JSON handler this project uses) render the identifier as its string
+// form without callers having to litter call sites with .String().
+// encoding/json does not honor fmt.Stringer; LogValuer is the slog-
+// specific bridge that does.
+func (id UserID) LogValue() slog.Value { return slog.StringValue(id.value) }

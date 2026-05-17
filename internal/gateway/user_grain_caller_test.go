@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/ids"
 )
 
 // Compile-time assertion: the per-user adapter satisfies the
@@ -72,19 +73,19 @@ func TestUserGrainFor_FallsThroughToClusterAdapter_WhenSeamUnset(t *testing.T) {
 			t.Errorf("expected nil-cluster panic from GetUserGrainGrainClient, got %v", r)
 		}
 	}()
-	g.userGrainFor("user-1")
+	g.userGrainFor(mustUserID(t, "user-1"))
 }
 
 func TestUserGrainFor_UsesTestSeamWhenSet(t *testing.T) {
 	fake := &fakeUserGrainCaller{joinErr: errors.New("boom")}
-	g := &Gateway{userGrain: func(userID string) userGrainCaller {
-		if userID != "user-1" {
-			t.Fatalf("userGrainFor passed unexpected userID: got %q, want %q", userID, "user-1")
+	g := &Gateway{userGrain: func(userID ids.UserID) userGrainCaller {
+		if userID.String() != "user-1" {
+			t.Fatalf("userGrainFor passed unexpected userID: got %q, want %q", userID.String(), "user-1")
 		}
 		return fake
 	}}
 
-	got := g.userGrainFor("user-1")
+	got := g.userGrainFor(mustUserID(t, "user-1"))
 	if got != fake {
 		t.Fatalf("userGrainFor: got %v, want injected fake %v", got, fake)
 	}
