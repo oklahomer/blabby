@@ -19,8 +19,20 @@ import (
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/grain/user"
+	"github.com/oklahomer/blabby/internal/ids"
 	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
 )
+
+// mustRoomID is a test helper that constructs a typed ids.RoomID, failing
+// the test on any structural error.
+func mustRoomID(t *testing.T, raw string) ids.RoomID {
+	t.Helper()
+	r, err := ids.NewRoomID(raw)
+	if err != nil {
+		t.Fatalf("mustRoomID(%q): %v", raw, err)
+	}
+	return r
+}
 
 // fakeRoomClient is a recording roomClient. Each method records its inputs
 // for assertion and returns the response/error configured by the test.
@@ -30,9 +42,9 @@ type fakeRoomClient struct {
 	joinCalls    []joinCall
 	leaveCalls   []leaveCall
 	postCalls    []postCall
-	joinFn       func(roomID string, req *roompb.JoinRequest) (*roompb.JoinResponse, error)
-	leaveFn      func(roomID string, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error)
-	postFn       func(roomID string, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error)
+	joinFn       func(roomID ids.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error)
+	leaveFn      func(roomID ids.RoomID, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error)
+	postFn       func(roomID ids.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error)
 	defaultJoin  *roompb.JoinResponse
 	defaultLeave *roompb.LeaveResponse
 	defaultPost  *roompb.PostMessageResponse
@@ -52,9 +64,9 @@ type postCall struct {
 	Text   string
 }
 
-func (f *fakeRoomClient) Join(roomID string, req *roompb.JoinRequest) (*roompb.JoinResponse, error) {
+func (f *fakeRoomClient) Join(roomID ids.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error) {
 	f.mu.Lock()
-	f.joinCalls = append(f.joinCalls, joinCall{RoomID: roomID, UserID: req.GetUserId()})
+	f.joinCalls = append(f.joinCalls, joinCall{RoomID: roomID.String(), UserID: req.GetUserId()})
 	fn := f.joinFn
 	def := f.defaultJoin
 	f.mu.Unlock()
@@ -67,9 +79,9 @@ func (f *fakeRoomClient) Join(roomID string, req *roompb.JoinRequest) (*roompb.J
 	return &roompb.JoinResponse{}, nil
 }
 
-func (f *fakeRoomClient) Leave(roomID string, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error) {
+func (f *fakeRoomClient) Leave(roomID ids.RoomID, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error) {
 	f.mu.Lock()
-	f.leaveCalls = append(f.leaveCalls, leaveCall{RoomID: roomID, UserID: req.GetUserId()})
+	f.leaveCalls = append(f.leaveCalls, leaveCall{RoomID: roomID.String(), UserID: req.GetUserId()})
 	fn := f.leaveFn
 	def := f.defaultLeave
 	f.mu.Unlock()
@@ -82,9 +94,9 @@ func (f *fakeRoomClient) Leave(roomID string, req *roompb.LeaveRequest) (*roompb
 	return &roompb.LeaveResponse{}, nil
 }
 
-func (f *fakeRoomClient) PostMessage(roomID string, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error) {
+func (f *fakeRoomClient) PostMessage(roomID ids.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error) {
 	f.mu.Lock()
-	f.postCalls = append(f.postCalls, postCall{RoomID: roomID, UserID: req.GetUserId(), Text: req.GetText()})
+	f.postCalls = append(f.postCalls, postCall{RoomID: roomID.String(), UserID: req.GetUserId(), Text: req.GetText()})
 	fn := f.postFn
 	def := f.defaultPost
 	f.mu.Unlock()
@@ -306,7 +318,7 @@ func TestGrain_JoinRoom(t *testing.T) {
 		if resp.GetError() != nil {
 			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
-		if got := h.g.JoinedRooms(); !reflect.DeepEqual(got, []string{"general"}) {
+		if got := h.g.JoinedRooms(); !reflect.DeepEqual(got, []ids.RoomID{mustRoomID(t, "general")}) {
 			t.Errorf("JoinedRooms: got %v, want [general]", got)
 		}
 		if len(h.rooms.joinCalls) != 1 || h.rooms.joinCalls[0] != (joinCall{RoomID: "general", UserID: "alice"}) {
@@ -345,7 +357,7 @@ func TestGrain_JoinRoom(t *testing.T) {
 
 	t.Run("transport error becomes 5001", func(t *testing.T) {
 		h := newGrain(t)
-		h.rooms.joinFn = func(string, *roompb.JoinRequest) (*roompb.JoinResponse, error) {
+		h.rooms.joinFn = func(ids.RoomID, *roompb.JoinRequest) (*roompb.JoinResponse, error) {
 			return nil, errors.New("dial timeout")
 		}
 
@@ -411,7 +423,7 @@ func TestGrain_LeaveRoom(t *testing.T) {
 
 	t.Run("transport error becomes 5001", func(t *testing.T) {
 		h := newGrain(t)
-		h.rooms.leaveFn = func(string, *roompb.LeaveRequest) (*roompb.LeaveResponse, error) {
+		h.rooms.leaveFn = func(ids.RoomID, *roompb.LeaveRequest) (*roompb.LeaveResponse, error) {
 			return nil, errors.New("dial timeout")
 		}
 
@@ -488,7 +500,7 @@ func TestGrain_SendMessage(t *testing.T) {
 
 	t.Run("transport error becomes 5001", func(t *testing.T) {
 		h := newGrain(t)
-		h.rooms.postFn = func(string, *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error) {
+		h.rooms.postFn = func(ids.RoomID, *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error) {
 			return nil, errors.New("dial timeout")
 		}
 
