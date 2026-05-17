@@ -20,7 +20,7 @@ A related question that *isn't* the problem here, but worth naming so the decisi
 
 ## Decision
 
-**Introduce a small `internal/ids` package containing two value-object types — `UserID` and `RoomID` — that share a uniform structural rule set, are distinct at the Go type level, and are parsed exactly once at each boundary where their underlying strings enter the system.**
+**Introduce a small `internal/id` package containing two value-object types — `UserID` and `RoomID` — that share a uniform structural rule set, are distinct at the Go type level, and are parsed exactly once at each boundary where their underlying strings enter the system.**
 
 Concretely:
 
@@ -52,11 +52,11 @@ Concretely:
 - The two types are structurally identical but compile-distinct. A function expecting `UserID` rejects `RoomID` at compile time, and vice versa. Map keys, struct fields, and function parameters all carry the typing through to internal state.
 - Inside the system, raw `string` for an identifier appears only at four boundaries:
   1. **JWT verification.** `auth.Authenticator.ValidateToken` parses the JWT subject claim into `UserID` and returns it on `Claims.UserID`. A structurally invalid subject yields `ErrTokenInvalid` — the JWT itself is treated as malformed.
-  2. **HTTP auth middleware.** `gateway.authMiddleware` receives the already-typed `Claims.UserID` and places it in the request context via `auth.ContextWithUserID(ctx, ids.UserID)`. `UserIDFromContext` returns the typed value.
+  2. **HTTP auth middleware.** `gateway.authMiddleware` receives the already-typed `Claims.UserID` and places it in the request context via `auth.ContextWithUserID(ctx, id.UserID)`. `UserIDFromContext` returns the typed value.
   3. **HTTP path extraction.** Gateway handlers parse `r.PathValue("id")` into `RoomID`. Failure is `4001 INVALID_REQUEST`.
   4. **Grain handler entry.** Each grain handler parses incoming proto string fields (`req.GetUserId()`, `req.GetRoomId()`) into typed values at the top of the function. The grain re-validates because its contract is "any caller within the cluster," not "only the gateway." Failure is the existing `INVALID_REQUEST` business error.
 - Proto wire types remain `string`. Crossing the cluster boundary on the way out, typed values are converted via `.String()`. The wire format is not part of this decision; the type discipline is purely an in-process concern.
-- Internal state holds typed values. The User grain's joined-rooms set becomes `map[ids.RoomID]struct{}`; the Room grain's member set becomes `map[ids.UserID]struct{}`. Cross-keying becomes a compile error.
+- Internal state holds typed values. The User grain's joined-rooms set becomes `map[id.RoomID]struct{}`; the Room grain's member set becomes `map[id.UserID]struct{}`. Cross-keying becomes a compile error.
 - The types prove only their structural invariants. They do *not* claim that a user or a room exists, that the caller is authorized, or that the identifier matches any external taxonomy. Deeper rules (membership, authorization, existence) belong to the grains and handlers that own them, not to the value object.
 
 ## Consequences
@@ -67,7 +67,7 @@ Concretely:
 - **One canonical rule set.** Tightening or extending the rules touches one file. The Go 1.22+ `%2F` exposure closes here, not at every handler.
 - **Validation lives at boundaries, not at every internal call.** Once a function parameter is `UserID`, no callee re-validates. The "Parse, don't validate" pattern is enforced by the type system.
 - **Logs gain typed cause classification.** A rejected request logs `reason=identifier_too_long` instead of a generic `invalid_request` collapse, without changing the on-wire error code.
-- **Future entity types slot in without rename.** When `Room` (storage-backed entity) lands, it sits alongside `RoomID` (reference). The two are unambiguously distinct concepts and never collide on name. The package layout in `internal/ids` is reserved for identifiers, not entities — entities will own their own packages when they have a real consumer.
+- **Future entity types slot in without rename.** When `Room` (storage-backed entity) lands, it sits alongside `RoomID` (reference). The two are unambiguously distinct concepts and never collide on name. The package layout in `internal/id` is reserved for identifiers, not entities — entities will own their own packages when they have a real consumer.
 
 ### Negative
 
@@ -80,7 +80,7 @@ Concretely:
 - **No effect on the cluster wire format.** Proto fields stay `string`; the cluster client signature is unchanged. The type discipline is a pure in-process property.
 - **No effect on the error taxonomy.** All structural failures continue to map to `4001 INVALID_REQUEST` on the wire. The typed errors are for log clarity, not for clients.
 - **No effect on the cluster identity binding.** `cluster.GetUserGrainGrainClient(c, userID.String())` continues to use a string identity; the typed value's `.String()` is the only conversion needed.
-- **`internal/ids` imports `log/slog`.** A non-trivial choice for a value-object package, but slog is part of the standard library and `LogValuer` is the idiomatic way for a custom type to participate in structured logging. The import is one-way; nothing in `log/slog` depends back on `internal/ids`.
+- **`internal/id` imports `log/slog`.** A non-trivial choice for a value-object package, but slog is part of the standard library and `LogValuer` is the idiomatic way for a custom type to participate in structured logging. The import is one-way; nothing in `log/slog` depends back on `internal/id`.
 
 ## Alternatives considered
 
@@ -94,7 +94,7 @@ Rejected because this is the same duplication pattern the error-code constants a
 
 Use a generic value object parameterised by a phantom tag (`type Identifier[T any] struct{ value string }`; `type UserID = Identifier[userTag]`). Identical underlying mechanism, fewer file-level types.
 
-Rejected as too clever for this codebase. Reading `ids.NewUserID(raw)` is immediate; reading `ids.NewIdentifier[ids.UserTag](raw)` requires unpacking the generic. The shared-parser-plus-two-types approach achieves the same compile-time distinction with substantially better local readability.
+Rejected as too clever for this codebase. Reading `id.NewUserID(raw)` is immediate; reading `id.NewIdentifier[id.UserTag](raw)` requires unpacking the generic. The shared-parser-plus-two-types approach achieves the same compile-time distinction with substantially better local readability.
 
 ### Proto-typed wire identifiers (`message UserId { string value = 1; }`)
 
@@ -130,7 +130,7 @@ Rejected as premature. There is no persistence layer, no storage-backed shape, a
 
 This ADR governs the representation of `user_id` and `room_id` across the codebase. It does **not** govern:
 
-- **Storage-backed entities.** A future `Room` or `User` type with persistence-derived fields is out of scope; this ADR reserves the `internal/ids` package for identifiers only.
+- **Storage-backed entities.** A future `Room` or `User` type with persistence-derived fields is out of scope; this ADR reserves the `internal/id` package for identifiers only.
 - **Cluster identity strings.** `cluster.GetUserGrainGrainClient(c, identity)` takes a `string` identity opaque to the cluster. The gateway converts `UserID` → `string` at this seam; the grain receives it via `ctx.Identity()` as a `string`. Whether `ctx.Identity()` should be re-parsed inside the grain is left to a future decision when a concrete reason to enforce it arises.
 - **Other domain-significant strings.** Authentication tokens, message text, and similar values are not covered. `connection.AuthToken` already exists with its own value-object discipline and is unaffected.
 

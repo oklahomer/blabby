@@ -5,7 +5,7 @@ import (
 
 	"github.com/asynkron/protoactor-go/actor"
 
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // userState holds a single User grain's in-memory state. It is mutated
@@ -13,14 +13,14 @@ import (
 // project's global immutability rule does not apply here.
 type userState struct {
 	connections map[string]*actor.PID
-	joinedRooms map[ids.RoomID]struct{}
+	joinedRooms map[id.RoomID]struct{}
 }
 
 // newUserState builds an empty userState. The Grain calls this from Init.
 func newUserState() userState {
 	return userState{
 		connections: map[string]*actor.PID{},
-		joinedRooms: map[ids.RoomID]struct{}{},
+		joinedRooms: map[id.RoomID]struct{}{},
 	}
 }
 
@@ -67,20 +67,20 @@ func (s *userState) connectionPIDs() []*actor.PID {
 }
 
 // joinRoom records roomID in the joined set. No-op if already present.
-func (s *userState) joinRoom(roomID ids.RoomID) {
+func (s *userState) joinRoom(roomID id.RoomID) {
 	s.joinedRooms[roomID] = struct{}{}
 }
 
 // leaveRoom drops roomID from the joined set. No-op if absent.
-func (s *userState) leaveRoom(roomID ids.RoomID) {
+func (s *userState) leaveRoom(roomID id.RoomID) {
 	delete(s.joinedRooms, roomID)
 }
 
 // joinedRoomIDs returns a sorted snapshot of the joined-rooms set.
-func (s *userState) joinedRoomIDs() []ids.RoomID {
-	out := make([]ids.RoomID, 0, len(s.joinedRooms))
-	for id := range s.joinedRooms {
-		out = append(out, id)
+func (s *userState) joinedRoomIDs() []id.RoomID {
+	out := make([]id.RoomID, 0, len(s.joinedRooms))
+	for roomID := range s.joinedRooms {
+		out = append(out, roomID)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
 	return out

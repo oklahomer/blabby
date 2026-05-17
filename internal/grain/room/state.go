@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // maxRecentMessages bounds the in-memory ring buffer of recent messages
@@ -18,7 +18,7 @@ const maxRecentMessages = 100
 // wire format (architecture.md timestamp rule) happens at the proto
 // boundary in events.go and in PostMessage's response.
 type chatMessage struct {
-	senderID  ids.UserID
+	senderID  id.UserID
 	text      string
 	timestamp time.Time
 }
@@ -28,7 +28,7 @@ type chatMessage struct {
 // global immutability rule does not apply to grain state (architecture.md
 // "Grain State Management").
 type roomState struct {
-	members           map[ids.UserID]struct{}
+	members           map[id.UserID]struct{}
 	recentMessages    []chatMessage
 	maxRecentMessages int
 }
@@ -37,14 +37,14 @@ type roomState struct {
 // bound. The caller (the Grain) is responsible for invoking this from Init.
 func newRoomState() roomState {
 	return roomState{
-		members:           map[ids.UserID]struct{}{},
+		members:           map[id.UserID]struct{}{},
 		maxRecentMessages: maxRecentMessages,
 	}
 }
 
 // addMember records userID as a member of the room. Returns false if the
 // user was already a member; in that case the state is unchanged.
-func (s *roomState) addMember(userID ids.UserID) bool {
+func (s *roomState) addMember(userID id.UserID) bool {
 	if _, ok := s.members[userID]; ok {
 		return false
 	}
@@ -54,7 +54,7 @@ func (s *roomState) addMember(userID ids.UserID) bool {
 
 // removeMember erases userID from the member set. Returns false if the user
 // was not a member; in that case the state is unchanged.
-func (s *roomState) removeMember(userID ids.UserID) bool {
+func (s *roomState) removeMember(userID id.UserID) bool {
 	if _, ok := s.members[userID]; !ok {
 		return false
 	}
@@ -63,7 +63,7 @@ func (s *roomState) removeMember(userID ids.UserID) bool {
 }
 
 // isMember reports whether userID is currently a member of the room.
-func (s *roomState) isMember(userID ids.UserID) bool {
+func (s *roomState) isMember(userID id.UserID) bool {
 	_, ok := s.members[userID]
 	return ok
 }
@@ -90,10 +90,10 @@ func (s *roomState) recordMessage(msg chatMessage) {
 // of the current member set. Sorting yields deterministic fan-out order in
 // tests and across nodes; allocating prevents iteration-during-mutation
 // bugs when a fan-out loop also mutates the member set.
-func (s *roomState) memberIDs() []ids.UserID {
-	out := make([]ids.UserID, 0, len(s.members))
-	for id := range s.members {
-		out = append(out, id)
+func (s *roomState) memberIDs() []id.UserID {
+	out := make([]id.UserID, 0, len(s.members))
+	for userID := range s.members {
+		out = append(out, userID)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
 	return out

@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	userpb "github.com/oklahomer/blabby/gen/user"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // roomDescriptor is the on-the-wire shape of one entry in the room list.
@@ -39,8 +39,8 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	logRoomEntry(endpointRoomList, r.Method, userID, ids.RoomID{})
-	logRoomExit(endpointRoomList, r.Method, userID, ids.RoomID{}, outcomeOK, 0)
+	logRoomEntry(endpointRoomList, r.Method, userID, id.RoomID{})
+	logRoomExit(endpointRoomList, r.Method, userID, id.RoomID{}, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, roomListResponse{Rooms: defaultRooms})
 }
 
@@ -54,7 +54,7 @@ func (g *Gateway) handleRoomJoined(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logRoomEntry(endpointRoomJoined, r.Method, userID, ids.RoomID{})
+	logRoomEntry(endpointRoomJoined, r.Method, userID, id.RoomID{})
 	resp, err := g.userGrainFor(userID).GetJoinedRooms(&userpb.GetJoinedRoomsRequest{})
 	if err != nil {
 		slog.Warn("room handler transport error",
@@ -68,6 +68,6 @@ func (g *Gateway) handleRoomJoined(w http.ResponseWriter, r *http.Request) {
 	// message's internal storage. Also normalises a nil proto slice to
 	// an empty JSON array rather than `null`.
 	roomIDs := append([]string{}, resp.GetRoomIds()...)
-	logRoomExit(endpointRoomJoined, r.Method, userID, ids.RoomID{}, outcomeOK, 0)
+	logRoomExit(endpointRoomJoined, r.Method, userID, id.RoomID{}, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, joinedRoomsResponse{RoomIDs: roomIDs})
 }

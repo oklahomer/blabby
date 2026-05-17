@@ -12,15 +12,15 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/internal/auth"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // mustUserID is a test helper that panics on construction failure. Used
 // to build fake Claims with valid UserIDs without inflating every table
 // row with error-handling boilerplate.
-func mustUserID(t *testing.T, raw string) ids.UserID {
+func mustUserID(t *testing.T, raw string) id.UserID {
 	t.Helper()
-	uid, err := ids.NewUserID(raw)
+	uid, err := id.NewUserID(raw)
 	if err != nil {
 		t.Fatalf("mustUserID(%q): %v", raw, err)
 	}
@@ -155,7 +155,7 @@ func TestAuthMiddleware(t *testing.T) {
 			g := NewGateway(&stubAuthenticator{validateTokenFn: tt.validateTokenFn}, nil, nil)
 
 			downstreamInvoked := false
-			var capturedUserID ids.UserID
+			var capturedUserID id.UserID
 			var capturedUserOK bool
 			downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				downstreamInvoked = true

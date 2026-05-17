@@ -12,16 +12,16 @@ import (
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/grain/room"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
 )
 
-// mustUserID is a test helper that constructs a typed ids.UserID, failing
+// mustUserID is a test helper that constructs a typed id.UserID, failing
 // the test on any structural error. Used to keep table-driven cases
 // readable without sprinkling NewUserID calls everywhere.
-func mustUserID(t *testing.T, raw string) ids.UserID {
+func mustUserID(t *testing.T, raw string) id.UserID {
 	t.Helper()
-	u, err := ids.NewUserID(raw)
+	u, err := id.NewUserID(raw)
 	if err != nil {
 		t.Fatalf("mustUserID(%q): %v", raw, err)
 	}
@@ -51,7 +51,7 @@ type forwardCall struct {
 	Timestamp time.Time
 }
 
-func (f *fakeNotifier) NotifyRoomEvent(userID ids.UserID, req *userpb.NotifyRoomEventRequest) error {
+func (f *fakeNotifier) NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomEventRequest) error {
 	f.notifyCalls = append(f.notifyCalls, notifyCall{
 		UserID:    userID.String(),
 		RoomID:    req.GetRoomId(),
@@ -64,7 +64,7 @@ func (f *fakeNotifier) NotifyRoomEvent(userID ids.UserID, req *userpb.NotifyRoom
 	return nil
 }
 
-func (f *fakeNotifier) ForwardMessage(userID ids.UserID, req *userpb.ForwardMessageRequest) error {
+func (f *fakeNotifier) ForwardMessage(userID id.UserID, req *userpb.ForwardMessageRequest) error {
 	f.forwardCalls = append(f.forwardCalls, forwardCall{
 		UserID:    userID.String(),
 		RoomID:    req.GetRoomId(),
@@ -108,7 +108,7 @@ func TestGrain_Join(t *testing.T) {
 			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
 
-		if got := g.Members(); !reflect.DeepEqual(got, []ids.UserID{mustUserID(t, "alice")}) {
+		if got := g.Members(); !reflect.DeepEqual(got, []id.UserID{mustUserID(t, "alice")}) {
 			t.Errorf("Members: got %v, want [alice]", got)
 		}
 		if len(notifier.notifyCalls) != 1 {
@@ -184,7 +184,7 @@ func TestGrain_Join(t *testing.T) {
 		if len(notifier.notifyCalls) != 0 {
 			t.Errorf("notifyCalls: got %d, want 0", len(notifier.notifyCalls))
 		}
-		if got := g.Members(); !reflect.DeepEqual(got, []ids.UserID{mustUserID(t, "alice")}) {
+		if got := g.Members(); !reflect.DeepEqual(got, []id.UserID{mustUserID(t, "alice")}) {
 			t.Errorf("Members: got %v, want [alice]", got)
 		}
 	})
@@ -205,7 +205,7 @@ func TestGrain_Leave(t *testing.T) {
 			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
 
-		if got := g.Members(); !reflect.DeepEqual(got, []ids.UserID{mustUserID(t, "bob")}) {
+		if got := g.Members(); !reflect.DeepEqual(got, []id.UserID{mustUserID(t, "bob")}) {
 			t.Errorf("Members: got %v, want [bob]", got)
 		}
 		if len(notifier.notifyCalls) != 2 {

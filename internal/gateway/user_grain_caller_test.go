@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	userpb "github.com/oklahomer/blabby/gen/user"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // Compile-time assertion: the per-user adapter satisfies the
@@ -78,7 +78,7 @@ func TestUserGrainFor_FallsThroughToClusterAdapter_WhenSeamUnset(t *testing.T) {
 
 func TestUserGrainFor_UsesTestSeamWhenSet(t *testing.T) {
 	fake := &fakeUserGrainCaller{joinErr: errors.New("boom")}
-	g := &Gateway{userGrain: func(userID ids.UserID) userGrainCaller {
+	g := &Gateway{userGrain: func(userID id.UserID) userGrainCaller {
 		if userID.String() != "user-1" {
 			t.Fatalf("userGrainFor passed unexpected userID: got %q, want %q", userID.String(), "user-1")
 		}

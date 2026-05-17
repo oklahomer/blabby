@@ -6,12 +6,12 @@ import (
 
 	"github.com/asynkron/protoactor-go/actor"
 
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
-func mustRoomID(t *testing.T, raw string) ids.RoomID {
+func mustRoomID(t *testing.T, raw string) id.RoomID {
 	t.Helper()
-	r, err := ids.NewRoomID(raw)
+	r, err := id.NewRoomID(raw)
 	if err != nil {
 		t.Fatalf("mustRoomID(%q): %v", raw, err)
 	}
@@ -144,7 +144,7 @@ func TestUserState_JoinedRooms(t *testing.T) {
 		s.joinRoom(mustRoomID(t, "mike"))
 
 		got := s.joinedRoomIDs()
-		want := []ids.RoomID{mustRoomID(t, "alpha"), mustRoomID(t, "mike"), mustRoomID(t, "zulu")}
+		want := []id.RoomID{mustRoomID(t, "alpha"), mustRoomID(t, "mike"), mustRoomID(t, "zulu")}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("joinedRoomIDs: got %v, want %v", got, want)
 		}
@@ -156,7 +156,7 @@ func TestUserState_JoinedRooms(t *testing.T) {
 		s.joinRoom(mustRoomID(t, "general"))
 
 		got := s.joinedRoomIDs()
-		want := []ids.RoomID{mustRoomID(t, "general")}
+		want := []id.RoomID{mustRoomID(t, "general")}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("joinedRoomIDs: got %v, want %v", got, want)
 		}
@@ -169,7 +169,7 @@ func TestUserState_JoinedRooms(t *testing.T) {
 		s.leaveRoom(mustRoomID(t, "general"))
 
 		got := s.joinedRoomIDs()
-		want := []ids.RoomID{mustRoomID(t, "random")}
+		want := []id.RoomID{mustRoomID(t, "random")}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("joinedRoomIDs: got %v, want %v", got, want)
 		}
@@ -181,7 +181,7 @@ func TestUserState_JoinedRooms(t *testing.T) {
 		s.leaveRoom(mustRoomID(t, "missing"))
 
 		got := s.joinedRoomIDs()
-		want := []ids.RoomID{mustRoomID(t, "general")}
+		want := []id.RoomID{mustRoomID(t, "general")}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("joinedRoomIDs: got %v, want %v", got, want)
 		}

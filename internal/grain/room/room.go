@@ -24,7 +24,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/middleware"
 )
 
@@ -74,8 +74,8 @@ const passivationTimeout = 5 * time.Minute
 // userNotifier abstracts the User grain client surface used for fan-out so
 // the Room grain can be unit-tested without a real cluster.
 type userNotifier interface {
-	NotifyRoomEvent(userID ids.UserID, req *userpb.NotifyRoomEventRequest) error
-	ForwardMessage(userID ids.UserID, req *userpb.ForwardMessageRequest) error
+	NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomEventRequest) error
+	ForwardMessage(userID id.UserID, req *userpb.ForwardMessageRequest) error
 }
 
 // clusterUserNotifier is the production userNotifier; it routes calls to the
@@ -84,14 +84,14 @@ type clusterUserNotifier struct {
 	c *cluster.Cluster
 }
 
-func (n *clusterUserNotifier) NotifyRoomEvent(userID ids.UserID, req *userpb.NotifyRoomEventRequest) error {
+func (n *clusterUserNotifier) NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomEventRequest) error {
 	if _, err := userpb.GetUserGrainGrainClient(n.c, userID.String()).NotifyRoomEvent(req); err != nil {
 		return fmt.Errorf("user grain NotifyRoomEvent: %w", err)
 	}
 	return nil
 }
 
-func (n *clusterUserNotifier) ForwardMessage(userID ids.UserID, req *userpb.ForwardMessageRequest) error {
+func (n *clusterUserNotifier) ForwardMessage(userID id.UserID, req *userpb.ForwardMessageRequest) error {
 	if _, err := userpb.GetUserGrainGrainClient(n.c, userID.String()).ForwardMessage(req); err != nil {
 		return fmt.Errorf("user grain ForwardMessage: %w", err)
 	}
@@ -159,7 +159,7 @@ func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
 // Join adds the user to the room and fans out a JOINED event to every
 // current member (including the joiner — multi-device echo, FR4).
 func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb.JoinResponse, error) {
-	userID, err := ids.NewUserID(req.GetUserId())
+	userID, err := id.NewUserID(req.GetUserId())
 	if err != nil {
 		slog.Warn(eventRoomMemberJoinRejected,
 			"grain_type", kindName,
@@ -202,7 +202,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 // pre-removal member snapshot (including the leaver, so their connection
 // can update UI state symmetrically with Join).
 func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*roompb.LeaveResponse, error) {
-	userID, err := ids.NewUserID(req.GetUserId())
+	userID, err := id.NewUserID(req.GetUserId())
 	if err != nil {
 		slog.Warn(eventRoomMemberLeaveRejected,
 			"grain_type", kindName,
@@ -245,7 +245,7 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 // PostMessage records the message, assigns the server-side timestamp, and
 // fans the message out unconditionally to every current member (FR4).
 func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainContext) (*roompb.PostMessageResponse, error) {
-	userID, err := ids.NewUserID(req.GetUserId())
+	userID, err := id.NewUserID(req.GetUserId())
 	if err != nil {
 		slog.Warn(eventRoomMessagePostRejected,
 			"grain_type", kindName,
@@ -309,7 +309,7 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 //
 // Phase 1 uses a sequential loop; concurrency can be added later if measured
 // fan-out latency demands it.
-func (g *Grain) fanOutNotify(ctx cluster.GrainContext, recipients []ids.UserID, payload *userpb.NotifyRoomEventRequest, msgType string) {
+func (g *Grain) fanOutNotify(ctx cluster.GrainContext, recipients []id.UserID, payload *userpb.NotifyRoomEventRequest, msgType string) {
 	for _, recipientID := range recipients {
 		if err := g.notifier.NotifyRoomEvent(recipientID, payload); err != nil {
 			slog.Warn(middleware.EventGrainFanoutError,
@@ -325,7 +325,7 @@ func (g *Grain) fanOutNotify(ctx cluster.GrainContext, recipients []ids.UserID, 
 
 // fanOutForward delivers a ForwardMessage to each recipient. Same best-effort
 // semantics as fanOutNotify.
-func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []ids.UserID, payload *userpb.ForwardMessageRequest, msgType string) {
+func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []id.UserID, payload *userpb.ForwardMessageRequest, msgType string) {
 	for _, recipientID := range recipients {
 		if err := g.notifier.ForwardMessage(recipientID, payload); err != nil {
 			slog.Warn(middleware.EventGrainFanoutError,

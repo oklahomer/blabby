@@ -4,7 +4,7 @@ import (
 	"github.com/asynkron/protoactor-go/cluster"
 
 	userpb "github.com/oklahomer/blabby/gen/user"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // userGrainCaller abstracts the four User-grain RPCs that this package
@@ -34,7 +34,7 @@ func newClusterUserGrainCaller(c *cluster.Cluster) *clusterUserGrainCaller {
 // cluster.GrainCallOption tail because the gateway has no use for it
 // today; if a future story needs per-call options, widen the interface
 // before reaching for this seam.
-func (c *clusterUserGrainCaller) callerFor(userID ids.UserID) userGrainCaller {
+func (c *clusterUserGrainCaller) callerFor(userID id.UserID) userGrainCaller {
 	return &userGrainClient{client: userpb.GetUserGrainGrainClient(c.cluster, userID.String())}
 }
 

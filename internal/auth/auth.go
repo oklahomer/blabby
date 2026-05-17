@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // Authenticator defines the contract for authentication providers.
@@ -35,7 +35,7 @@ type AuthParams struct {
 // parsed identifier of the authenticated user; the JWT Subject claim
 // carries the same value on the wire.
 type Result struct {
-	UserID ids.UserID
+	UserID id.UserID
 	Token  string
 }
 
@@ -45,7 +45,7 @@ type Result struct {
 // A structurally invalid Subject causes ValidateToken to fail with
 // ErrTokenInvalid before a Claims value is constructed.
 type Claims struct {
-	UserID    ids.UserID
+	UserID    id.UserID
 	Issuer    string
 	Audience  []string
 	ExpiresAt time.Time

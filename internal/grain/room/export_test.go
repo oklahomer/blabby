@@ -3,14 +3,14 @@ package room
 import (
 	"time"
 
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // Test-only seams. export_test.go is compiled only during `go test` so the
 // production binary surface stays clean while tests can inspect private state.
 
 // Members exposes a sorted snapshot of the current member set.
-func (g *Grain) Members() []ids.UserID { return g.state.memberIDs() }
+func (g *Grain) Members() []id.UserID { return g.state.memberIDs() }
 
 // RecentMessageCount returns the size of the recent-message buffer.
 func (g *Grain) RecentMessageCount() int { return len(g.state.recentMessages) }

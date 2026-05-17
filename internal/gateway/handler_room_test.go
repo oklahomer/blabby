@@ -20,7 +20,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // sentinelCluster / sentinelActorRoot return non-nil zero-value
@@ -49,7 +49,7 @@ func gatewayWithFake(fake userGrainCaller) *Gateway {
 		auth:      &stubAuthenticator{},
 		cluster:   sentinelCluster(),
 		actorRoot: sentinelActorRoot(),
-		userGrain: func(ids.UserID) userGrainCaller { return fake },
+		userGrain: func(id.UserID) userGrainCaller { return fake },
 	}
 }
 
@@ -215,7 +215,7 @@ func TestHandleRoomJoin(t *testing.T) {
 		},
 		{
 			name:       "overlong room_id → 400 + 4001",
-			path:       "/rooms/" + strings.Repeat("a", ids.MaxIdentifierBytes+1) + "/join",
+			path:       "/rooms/" + strings.Repeat("a", id.MaxIdentifierBytes+1) + "/join",
 			userID:     okUser,
 			stubResp:   &userpb.JoinRoomResponse{},
 			wantStatus: http.StatusBadRequest,

@@ -142,7 +142,7 @@ func TestJWTAuthenticator_ValidateToken(t *testing.T) {
 		}
 	})
 
-	// Subjects that pass JWT-library validation but fail the ids.NewUserID
+	// Subjects that pass JWT-library validation but fail the id.NewUserID
 	// rules must surface as invalid tokens — a JWT that cannot identify a
 	// user is invalid at this boundary, not a separate failure mode.
 	subjectCases := []struct {

@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
-func mustUserID(t *testing.T, raw string) ids.UserID {
+func mustUserID(t *testing.T, raw string) id.UserID {
 	t.Helper()
-	u, err := ids.NewUserID(raw)
+	u, err := id.NewUserID(raw)
 	if err != nil {
 		t.Fatalf("mustUserID(%q): %v", raw, err)
 	}
@@ -26,20 +26,20 @@ func TestRoomState_AddRemoveMember(t *testing.T) {
 		setup     func(s *roomState)
 		op        func(s *roomState) bool
 		wantOK    bool
-		wantState []ids.UserID
+		wantState []id.UserID
 	}{
 		{
 			name:      "add new member returns true and stores id",
 			op:        func(s *roomState) bool { return s.addMember(alice) },
 			wantOK:    true,
-			wantState: []ids.UserID{alice},
+			wantState: []id.UserID{alice},
 		},
 		{
 			name:      "add duplicate member returns false and keeps state",
 			setup:     func(s *roomState) { s.addMember(alice) },
 			op:        func(s *roomState) bool { return s.addMember(alice) },
 			wantOK:    false,
-			wantState: []ids.UserID{alice},
+			wantState: []id.UserID{alice},
 		},
 		{
 			name:      "remove existing member returns true and clears state",
@@ -53,7 +53,7 @@ func TestRoomState_AddRemoveMember(t *testing.T) {
 			setup:     func(s *roomState) { s.addMember(bob) },
 			op:        func(s *roomState) bool { return s.removeMember(alice) },
 			wantOK:    false,
-			wantState: []ids.UserID{bob},
+			wantState: []id.UserID{bob},
 		},
 	}
 
@@ -93,12 +93,12 @@ func TestRoomState_IsMember(t *testing.T) {
 
 func TestRoomState_MemberIDs_Sorted(t *testing.T) {
 	s := newRoomState()
-	for _, id := range []ids.UserID{mustUserID(t, "charlie"), mustUserID(t, "alice"), mustUserID(t, "bob")} {
-		s.addMember(id)
+	for _, userID := range []id.UserID{mustUserID(t, "charlie"), mustUserID(t, "alice"), mustUserID(t, "bob")} {
+		s.addMember(userID)
 	}
 
 	got := s.memberIDs()
-	want := []ids.UserID{mustUserID(t, "alice"), mustUserID(t, "bob"), mustUserID(t, "charlie")}
+	want := []id.UserID{mustUserID(t, "alice"), mustUserID(t, "bob"), mustUserID(t, "charlie")}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("memberIDs: got %v, want %v (must be sorted)", got, want)
 	}

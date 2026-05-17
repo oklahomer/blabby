@@ -1,4 +1,4 @@
-// Package ids defines value-object types for domain identifiers that flow
+// Package id defines value-object types for domain identifiers that flow
 // through every layer of the system.
 //
 // Two types live here: UserID and RoomID. They share an identical set of
@@ -20,7 +20,7 @@
 // [ErrIdentifierTooLong], and [ErrIdentifierInvalidChar]. Constructors
 // wrap the sentinel with a per-type prefix (user_id: ... / room_id: ...)
 // so log readers can distinguish causes without losing the classification.
-package ids
+package id
 
 import (
 	"errors"

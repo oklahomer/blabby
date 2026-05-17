@@ -6,7 +6,7 @@ import (
 	"github.com/asynkron/protoactor-go/cluster"
 
 	roompb "github.com/oklahomer/blabby/gen/room"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // roomClient abstracts calls into Room grains so the User grain can be
@@ -14,9 +14,9 @@ import (
 // internal/grain/room — small interface, recording fake in tests, thin
 // cluster wrapper in production.
 type roomClient interface {
-	Join(roomID ids.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error)
-	Leave(roomID ids.RoomID, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error)
-	PostMessage(roomID ids.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error)
+	Join(roomID id.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error)
+	Leave(roomID id.RoomID, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error)
+	PostMessage(roomID id.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error)
 }
 
 // clusterRoomClient is the production roomClient; it routes calls to the
@@ -35,7 +35,7 @@ func newClusterRoomClient(c *cluster.Cluster) *clusterRoomClient {
 	return &clusterRoomClient{c: c}
 }
 
-func (r *clusterRoomClient) Join(roomID ids.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error) {
+func (r *clusterRoomClient) Join(roomID id.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error) {
 	resp, err := roompb.GetRoomGrainGrainClient(r.c, roomID.String()).Join(req)
 	if err != nil {
 		return nil, fmt.Errorf("room grain Join: %w", err)
@@ -43,7 +43,7 @@ func (r *clusterRoomClient) Join(roomID ids.RoomID, req *roompb.JoinRequest) (*r
 	return resp, nil
 }
 
-func (r *clusterRoomClient) Leave(roomID ids.RoomID, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error) {
+func (r *clusterRoomClient) Leave(roomID id.RoomID, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error) {
 	resp, err := roompb.GetRoomGrainGrainClient(r.c, roomID.String()).Leave(req)
 	if err != nil {
 		return nil, fmt.Errorf("room grain Leave: %w", err)
@@ -51,7 +51,7 @@ func (r *clusterRoomClient) Leave(roomID ids.RoomID, req *roompb.LeaveRequest) (
 	return resp, nil
 }
 
-func (r *clusterRoomClient) PostMessage(roomID ids.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error) {
+func (r *clusterRoomClient) PostMessage(roomID id.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error) {
 	resp, err := roompb.GetRoomGrainGrainClient(r.c, roomID.String()).PostMessage(req)
 	if err != nil {
 		return nil, fmt.Errorf("room grain PostMessage: %w", err)

@@ -5,12 +5,12 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/internal/auth"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
-func mustUserID(t *testing.T, raw string) ids.UserID {
+func mustUserID(t *testing.T, raw string) id.UserID {
 	t.Helper()
-	uid, err := ids.NewUserID(raw)
+	uid, err := id.NewUserID(raw)
 	if err != nil {
 		t.Fatalf("mustUserID(%q): %v", raw, err)
 	}
@@ -35,7 +35,7 @@ func TestUserIDFromContext_MissingKey(t *testing.T) {
 	if ok {
 		t.Errorf("expected ok=false on missing key, got ok=true with value %q", got.String())
 	}
-	if got != (ids.UserID{}) {
+	if got != (id.UserID{}) {
 		t.Errorf("expected zero UserID on missing key, got %q", got.String())
 	}
 }
@@ -45,12 +45,12 @@ func TestContextWithUserID_ZeroValue(t *testing.T) {
 	// coerce. Production code never stores the zero value (the middleware
 	// only injects a parsed value), but the round-trip property is part
 	// of the API contract.
-	ctx := auth.ContextWithUserID(context.Background(), ids.UserID{})
+	ctx := auth.ContextWithUserID(context.Background(), id.UserID{})
 	got, ok := auth.UserIDFromContext(ctx)
 	if !ok {
 		t.Fatal("expected ok=true even when userID is zero (caller stored it explicitly)")
 	}
-	if got != (ids.UserID{}) {
+	if got != (id.UserID{}) {
 		t.Errorf("got %q, want zero UserID", got.String())
 	}
 }
@@ -66,7 +66,7 @@ func TestUserIDFromContext_WrongTypedValue(t *testing.T) {
 	if ok {
 		t.Errorf("expected ok=false for value stored under foreign key, got ok=true with %q", got.String())
 	}
-	if got != (ids.UserID{}) {
+	if got != (id.UserID{}) {
 		t.Errorf("expected zero UserID, got %q", got.String())
 	}
 }

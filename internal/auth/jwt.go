@@ -10,7 +10,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 const (
@@ -69,7 +69,7 @@ func NewJWTAuthenticator(signingKey []byte, store UserStore, opts ...Option) *JW
 }
 
 // Authenticate validates credentials and returns a signed JWT. The
-// store's user ID is parsed into an ids.UserID before signing — a
+// store's user ID is parsed into an id.UserID before signing — a
 // structurally invalid stored ID is a server-side data-integrity issue
 // and surfaces to the client as a generic credential failure, with the
 // underlying cause logged for operators.
@@ -85,7 +85,7 @@ func (a *JWTAuthenticator) Authenticate(_ context.Context, params AuthParams) (*
 		return nil, errors.New("failed to authenticate: invalid credentials")
 	}
 
-	userID, err := ids.NewUserID(user.ID)
+	userID, err := id.NewUserID(user.ID)
 	if err != nil {
 		slog.Error("authentication failed", "username", params.Username, "reason", "store_user_id_invalid", "error", err)
 		return nil, errors.New("failed to authenticate: invalid credentials")
@@ -148,7 +148,7 @@ func (a *JWTAuthenticator) ValidateToken(_ context.Context, tokenString string) 
 		return nil, fmt.Errorf("%w: invalid claims", ErrTokenInvalid)
 	}
 
-	userID, err := ids.NewUserID(claims.Subject)
+	userID, err := id.NewUserID(claims.Subject)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
 	}

@@ -18,7 +18,7 @@ import (
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/grain/user"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 	clustertest "github.com/oklahomer/blabby/internal/testutil/cluster"
 )
 
@@ -30,7 +30,7 @@ type integrationAuth struct {
 }
 
 func (a *integrationAuth) Authenticate(_ context.Context, _ auth.AuthParams) (*auth.Result, error) {
-	uid, err := ids.NewUserID(a.userID)
+	uid, err := id.NewUserID(a.userID)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func (a *integrationAuth) ValidateToken(_ context.Context, token string) (*auth.
 	if token != a.token {
 		return nil, auth.ErrTokenInvalid
 	}
-	uid, err := ids.NewUserID(a.userID)
+	uid, err := id.NewUserID(a.userID)
 	if err != nil {
 		return nil, auth.ErrTokenInvalid
 	}

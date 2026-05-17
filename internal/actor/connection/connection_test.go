@@ -20,7 +20,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // stubAuthenticator implements auth.Authenticator with caller-supplied
@@ -146,7 +146,7 @@ func writeAuthFrame(t *testing.T, c *websocket.Conn, token string) {
 }
 
 func aliceClaims() *auth.Claims {
-	uid, err := ids.NewUserID("alice")
+	uid, err := id.NewUserID("alice")
 	if err != nil {
 		panic(err)
 	}

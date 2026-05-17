@@ -21,7 +21,7 @@ import (
 	connection "github.com/oklahomer/blabby/internal/actor/connection"
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/grain/user"
-	"github.com/oklahomer/blabby/internal/ids"
+	"github.com/oklahomer/blabby/internal/id"
 	clustertest "github.com/oklahomer/blabby/internal/testutil/cluster"
 )
 
@@ -50,7 +50,7 @@ func (s *integrationStubAuth) Authenticate(_ context.Context, _ auth.AuthParams)
 }
 
 func (s *integrationStubAuth) ValidateToken(_ context.Context, _ string) (*auth.Claims, error) {
-	uid, err := ids.NewUserID(s.subject)
+	uid, err := id.NewUserID(s.subject)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", auth.ErrTokenInvalid, err)
 	}
