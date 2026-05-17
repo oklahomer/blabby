@@ -29,11 +29,18 @@ Concretely:
   type UserID struct{ value string }
   func NewUserID(raw string) (UserID, error)
   func (id UserID) String() string
+  func (id UserID) LogValue() slog.Value
 
   type RoomID struct{ value string }
   func NewRoomID(raw string) (RoomID, error)
   func (id RoomID) String() string
+  func (id RoomID) LogValue() slog.Value
   ```
+- Both types implement [`slog.LogValuer`](https://pkg.go.dev/log/slog#LogValuer) so structured-log call sites pass the typed value directly:
+  ```go
+  slog.Info("room handler enter", "user_id", userID, "room_id", roomID)
+  ```
+  The JSON handler installed at process startup reaches a typed value as `KindAny` and falls through to `encoding/json`, which serialises by reflection over struct fields — an unexported field renders as `{}` and the identifier is lost. `encoding/json` does not honour `fmt.Stringer`; `LogValuer` is the slog-specific bridge that does, and returning `slog.StringValue(id.value)` skips the reflection-based fallback entirely.
 - Both constructors share an unexported `parseIdentifier` helper that enforces a single rule set:
   1. Trim leading and trailing whitespace.
   2. After trim, non-empty.
@@ -66,13 +73,14 @@ Concretely:
 
 - **Boilerplate at the proto wire.** Every proto-construction site writes `.String()` and every proto-receipt site re-parses. The cost is constant and concentrated at the cluster boundary; internal code remains typed.
 - **Tightening rules retroactively rejects values that used to pass.** Any test fixture, JWT, or stored identifier that contained a control byte, Unicode whitespace, or `/` previously passed; under this rule set it does not. No live deployment exists today, so the practical cost is limited to test-fixture updates.
-- **The grain's defensive re-parse looks redundant when the only caller is the gateway.** It is intentional: the grain's contract is the cluster boundary, not the HTTP boundary, and any future cluster caller (a backfill job, a maintenance tool, a second gateway) inherits the same rules without the grain trusting the caller's discipline.
+- **Grain handlers re-parse identifiers from incoming proto requests.** A request that goes through the gateway is parsed twice. The grain's contract is the cluster boundary — any future cluster caller (backfill, second gateway) inherits the same checks without the grain trusting the caller's discipline.
 
 ### Neutral
 
 - **No effect on the cluster wire format.** Proto fields stay `string`; the cluster client signature is unchanged. The type discipline is a pure in-process property.
 - **No effect on the error taxonomy.** All structural failures continue to map to `4001 INVALID_REQUEST` on the wire. The typed errors are for log clarity, not for clients.
 - **No effect on the cluster identity binding.** `cluster.GetUserGrainGrainClient(c, userID.String())` continues to use a string identity; the typed value's `.String()` is the only conversion needed.
+- **`internal/ids` imports `log/slog`.** A non-trivial choice for a value-object package, but slog is part of the standard library and `LogValuer` is the idiomatic way for a custom type to participate in structured logging. The import is one-way; nothing in `log/slog` depends back on `internal/ids`.
 
 ## Alternatives considered
 
@@ -106,6 +114,12 @@ Self-identifying IDs at the wire level, in the style of Stripe (`cus_…`, `pi_�
 
 Rejected for the same reason — and additionally because adoption is a breaking change to existing surfaces: JWT subjects, URL paths, the `defaultRooms` slice, and every test fixture. The operational benefit (an opaque ID self-identifies its kind in logs) scales with the number of identifier kinds. Today there are two; the type system distinguishes them in code; the structured-log key (`user_id` vs `room_id`) distinguishes them at the operator's terminal. Revisit when a third or fourth identifier type lands.
 
+### Rely on `fmt.Stringer` for log rendering
+
+Implement `String() string` only and pass typed identifiers to `slog`, expecting the handler to render the string form.
+
+Rejected because `encoding/json` (where the JSON handler falls through for `KindAny`) does not honour `fmt.Stringer`; the identifier is lost at every JSON log line. `slog.TextHandler` honours `fmt.Stringer` via `fmt.Sprint`, but the project ships JSON only. The marginal cost of the second method per type is worth not losing the identifier.
+
 ### Storage-backed `Room` and `User` aggregates instead of identifier types
 
 Skip the identifier types and define `Room { ID, Description, CreatedAt, … }` and `User { ID, … }` directly. Pass aggregates around.
@@ -119,7 +133,6 @@ This ADR governs the representation of `user_id` and `room_id` across the codeba
 - **Storage-backed entities.** A future `Room` or `User` type with persistence-derived fields is out of scope; this ADR reserves the `internal/ids` package for identifiers only.
 - **Cluster identity strings.** `cluster.GetUserGrainGrainClient(c, identity)` takes a `string` identity opaque to the cluster. The gateway converts `UserID` → `string` at this seam; the grain receives it via `ctx.Identity()` as a `string`. Whether `ctx.Identity()` should be re-parsed inside the grain is left to a future decision when a concrete reason to enforce it arises.
 - **Other domain-significant strings.** Authentication tokens, message text, and similar values are not covered. `connection.AuthToken` already exists with its own value-object discipline and is unaffected.
-- **Cross-cluster wire format.** Proto fields stay `string`. This ADR is about in-process type discipline only.
 
 ## References
 
