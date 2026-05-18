@@ -230,10 +230,14 @@ func logActorMsg(cfg loggingConfig, actorType string, ctx actor.ReceiverContext,
 //
 // Assumption: the logical identity does not itself contain '$'. The
 // partition-activator's '$' separates the suffix; LastIndex on '$' would
-// truncate a legitimate "team$alpha" identity to "team". Today's
-// callers (NewKind in internal/grain/{user,room}) never pass identities
-// containing '$', and the gateway/auth layer rejects user_ids containing
-// it. Revisit this parse if identity-shape conventions change.
+// truncate a legitimate "team$alpha" identity to "team". The structural
+// rules in internal/id reject '/', control characters, and Unicode
+// whitespace but do NOT reject '$'; today's callers happen to emit
+// '$'-free identities (UUID-shaped user_ids from auth.JWTAuthenticator,
+// short slug room_ids from gateway.defaultRooms), so the truncation is
+// not triggered in practice. Revisit this parse — either by tightening
+// the id parser or by reworking the partition-activator split — if a
+// future authenticator or room-provisioning scheme introduces '$'.
 //
 // If the PID Id does not match the partition-activator shape (e.g., a
 // future lookup provider with a different scheme), the function falls

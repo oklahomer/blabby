@@ -153,11 +153,20 @@ func (a *JWTAuthenticator) ValidateToken(_ context.Context, tokenString string) 
 		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
 	}
 
+	// jwt.WithExpirationRequired() guarantees ExpiresAt is non-nil — the
+	// parser returns an error caught above otherwise. IssuedAt is RFC 7519
+	// optional and the library does not require it; dereferencing
+	// claims.IssuedAt without a nil check would panic on any token that
+	// omits the iat claim.
+	var issuedAt time.Time
+	if claims.IssuedAt != nil {
+		issuedAt = claims.IssuedAt.Time
+	}
 	return &Claims{
 		UserID:    userID,
 		Issuer:    claims.Issuer,
 		Audience:  claims.Audience,
 		ExpiresAt: claims.ExpiresAt.Time,
-		IssuedAt:  claims.IssuedAt.Time,
+		IssuedAt:  issuedAt,
 	}, nil
 }

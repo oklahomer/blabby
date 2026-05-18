@@ -189,6 +189,40 @@ func signTokenWithSubject(t *testing.T, secret []byte, subject string, expiresAt
 	return signed
 }
 
+// TestJWTAuthenticator_ValidateToken_MissingIssuedAt covers a JWT that
+// omits the optional iat claim. RFC 7519 does not require iat, and the
+// JWT library does not enforce it; without a nil-check on
+// claims.IssuedAt, ValidateToken would panic on a perfectly legal token.
+func TestJWTAuthenticator_ValidateToken_MissingIssuedAt(t *testing.T) {
+	secret := []byte("test-secret")
+	store := auth.NewInMemoryUserStore()
+	authenticator := auth.NewJWTAuthenticator(secret, store)
+
+	claims := &jwt.RegisteredClaims{
+		Subject:   auth.UserIDAlice.String(),
+		Issuer:    auth.Issuer,
+		Audience:  jwt.ClaimStrings{auth.Audience},
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		// IssuedAt intentionally omitted.
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString(secret)
+	if err != nil {
+		t.Fatalf("failed to sign token without iat: %v", err)
+	}
+
+	got, err := authenticator.ValidateToken(context.Background(), signed)
+	if err != nil {
+		t.Fatalf("ValidateToken returned error for token without iat: %v", err)
+	}
+	if !got.IssuedAt.IsZero() {
+		t.Errorf("IssuedAt: got %v, want zero time", got.IssuedAt)
+	}
+	if got.UserID.String() != auth.UserIDAlice.String() {
+		t.Errorf("UserID: got %q, want %q", got.UserID.String(), auth.UserIDAlice.String())
+	}
+}
+
 func TestJWTAuthenticator_ExpiredToken(t *testing.T) {
 	store := auth.NewInMemoryUserStore()
 	authenticator := auth.NewJWTAuthenticator(
