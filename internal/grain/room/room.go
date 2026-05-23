@@ -17,12 +17,30 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/middleware"
+)
+
+// Event-name constants for every log line this package emits. Follow the
+// N3 past-tense action-verb convention: <package>.<object>.<past-verb> for
+// happy paths, <package>.<object>.<base-verb>_rejected for validation
+// refusals. Cross-cutting events (grain.fanout, grain.fanout.error,
+// grain.unhandled) live in internal/middleware as exported constants and
+// are referenced via middleware.EventXxx.
+const (
+	eventRoomMemberJoined        = "room.member.joined"
+	eventRoomMemberJoinRejected  = "room.member.join_rejected"
+	eventRoomMemberLeft          = "room.member.left"
+	eventRoomMemberLeaveRejected = "room.member.leave_rejected"
+	eventRoomMessagePosted       = "room.message.posted"
+	eventRoomMessagePostRejected = "room.message.post_rejected"
 )
 
 // Error code constants mirror the canonical taxonomy in
@@ -51,8 +69,8 @@ const passivationTimeout = 5 * time.Minute
 // userNotifier abstracts the User grain client surface used for fan-out so
 // the Room grain can be unit-tested without a real cluster.
 type userNotifier interface {
-	NotifyRoomEvent(userID string, req *userpb.NotifyRoomEventRequest) error
-	ForwardMessage(userID string, req *userpb.ForwardMessageRequest) error
+	NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomEventRequest) error
+	ForwardMessage(userID id.UserID, req *userpb.ForwardMessageRequest) error
 }
 
 // clusterUserNotifier is the production userNotifier; it routes calls to the
@@ -61,15 +79,15 @@ type clusterUserNotifier struct {
 	c *cluster.Cluster
 }
 
-func (n *clusterUserNotifier) NotifyRoomEvent(userID string, req *userpb.NotifyRoomEventRequest) error {
-	if _, err := userpb.GetUserGrainGrainClient(n.c, userID).NotifyRoomEvent(req); err != nil {
+func (n *clusterUserNotifier) NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomEventRequest) error {
+	if _, err := userpb.GetUserGrainGrainClient(n.c, userID.String()).NotifyRoomEvent(req); err != nil {
 		return fmt.Errorf("user grain NotifyRoomEvent: %w", err)
 	}
 	return nil
 }
 
-func (n *clusterUserNotifier) ForwardMessage(userID string, req *userpb.ForwardMessageRequest) error {
-	if _, err := userpb.GetUserGrainGrainClient(n.c, userID).ForwardMessage(req); err != nil {
+func (n *clusterUserNotifier) ForwardMessage(userID id.UserID, req *userpb.ForwardMessageRequest) error {
+	if _, err := userpb.GetUserGrainGrainClient(n.c, userID.String()).ForwardMessage(req); err != nil {
 		return fmt.Errorf("user grain ForwardMessage: %w", err)
 	}
 	return nil
@@ -102,7 +120,9 @@ type Grain struct {
 func NewKind() *cluster.Kind {
 	return roompb.NewRoomGrainKind(func() roompb.RoomGrain {
 		return &Grain{}
-	}, passivationTimeout)
+	}, passivationTimeout,
+		actor.WithReceiverMiddleware(middleware.GrainLogging("RoomGrain")),
+	)
 }
 
 // Init prepares an empty state for a freshly activated Room grain. When the
@@ -117,26 +137,15 @@ func (g *Grain) Init(ctx cluster.GrainContext) {
 	if g.notifier == nil {
 		g.notifier = &clusterUserNotifier{c: ctx.Cluster()}
 	}
-	slog.Info("grain.init",
-		"grain_type", "RoomGrain",
-		"grain_id", ctx.Identity(),
-		"msg_type", "Init",
-	)
 }
 
 // Terminate is a passivation hook; Phase 1 does not persist state.
-func (g *Grain) Terminate(ctx cluster.GrainContext) {
-	slog.Info("grain.terminate",
-		"grain_type", "RoomGrain",
-		"grain_id", ctx.Identity(),
-		"msg_type", "Terminate",
-	)
-}
+func (g *Grain) Terminate(_ cluster.GrainContext) {}
 
 // ReceiveDefault logs unexpected messages without crashing the grain.
 func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
-	slog.Warn("grain.unhandled",
-		"grain_type", "RoomGrain",
+	slog.Warn(middleware.EventGrainUnhandled,
+		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
 		"msg_type", fmt.Sprintf("%T", ctx.Message()),
 	)
@@ -145,23 +154,41 @@ func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
 // Join adds the user to the room and fans out a JOINED event to every
 // current member (including the joiner — multi-device echo, FR4).
 func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb.JoinResponse, error) {
-	slog.Info("grain.msg",
-		"grain_type", "RoomGrain",
-		"grain_id", ctx.Identity(),
-		"msg_type", "Join",
-		"user_id", req.GetUserId(),
-	)
-
-	if req.GetUserId() == "" {
+	userID, err := id.NewUserID(req.GetUserId())
+	if err != nil {
+		slog.Warn(eventRoomMemberJoinRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"user_id", req.GetUserId(),
+			"reason", statusInvalidRequest,
+		)
 		return joinErr(codeInvalidRequest, statusInvalidRequest, "user_id is required"), nil
 	}
-	if g.state.isMember(req.GetUserId()) {
+	if g.state.isMember(userID) {
+		slog.Warn(eventRoomMemberJoinRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"user_id", userID,
+			"reason", statusRoomAlreadyMember,
+		)
 		return joinErr(codeRoomAlreadyMember, statusRoomAlreadyMember, "already a member of this room"), nil
 	}
 
-	g.state.addMember(req.GetUserId())
+	g.state.addMember(userID)
 	recipients := g.state.memberIDs()
-	g.fanOutNotify(ctx, recipients, buildJoinedEvent(ctx.Identity(), req.GetUserId()), "Join.fanout")
+	slog.Info(eventRoomMemberJoined,
+		"grain_type", ctx.Kind(),
+		"grain_id", ctx.Identity(),
+		"user_id", userID,
+	)
+	slog.Info(middleware.EventGrainFanout,
+		"grain_type", ctx.Kind(),
+		"grain_id", ctx.Identity(),
+		"msg_type", "Join.fanout",
+		"sender_id", userID,
+		"target_count", len(recipients),
+	)
+	g.fanOutNotify(ctx, recipients, buildJoinedEvent(ctx.Identity(), userID), "Join.fanout")
 
 	return &roompb.JoinResponse{}, nil
 }
@@ -170,25 +197,42 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 // pre-removal member snapshot (including the leaver, so their connection
 // can update UI state symmetrically with Join).
 func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*roompb.LeaveResponse, error) {
-	slog.Info("grain.msg",
-		"grain_type", "RoomGrain",
-		"grain_id", ctx.Identity(),
-		"msg_type", "Leave",
-		"user_id", req.GetUserId(),
-	)
-
-	if req.GetUserId() == "" {
+	userID, err := id.NewUserID(req.GetUserId())
+	if err != nil {
+		slog.Warn(eventRoomMemberLeaveRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"user_id", req.GetUserId(),
+			"reason", statusInvalidRequest,
+		)
 		return leaveErr(codeInvalidRequest, statusInvalidRequest, "user_id is required"), nil
 	}
-	if !g.state.isMember(req.GetUserId()) {
+	if !g.state.isMember(userID) {
+		slog.Warn(eventRoomMemberLeaveRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"user_id", userID,
+			"reason", statusRoomNotMember,
+		)
 		return leaveErr(codeRoomNotMember, statusRoomNotMember, "not a member of this room"), nil
 	}
 
-	// Snapshot before removal so the leaver also receives the LEFT event
-	// (architecture decision documented in story 3.1 task 5).
+	// Snapshot before removal so the leaver also receives the LEFT event.
 	recipients := g.state.memberIDs()
-	g.state.removeMember(req.GetUserId())
-	g.fanOutNotify(ctx, recipients, buildLeftEvent(ctx.Identity(), req.GetUserId()), "Leave.fanout")
+	g.state.removeMember(userID)
+	slog.Info(eventRoomMemberLeft,
+		"grain_type", ctx.Kind(),
+		"grain_id", ctx.Identity(),
+		"user_id", userID,
+	)
+	slog.Info(middleware.EventGrainFanout,
+		"grain_type", ctx.Kind(),
+		"grain_id", ctx.Identity(),
+		"msg_type", "Leave.fanout",
+		"sender_id", userID,
+		"target_count", len(recipients),
+	)
+	g.fanOutNotify(ctx, recipients, buildLeftEvent(ctx.Identity(), userID), "Leave.fanout")
 
 	return &roompb.LeaveResponse{}, nil
 }
@@ -196,32 +240,59 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 // PostMessage records the message, assigns the server-side timestamp, and
 // fans the message out unconditionally to every current member (FR4).
 func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainContext) (*roompb.PostMessageResponse, error) {
-	slog.Info("grain.msg",
-		"grain_type", "RoomGrain",
-		"grain_id", ctx.Identity(),
-		"msg_type", "PostMessage",
-		"user_id", req.GetUserId(),
-	)
-
-	if req.GetUserId() == "" {
+	userID, err := id.NewUserID(req.GetUserId())
+	if err != nil {
+		slog.Warn(eventRoomMessagePostRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"user_id", req.GetUserId(),
+			"reason", statusInvalidRequest,
+		)
 		return postErr(codeInvalidRequest, statusInvalidRequest, "user_id is required"), nil
 	}
 	if strings.TrimSpace(req.GetText()) == "" {
+		slog.Warn(eventRoomMessagePostRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"user_id", userID,
+			"text_len", len(req.GetText()),
+			"reason", statusMissingField,
+		)
 		return postErr(codeMissingField, statusMissingField, "text is required"), nil
 	}
-	if !g.state.isMember(req.GetUserId()) {
+	if !g.state.isMember(userID) {
+		slog.Warn(eventRoomMessagePostRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"user_id", userID,
+			"reason", statusRoomNotMember,
+		)
 		return postErr(codeRoomNotMember, statusRoomNotMember, "not a member of this room"), nil
 	}
 
 	timestamp := g.now()
 	g.state.recordMessage(chatMessage{
-		senderID:  req.GetUserId(),
+		senderID:  userID,
 		text:      req.GetText(),
 		timestamp: timestamp,
 	})
 
 	recipients := g.state.memberIDs()
-	payload := buildForwardMessage(ctx.Identity(), req.GetUserId(), req.GetText(), timestamp)
+	textLen := len(req.GetText())
+	slog.Info(eventRoomMessagePosted,
+		"grain_type", ctx.Kind(),
+		"grain_id", ctx.Identity(),
+		"user_id", userID,
+	)
+	slog.Info(middleware.EventGrainFanout,
+		"grain_type", ctx.Kind(),
+		"grain_id", ctx.Identity(),
+		"msg_type", "PostMessage.fanout",
+		"sender_id", userID,
+		"target_count", len(recipients),
+		"text_len", textLen,
+	)
+	payload := buildForwardMessage(ctx.Identity(), userID, req.GetText(), timestamp)
 	g.fanOutForward(ctx, recipients, payload, "PostMessage.fanout")
 
 	return &roompb.PostMessageResponse{Timestamp: timestamppb.New(timestamp)}, nil
@@ -233,11 +304,11 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 //
 // Phase 1 uses a sequential loop; concurrency can be added later if measured
 // fan-out latency demands it.
-func (g *Grain) fanOutNotify(ctx cluster.GrainContext, recipients []string, payload *userpb.NotifyRoomEventRequest, msgType string) {
+func (g *Grain) fanOutNotify(ctx cluster.GrainContext, recipients []id.UserID, payload *userpb.NotifyRoomEventRequest, msgType string) {
 	for _, recipientID := range recipients {
 		if err := g.notifier.NotifyRoomEvent(recipientID, payload); err != nil {
-			slog.Warn("grain.fanout.error",
-				"grain_type", "RoomGrain",
+			slog.Warn(middleware.EventGrainFanoutError,
+				"grain_type", ctx.Kind(),
 				"grain_id", ctx.Identity(),
 				"msg_type", msgType,
 				"recipient_id", recipientID,
@@ -249,11 +320,11 @@ func (g *Grain) fanOutNotify(ctx cluster.GrainContext, recipients []string, payl
 
 // fanOutForward delivers a ForwardMessage to each recipient. Same best-effort
 // semantics as fanOutNotify.
-func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []string, payload *userpb.ForwardMessageRequest, msgType string) {
+func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []id.UserID, payload *userpb.ForwardMessageRequest, msgType string) {
 	for _, recipientID := range recipients {
 		if err := g.notifier.ForwardMessage(recipientID, payload); err != nil {
-			slog.Warn("grain.fanout.error",
-				"grain_type", "RoomGrain",
+			slog.Warn(middleware.EventGrainFanoutError,
+				"grain_type", ctx.Kind(),
 				"grain_id", ctx.Identity(),
 				"msg_type", msgType,
 				"recipient_id", recipientID,

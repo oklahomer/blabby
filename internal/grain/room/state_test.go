@@ -4,42 +4,56 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/oklahomer/blabby/internal/id"
 )
 
+func mustUserID(t *testing.T, raw string) id.UserID {
+	t.Helper()
+	u, err := id.NewUserID(raw)
+	if err != nil {
+		t.Fatalf("mustUserID(%q): %v", raw, err)
+	}
+	return u
+}
+
 func TestRoomState_AddRemoveMember(t *testing.T) {
+	alice := mustUserID(t, "alice")
+	bob := mustUserID(t, "bob")
+
 	tests := []struct {
 		name      string
 		setup     func(s *roomState)
 		op        func(s *roomState) bool
 		wantOK    bool
-		wantState []string
+		wantState []id.UserID
 	}{
 		{
 			name:      "add new member returns true and stores id",
-			op:        func(s *roomState) bool { return s.addMember("alice") },
+			op:        func(s *roomState) bool { return s.addMember(alice) },
 			wantOK:    true,
-			wantState: []string{"alice"},
+			wantState: []id.UserID{alice},
 		},
 		{
 			name:      "add duplicate member returns false and keeps state",
-			setup:     func(s *roomState) { s.addMember("alice") },
-			op:        func(s *roomState) bool { return s.addMember("alice") },
+			setup:     func(s *roomState) { s.addMember(alice) },
+			op:        func(s *roomState) bool { return s.addMember(alice) },
 			wantOK:    false,
-			wantState: []string{"alice"},
+			wantState: []id.UserID{alice},
 		},
 		{
 			name:      "remove existing member returns true and clears state",
-			setup:     func(s *roomState) { s.addMember("alice") },
-			op:        func(s *roomState) bool { return s.removeMember("alice") },
+			setup:     func(s *roomState) { s.addMember(alice) },
+			op:        func(s *roomState) bool { return s.removeMember(alice) },
 			wantOK:    true,
 			wantState: nil,
 		},
 		{
 			name:      "remove non-member returns false and keeps state",
-			setup:     func(s *roomState) { s.addMember("bob") },
-			op:        func(s *roomState) bool { return s.removeMember("alice") },
+			setup:     func(s *roomState) { s.addMember(bob) },
+			op:        func(s *roomState) bool { return s.removeMember(alice) },
 			wantOK:    false,
-			wantState: []string{"bob"},
+			wantState: []id.UserID{bob},
 		},
 	}
 
@@ -64,32 +78,34 @@ func TestRoomState_AddRemoveMember(t *testing.T) {
 }
 
 func TestRoomState_IsMember(t *testing.T) {
+	alice := mustUserID(t, "alice")
+	bob := mustUserID(t, "bob")
 	s := newRoomState()
-	s.addMember("alice")
+	s.addMember(alice)
 
-	if !s.isMember("alice") {
+	if !s.isMember(alice) {
 		t.Errorf("isMember(alice): got false, want true")
 	}
-	if s.isMember("bob") {
+	if s.isMember(bob) {
 		t.Errorf("isMember(bob): got true, want false")
 	}
 }
 
 func TestRoomState_MemberIDs_Sorted(t *testing.T) {
 	s := newRoomState()
-	for _, id := range []string{"charlie", "alice", "bob"} {
-		s.addMember(id)
+	for _, userID := range []id.UserID{mustUserID(t, "charlie"), mustUserID(t, "alice"), mustUserID(t, "bob")} {
+		s.addMember(userID)
 	}
 
 	got := s.memberIDs()
-	want := []string{"alice", "bob", "charlie"}
+	want := []id.UserID{mustUserID(t, "alice"), mustUserID(t, "bob"), mustUserID(t, "charlie")}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("memberIDs: got %v, want %v (must be sorted)", got, want)
 	}
 
 	// Mutating the snapshot must not affect the underlying state.
-	got[0] = "mutated"
-	if !s.isMember("alice") {
+	got[0] = mustUserID(t, "mutated")
+	if !s.isMember(mustUserID(t, "alice")) {
 		t.Errorf("snapshot mutation leaked into state")
 	}
 }
@@ -97,9 +113,10 @@ func TestRoomState_MemberIDs_Sorted(t *testing.T) {
 func TestRoomState_RecordMessage_RingBufferBound(t *testing.T) {
 	s := newRoomState()
 	s.maxRecentMessages = 3
+	alice := mustUserID(t, "alice")
 
 	for i := int64(1); i <= 5; i++ {
-		s.recordMessage(chatMessage{senderID: "alice", text: "msg", timestamp: time.UnixMilli(i)})
+		s.recordMessage(chatMessage{senderID: alice, text: "msg", timestamp: time.UnixMilli(i)})
 	}
 
 	if got := len(s.recentMessages); got != 3 {

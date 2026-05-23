@@ -18,6 +18,7 @@ import (
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/grain/user"
+	"github.com/oklahomer/blabby/internal/id"
 	clustertest "github.com/oklahomer/blabby/internal/testutil/cluster"
 )
 
@@ -29,14 +30,22 @@ type integrationAuth struct {
 }
 
 func (a *integrationAuth) Authenticate(_ context.Context, _ auth.AuthParams) (*auth.Result, error) {
-	return &auth.Result{UserID: a.userID, Token: a.token}, nil
+	uid, err := id.NewUserID(a.userID)
+	if err != nil {
+		return nil, err
+	}
+	return &auth.Result{UserID: uid, Token: a.token}, nil
 }
 
 func (a *integrationAuth) ValidateToken(_ context.Context, token string) (*auth.Claims, error) {
 	if token != a.token {
 		return nil, auth.ErrTokenInvalid
 	}
-	return &auth.Claims{Subject: a.userID}, nil
+	uid, err := id.NewUserID(a.userID)
+	if err != nil {
+		return nil, auth.ErrTokenInvalid
+	}
+	return &auth.Claims{UserID: uid}, nil
 }
 
 // stubRoomGrain stands in for the production Room grain so the User

@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuildJoinedEvent(t *testing.T) {
-	got := buildJoinedEvent("general", "alice")
+	got := buildJoinedEvent("general", mustUserID(t, "alice"))
 
 	if got.GetRoomId() != "general" {
 		t.Errorf("RoomId: got %q, want %q", got.GetRoomId(), "general")
@@ -22,7 +22,7 @@ func TestBuildJoinedEvent(t *testing.T) {
 }
 
 func TestBuildLeftEvent(t *testing.T) {
-	got := buildLeftEvent("general", "alice")
+	got := buildLeftEvent("general", mustUserID(t, "alice"))
 
 	if got.GetRoomId() != "general" {
 		t.Errorf("RoomId: got %q, want %q", got.GetRoomId(), "general")
@@ -37,7 +37,7 @@ func TestBuildLeftEvent(t *testing.T) {
 
 func TestBuildForwardMessage(t *testing.T) {
 	ts := time.UnixMilli(12345)
-	got := buildForwardMessage("general", "alice", "hello", ts)
+	got := buildForwardMessage("general", mustUserID(t, "alice"), "hello", ts)
 
 	if got.GetRoomId() != "general" {
 		t.Errorf("RoomId: got %q, want %q", got.GetRoomId(), "general")

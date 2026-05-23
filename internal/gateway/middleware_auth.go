@@ -64,17 +64,10 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Defensive: a misbehaving authenticator that returns success with nil
-		// claims, or claims whose Subject is blank/whitespace-only, must never
-		// authenticate a request. UserIDFromContext returns ok=true for any
-		// stored string (including ""), so an unchecked empty Subject would
-		// flow into downstream handlers as a "valid" anonymous principal.
-		//
-		// Both branches return the same client-facing response (401 + 1001) so
-		// attackers cannot distinguish "your token is bad" from "the server's
-		// authenticator is buggy". Operators get distinct signals via the log
-		// level and reason: contract violations are slog.Error, malformed
-		// tokens stay at slog.Warn (consistent with the other rejection paths).
+		// Defensive: a misbehaving authenticator that returns (nil, nil)
+		// would otherwise authenticate the request with no identity. Same
+		// client-facing response as a malformed token so attackers cannot
+		// distinguish the cases; operators get the slog.Error signal.
 		if claims == nil {
 			slog.Error("auth middleware rejected request: authenticator contract violation",
 				"method", r.Method,
@@ -86,19 +79,8 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 				ErrAuthInvalidToken("invalid token"))
 			return
 		}
-		if strings.TrimSpace(claims.Subject) == "" {
-			slog.Warn("auth middleware rejected request",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"reason", "invalid",
-				"remote_addr", r.RemoteAddr,
-			)
-			WriteErrorResponse(w, http.StatusUnauthorized,
-				ErrAuthInvalidToken("invalid token"))
-			return
-		}
 
-		ctx := auth.ContextWithUserID(r.Context(), claims.Subject)
+		ctx := auth.ContextWithUserID(r.Context(), claims.UserID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

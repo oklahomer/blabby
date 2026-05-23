@@ -56,8 +56,8 @@ func TestJWTAuthenticator_Authenticate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if result.UserID != tt.wantUser {
-				t.Errorf("UserID = %q, want %q", result.UserID, tt.wantUser)
+			if result.UserID.String() != tt.wantUser {
+				t.Errorf("UserID = %q, want %q", result.UserID.String(), tt.wantUser)
 			}
 			if result.Token == "" {
 				t.Error("expected non-empty token")
@@ -86,8 +86,8 @@ func TestJWTAuthenticator_ValidateToken(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if claims.Subject != auth.UserIDBob.String() {
-			t.Errorf("Subject = %q, want %q", claims.Subject, auth.UserIDBob.String())
+		if claims.UserID.String() != auth.UserIDBob.String() {
+			t.Errorf("UserID = %q, want %q", claims.UserID.String(), auth.UserIDBob.String())
 		}
 		if claims.Issuer != auth.Issuer {
 			t.Errorf("Issuer = %q, want %q", claims.Issuer, auth.Issuer)
@@ -141,6 +141,86 @@ func TestJWTAuthenticator_ValidateToken(t *testing.T) {
 			t.Errorf("expected ErrTokenInvalid, got %v", err)
 		}
 	})
+
+	// Subjects that pass JWT-library validation but fail the id.NewUserID
+	// rules must surface as invalid tokens — a JWT that cannot identify a
+	// user is invalid at this boundary, not a separate failure mode.
+	subjectCases := []struct {
+		name    string
+		subject string
+	}{
+		{name: "empty subject", subject: ""},
+		{name: "whitespace-only subject", subject: " \t"},
+		{name: "subject with NUL", subject: "alice\x00"},
+		{name: "subject with slash", subject: "foo/bar"},
+	}
+	for _, tc := range subjectCases {
+		t.Run("structurally invalid subject ("+tc.name+") is rejected with ErrTokenInvalid", func(t *testing.T) {
+			tokenString := signTokenWithSubject(t, secret, tc.subject, time.Now().Add(time.Hour))
+			_, err := authenticator.ValidateToken(ctx, tokenString)
+			if err == nil {
+				t.Fatal("expected error for token with invalid subject")
+			}
+			if !errors.Is(err, auth.ErrTokenInvalid) {
+				t.Errorf("expected ErrTokenInvalid, got %v", err)
+			}
+		})
+	}
+}
+
+// signTokenWithSubject forges a JWT with an arbitrary Subject claim so
+// the ValidateToken parser sees a structurally invalid subject after
+// otherwise-successful signature verification. The Issuer and Audience
+// match the authenticator's expected values.
+func signTokenWithSubject(t *testing.T, secret []byte, subject string, expiresAt time.Time) string {
+	t.Helper()
+	claims := &jwt.RegisteredClaims{
+		Subject:   subject,
+		Issuer:    auth.Issuer,
+		Audience:  jwt.ClaimStrings{auth.Audience},
+		ExpiresAt: jwt.NewNumericDate(expiresAt),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString(secret)
+	if err != nil {
+		t.Fatalf("failed to sign forged token: %v", err)
+	}
+	return signed
+}
+
+// TestJWTAuthenticator_ValidateToken_MissingIssuedAt covers a JWT that
+// omits the optional iat claim. RFC 7519 does not require iat, and the
+// JWT library does not enforce it; without a nil-check on
+// claims.IssuedAt, ValidateToken would panic on a perfectly legal token.
+func TestJWTAuthenticator_ValidateToken_MissingIssuedAt(t *testing.T) {
+	secret := []byte("test-secret")
+	store := auth.NewInMemoryUserStore()
+	authenticator := auth.NewJWTAuthenticator(secret, store)
+
+	claims := &jwt.RegisteredClaims{
+		Subject:   auth.UserIDAlice.String(),
+		Issuer:    auth.Issuer,
+		Audience:  jwt.ClaimStrings{auth.Audience},
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		// IssuedAt intentionally omitted.
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString(secret)
+	if err != nil {
+		t.Fatalf("failed to sign token without iat: %v", err)
+	}
+
+	got, err := authenticator.ValidateToken(context.Background(), signed)
+	if err != nil {
+		t.Fatalf("ValidateToken returned error for token without iat: %v", err)
+	}
+	if !got.IssuedAt.IsZero() {
+		t.Errorf("IssuedAt: got %v, want zero time", got.IssuedAt)
+	}
+	if got.UserID.String() != auth.UserIDAlice.String() {
+		t.Errorf("UserID: got %q, want %q", got.UserID.String(), auth.UserIDAlice.String())
+	}
 }
 
 func TestJWTAuthenticator_ExpiredToken(t *testing.T) {
@@ -198,7 +278,7 @@ func TestJWTAuthenticator_ConfigurableExpiration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if claims.Subject != auth.UserIDAlice.String() {
-		t.Errorf("Subject = %q, want %q", claims.Subject, auth.UserIDAlice.String())
+	if claims.UserID.String() != auth.UserIDAlice.String() {
+		t.Errorf("UserID = %q, want %q", claims.UserID.String(), auth.UserIDAlice.String())
 	}
 }

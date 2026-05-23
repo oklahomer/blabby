@@ -8,12 +8,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asynkron/protoactor-go/cluster"
+
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/grain/room"
+	"github.com/oklahomer/blabby/internal/id"
 	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
 )
+
+// mustUserID is a test helper that constructs a typed id.UserID, failing
+// the test on any structural error. Used to keep table-driven cases
+// readable without sprinkling NewUserID calls everywhere.
+func mustUserID(t *testing.T, raw string) id.UserID {
+	t.Helper()
+	u, err := id.NewUserID(raw)
+	if err != nil {
+		t.Fatalf("mustUserID(%q): %v", raw, err)
+	}
+	return u
+}
+
+// fakeRoomCtx returns a fake grain context with kind="RoomGrain", matching
+// what cluster.NewKind("RoomGrain", ...) produces in production. Handlers
+// in this package now derive grain_type from ctx.Kind(), so tests have to
+// populate it.
+func fakeRoomCtx(identity string, opts ...graintest.FakeGrainContextOption) cluster.GrainContext {
+	return graintest.NewFakeGrainContext(identity, append([]graintest.FakeGrainContextOption{graintest.WithKind("RoomGrain")}, opts...)...)
+}
 
 // fakeNotifier records every fan-out call, in order, for assertion.
 type fakeNotifier struct {
@@ -38,29 +61,29 @@ type forwardCall struct {
 	Timestamp time.Time
 }
 
-func (f *fakeNotifier) NotifyRoomEvent(userID string, req *userpb.NotifyRoomEventRequest) error {
+func (f *fakeNotifier) NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomEventRequest) error {
 	f.notifyCalls = append(f.notifyCalls, notifyCall{
-		UserID:    userID,
+		UserID:    userID.String(),
 		RoomID:    req.GetRoomId(),
 		Subject:   req.GetUserId(),
 		EventType: req.GetEventType(),
 	})
 	if f.notifyErrFn != nil {
-		return f.notifyErrFn(userID)
+		return f.notifyErrFn(userID.String())
 	}
 	return nil
 }
 
-func (f *fakeNotifier) ForwardMessage(userID string, req *userpb.ForwardMessageRequest) error {
+func (f *fakeNotifier) ForwardMessage(userID id.UserID, req *userpb.ForwardMessageRequest) error {
 	f.forwardCalls = append(f.forwardCalls, forwardCall{
-		UserID:    userID,
+		UserID:    userID.String(),
 		RoomID:    req.GetRoomId(),
 		SenderID:  req.GetSenderId(),
 		Text:      req.GetText(),
 		Timestamp: req.GetTimestamp().AsTime(),
 	})
 	if f.forwardErrFn != nil {
-		return f.forwardErrFn(userID)
+		return f.forwardErrFn(userID.String())
 	}
 	return nil
 }
@@ -79,7 +102,7 @@ func newGrain(t *testing.T) (*room.Grain, *fakeNotifier, *time.Time) {
 		clock = clock.Add(time.Millisecond)
 		return clock
 	})
-	g.Init(graintest.NewFakeGrainContext("general"))
+	g.Init(fakeRoomCtx("general"))
 	return g, notifier, &clock
 }
 
@@ -87,7 +110,7 @@ func TestGrain_Join(t *testing.T) {
 	t.Run("success — empty room records member and fans out one JOINED event", func(t *testing.T) {
 		g, notifier, _ := newGrain(t)
 
-		resp, err := g.Join(&roompb.JoinRequest{UserId: "alice"}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.Join(&roompb.JoinRequest{UserId: "alice"}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -95,7 +118,7 @@ func TestGrain_Join(t *testing.T) {
 			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
 
-		if got := g.Members(); !reflect.DeepEqual(got, []string{"alice"}) {
+		if got := g.Members(); !reflect.DeepEqual(got, []id.UserID{mustUserID(t, "alice")}) {
 			t.Errorf("Members: got %v, want [alice]", got)
 		}
 		if len(notifier.notifyCalls) != 1 {
@@ -114,7 +137,7 @@ func TestGrain_Join(t *testing.T) {
 		mustJoin(t, g, "bob")
 		notifier.notifyCalls = nil // reset before the third join
 
-		resp, err := g.Join(&roompb.JoinRequest{UserId: "carol"}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.Join(&roompb.JoinRequest{UserId: "carol"}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -148,7 +171,7 @@ func TestGrain_Join(t *testing.T) {
 	t.Run("empty user_id returns 4001 with no fan-out", func(t *testing.T) {
 		g, notifier, _ := newGrain(t)
 
-		resp, err := g.Join(&roompb.JoinRequest{UserId: ""}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.Join(&roompb.JoinRequest{UserId: ""}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -163,7 +186,7 @@ func TestGrain_Join(t *testing.T) {
 		mustJoin(t, g, "alice")
 		notifier.notifyCalls = nil
 
-		resp, err := g.Join(&roompb.JoinRequest{UserId: "alice"}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.Join(&roompb.JoinRequest{UserId: "alice"}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -171,7 +194,7 @@ func TestGrain_Join(t *testing.T) {
 		if len(notifier.notifyCalls) != 0 {
 			t.Errorf("notifyCalls: got %d, want 0", len(notifier.notifyCalls))
 		}
-		if got := g.Members(); !reflect.DeepEqual(got, []string{"alice"}) {
+		if got := g.Members(); !reflect.DeepEqual(got, []id.UserID{mustUserID(t, "alice")}) {
 			t.Errorf("Members: got %v, want [alice]", got)
 		}
 	})
@@ -184,7 +207,7 @@ func TestGrain_Leave(t *testing.T) {
 		mustJoin(t, g, "bob")
 		notifier.notifyCalls = nil
 
-		resp, err := g.Leave(&roompb.LeaveRequest{UserId: "alice"}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.Leave(&roompb.LeaveRequest{UserId: "alice"}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -192,7 +215,7 @@ func TestGrain_Leave(t *testing.T) {
 			t.Fatalf("expected success, got error: %+v", resp.GetError())
 		}
 
-		if got := g.Members(); !reflect.DeepEqual(got, []string{"bob"}) {
+		if got := g.Members(); !reflect.DeepEqual(got, []id.UserID{mustUserID(t, "bob")}) {
 			t.Errorf("Members: got %v, want [bob]", got)
 		}
 		if len(notifier.notifyCalls) != 2 {
@@ -214,7 +237,7 @@ func TestGrain_Leave(t *testing.T) {
 		mustJoin(t, g, "alice")
 		notifier.notifyCalls = nil
 
-		resp, err := g.Leave(&roompb.LeaveRequest{UserId: ""}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.Leave(&roompb.LeaveRequest{UserId: ""}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -227,7 +250,7 @@ func TestGrain_Leave(t *testing.T) {
 	t.Run("non-member returns 2001 with no fan-out", func(t *testing.T) {
 		g, notifier, _ := newGrain(t)
 
-		resp, err := g.Leave(&roompb.LeaveRequest{UserId: "alice"}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.Leave(&roompb.LeaveRequest{UserId: "alice"}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -245,7 +268,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		mustJoin(t, g, "bob")
 		notifier.forwardCalls = nil
 
-		resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "hello"}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "hello"}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -278,8 +301,8 @@ func TestGrain_PostMessage(t *testing.T) {
 		g, _, _ := newGrain(t)
 		mustJoin(t, g, "alice")
 
-		resp1, _ := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "one"}, graintest.NewFakeGrainContext("general"))
-		resp2, _ := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "two"}, graintest.NewFakeGrainContext("general"))
+		resp1, _ := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "one"}, fakeRoomCtx("general"))
+		resp2, _ := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "two"}, fakeRoomCtx("general"))
 
 		ts1 := resp1.GetTimestamp().AsTime()
 		ts2 := resp2.GetTimestamp().AsTime()
@@ -296,7 +319,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		mustJoin(t, g, "alice")
 		notifier.forwardCalls = nil
 
-		resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "", Text: "hi"}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "", Text: "hi"}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -314,7 +337,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		mustJoin(t, g, "alice")
 		notifier.forwardCalls = nil
 
-		resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: ""}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: ""}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -329,7 +352,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		mustJoin(t, g, "alice")
 		notifier.forwardCalls = nil
 
-		resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "  \t\n"}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "  \t\n"}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -342,7 +365,7 @@ func TestGrain_PostMessage(t *testing.T) {
 	t.Run("non-member sender returns 2001 with no fan-out and no state mutation", func(t *testing.T) {
 		g, notifier, _ := newGrain(t)
 
-		resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "hi"}, graintest.NewFakeGrainContext("general"))
+		resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "hi"}, fakeRoomCtx("general"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -368,7 +391,7 @@ func TestGrain_FanOutErrorIsLoggedNotFatal(t *testing.T) {
 		return nil
 	}
 
-	resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "hello"}, graintest.NewFakeGrainContext("general"))
+	resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "hello"}, fakeRoomCtx("general"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -383,11 +406,11 @@ func TestGrain_FanOutErrorIsLoggedNotFatal(t *testing.T) {
 func TestGrain_Init_DefaultsClockWhenAbsent(t *testing.T) {
 	g := &room.Grain{}
 	g.SetNotifier(&fakeNotifier{})
-	g.Init(graintest.NewFakeGrainContext("general"))
+	g.Init(fakeRoomCtx("general"))
 
 	mustJoin(t, g, "alice")
 
-	resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "hi"}, graintest.NewFakeGrainContext("general"))
+	resp, err := g.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "hi"}, fakeRoomCtx("general"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -399,19 +422,9 @@ func TestGrain_Init_DefaultsClockWhenAbsent(t *testing.T) {
 	}
 }
 
-func TestGrain_Terminate_EmitsLog(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	g, _, _ := newGrain(t)
-	g.Terminate(graintest.NewFakeGrainContext("general"))
-
-	if !strings.Contains(buf.String(), "grain.terminate") {
-		t.Errorf("Terminate did not emit grain.terminate log: %s", buf.String())
-	}
-}
+// Note: lifecycle logs (grain.activated / grain.passivated) are emitted by
+// the receiver middleware, not the grain body. See
+// internal/middleware/logging_test.go for those assertions.
 
 func TestGrain_ReceiveDefault_LogsUnhandled(t *testing.T) {
 	var buf bytes.Buffer
@@ -440,7 +453,7 @@ func TestGrain_FanOutNotifyError_LoggedNotFatal(t *testing.T) {
 	notifier.notifyCalls = nil
 	notifier.notifyErrFn = func(string) error { return errFake("downstream user grain unreachable") }
 
-	resp, err := g.Join(&roompb.JoinRequest{UserId: "bob"}, graintest.NewFakeGrainContext("general"))
+	resp, err := g.Join(&roompb.JoinRequest{UserId: "bob"}, fakeRoomCtx("general"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -452,7 +465,7 @@ func TestGrain_FanOutNotifyError_LoggedNotFatal(t *testing.T) {
 	}
 }
 
-func TestGrain_LogsCarryGrainTypeAndMsgType(t *testing.T) {
+func TestGrain_DomainLogsCarryEnvelopeAttrs(t *testing.T) {
 	var buf bytes.Buffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
@@ -462,11 +475,23 @@ func TestGrain_LogsCarryGrainTypeAndMsgType(t *testing.T) {
 	mustJoin(t, g, "alice")
 
 	out := buf.String()
+	if !strings.Contains(out, `msg=room.member.joined`) {
+		t.Errorf("logs missing room.member.joined line: %s", out)
+	}
 	if !strings.Contains(out, `grain_type=RoomGrain`) {
 		t.Errorf("logs missing grain_type=RoomGrain: %s", out)
 	}
-	if !strings.Contains(out, `msg_type=Join`) {
-		t.Errorf("logs missing msg_type=Join: %s", out)
+	if !strings.Contains(out, `user_id=alice`) {
+		t.Errorf("logs missing user_id=alice: %s", out)
+	}
+	if !strings.Contains(out, `msg=grain.fanout`) {
+		t.Errorf("logs missing grain.fanout trace line: %s", out)
+	}
+	if !strings.Contains(out, `msg_type=Join.fanout`) {
+		t.Errorf("logs missing msg_type=Join.fanout: %s", out)
+	}
+	if !strings.Contains(out, `target_count=1`) {
+		t.Errorf("logs missing target_count=1: %s", out)
 	}
 }
 
@@ -474,7 +499,7 @@ func TestGrain_LogsCarryGrainTypeAndMsgType(t *testing.T) {
 
 func mustJoin(t *testing.T, g *room.Grain, userID string) {
 	t.Helper()
-	resp, err := g.Join(&roompb.JoinRequest{UserId: userID}, graintest.NewFakeGrainContext("general"))
+	resp, err := g.Join(&roompb.JoinRequest{UserId: userID}, fakeRoomCtx("general"))
 	if err != nil {
 		t.Fatalf("Join(%q) unexpected error: %v", userID, err)
 	}

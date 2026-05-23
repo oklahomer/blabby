@@ -8,6 +8,7 @@ import (
 	"github.com/asynkron/protoactor-go/cluster"
 
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // Gateway is the HTTP entry point for the chat service. It translates
@@ -20,7 +21,7 @@ type Gateway struct {
 	// userGrain is a test seam. Production construction in NewGateway
 	// leaves it nil and userGrainFor falls through to
 	// clusterUserGrainCaller. Non-nil only in tests.
-	userGrain func(userID string) userGrainCaller
+	userGrain func(userID id.UserID) userGrainCaller
 }
 
 // NewGateway constructs a Gateway. All three arguments are required.
@@ -77,7 +78,7 @@ func (g *Gateway) ListenAndServe(addr string) error {
 // field on Gateway is set to inject a fake. In production it is nil and
 // the call falls through to a per-user adapter over the generated
 // cluster client.
-func (g *Gateway) userGrainFor(userID string) userGrainCaller {
+func (g *Gateway) userGrainFor(userID id.UserID) userGrainCaller {
 	if g.userGrain != nil {
 		return g.userGrain(userID)
 	}

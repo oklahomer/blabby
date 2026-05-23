@@ -1,6 +1,10 @@
 package auth
 
-import "context"
+import (
+	"context"
+
+	"github.com/oklahomer/blabby/internal/id"
+)
 
 // contextKey is an unexported type used as the key for user-ID values stored
 // in a context.Context. Using a struct (rather than a string) prevents
@@ -22,7 +26,7 @@ var userIDContextKey = &contextKey{name: "user_id"}
 // (grains, persistence, business logic) rather than threading the context
 // through and calling UserIDFromContext again — explicit arguments keep
 // dependencies visible at function boundaries.
-func ContextWithUserID(ctx context.Context, userID string) context.Context {
+func ContextWithUserID(ctx context.Context, userID id.UserID) context.Context {
 	return context.WithValue(ctx, userIDContextKey, userID)
 }
 
@@ -38,10 +42,10 @@ func ContextWithUserID(ctx context.Context, userID string) context.Context {
 // it from a context they happen to have a reference to. If ok is false at a
 // call site that runs behind authMiddleware, that is a wiring bug (route
 // registered without g.requireAuth), not a runtime condition to recover from.
-func UserIDFromContext(ctx context.Context) (string, bool) {
-	v, ok := ctx.Value(userIDContextKey).(string)
+func UserIDFromContext(ctx context.Context) (id.UserID, bool) {
+	v, ok := ctx.Value(userIDContextKey).(id.UserID)
 	if !ok {
-		return "", false
+		return id.UserID{}, false
 	}
 	return v, true
 }

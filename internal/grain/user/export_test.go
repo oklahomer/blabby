@@ -1,6 +1,10 @@
 package user
 
-import "github.com/asynkron/protoactor-go/actor"
+import (
+	"github.com/asynkron/protoactor-go/actor"
+
+	"github.com/oklahomer/blabby/internal/id"
+)
 
 // Test-only seams. export_test.go is compiled only during `go test` so the
 // production binary surface stays clean while tests can inspect private
@@ -10,7 +14,7 @@ import "github.com/asynkron/protoactor-go/actor"
 func (g *Grain) Connections() []*actor.PID { return g.state.connectionPIDs() }
 
 // JoinedRooms returns a sorted snapshot of the joined-rooms set.
-func (g *Grain) JoinedRooms() []string { return g.state.joinedRoomIDs() }
+func (g *Grain) JoinedRooms() []id.RoomID { return g.state.joinedRoomIDs() }
 
 // SetRoomClient injects a roomClient for tests; production code uses NewKind.
 func (g *Grain) SetRoomClient(c roomClient) { g.rooms = c }
