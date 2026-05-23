@@ -28,11 +28,6 @@ import (
 	"github.com/oklahomer/blabby/internal/middleware"
 )
 
-// kindName is the canonical grain_type value emitted by every log call from
-// this package and passed to middleware.GrainLogging. Pinned at one site so
-// the envelope contract cannot drift.
-const kindName = "UserGrain"
-
 // Event-name constants for every log line this package emits. Follow the
 // N3 past-tense action-verb convention: <package>.<object>.<past-verb> for
 // happy paths, <package>.<object>.<base-verb>_rejected for validation
@@ -106,7 +101,7 @@ func NewKind() *cluster.Kind {
 			return &Grain{}
 		},
 		passivationTimeout,
-		actor.WithReceiverMiddleware(middleware.GrainLogging(kindName)),
+		actor.WithReceiverMiddleware(middleware.GrainLogging("UserGrain")),
 	)
 }
 
@@ -133,7 +128,7 @@ func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
 	case *actor.Terminated:
 		g.state.removeConnection(msg.Who)
 		slog.Info(middleware.EventGrainConnectionTerminated,
-			"grain_type", kindName,
+			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"msg_type", "Terminated",
 			"pid_address", msg.Who.GetAddress(),
@@ -141,7 +136,7 @@ func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
 		)
 	default:
 		slog.Warn(middleware.EventGrainUnhandled,
-			"grain_type", kindName,
+			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"msg_type", fmt.Sprintf("%T", msg),
 		)
@@ -163,7 +158,7 @@ func (g *Grain) RegisterConnection(req *userpb.RegisterConnectionRequest, ctx cl
 	requesterPid := req.GetRequesterPid()
 	if requesterPid == nil {
 		slog.Warn(eventUserConnectionRegisterRejected,
-			"grain_type", kindName,
+			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"reason", statusInvalidRequest,
 		)
@@ -171,7 +166,7 @@ func (g *Grain) RegisterConnection(req *userpb.RegisterConnectionRequest, ctx cl
 	}
 	if requesterPid.GetAddress() == "" || requesterPid.GetId() == "" {
 		slog.Warn(eventUserConnectionRegisterRejected,
-			"grain_type", kindName,
+			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"pid_address", requesterPid.GetAddress(),
 			"pid_id", requesterPid.GetId(),
@@ -184,7 +179,7 @@ func (g *Grain) RegisterConnection(req *userpb.RegisterConnectionRequest, ctx cl
 	g.state.addConnection(pid)
 	ctx.Watch(pid)
 	slog.Info(eventUserConnectionRegistered,
-		"grain_type", kindName,
+		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
 		"pid_address", pid.GetAddress(),
 		"pid_id", pid.GetId(),
@@ -199,7 +194,7 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 	roomID, err := id.NewRoomID(req.GetRoomId())
 	if err != nil {
 		slog.Warn(eventUserRoomJoinRejected,
-			"grain_type", kindName,
+			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"user_id", ctx.Identity(),
 			"room_id", req.GetRoomId(),
@@ -214,7 +209,7 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 		// error so the gateway treats them uniformly with domain failures.
 		// The message stays generic — no actor paths leaked to the client.
 		slog.Warn(middleware.EventGrainTransportError,
-			"grain_type", kindName,
+			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"msg_type", "JoinRoom",
 			"room_id", roomID,
@@ -228,7 +223,7 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 
 	g.state.joinRoom(roomID)
 	slog.Info(eventUserRoomJoined,
-		"grain_type", kindName,
+		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
 		"user_id", ctx.Identity(),
 		"room_id", roomID,
@@ -242,7 +237,7 @@ func (g *Grain) LeaveRoom(req *userpb.LeaveRoomRequest, ctx cluster.GrainContext
 	roomID, err := id.NewRoomID(req.GetRoomId())
 	if err != nil {
 		slog.Warn(eventUserRoomLeaveRejected,
-			"grain_type", kindName,
+			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"user_id", ctx.Identity(),
 			"room_id", req.GetRoomId(),
@@ -254,7 +249,7 @@ func (g *Grain) LeaveRoom(req *userpb.LeaveRoomRequest, ctx cluster.GrainContext
 	roomResp, err := g.rooms.Leave(roomID, &roompb.LeaveRequest{UserId: ctx.Identity()})
 	if err != nil {
 		slog.Warn(middleware.EventGrainTransportError,
-			"grain_type", kindName,
+			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"msg_type", "LeaveRoom",
 			"room_id", roomID,
@@ -268,7 +263,7 @@ func (g *Grain) LeaveRoom(req *userpb.LeaveRoomRequest, ctx cluster.GrainContext
 
 	g.state.leaveRoom(roomID)
 	slog.Info(eventUserRoomLeft,
-		"grain_type", kindName,
+		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
 		"user_id", ctx.Identity(),
 		"room_id", roomID,
@@ -283,7 +278,7 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 	roomID, err := id.NewRoomID(req.GetRoomId())
 	if err != nil {
 		slog.Warn(eventUserMessageSendRejected,
-			"grain_type", kindName,
+			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"user_id", ctx.Identity(),
 			"room_id", req.GetRoomId(),
@@ -293,7 +288,7 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 	}
 	if strings.TrimSpace(req.GetText()) == "" {
 		slog.Warn(eventUserMessageSendRejected,
-			"grain_type", kindName,
+			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"user_id", ctx.Identity(),
 			"room_id", roomID,
@@ -309,7 +304,7 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 	})
 	if err != nil {
 		slog.Warn(middleware.EventGrainTransportError,
-			"grain_type", kindName,
+			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"msg_type", "SendMessage",
 			"room_id", roomID,
@@ -322,7 +317,7 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 	}
 
 	slog.Info(eventUserMessageSent,
-		"grain_type", kindName,
+		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
 		"user_id", ctx.Identity(),
 		"room_id", roomID,
@@ -342,7 +337,7 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 func (g *Grain) ForwardMessage(req *userpb.ForwardMessageRequest, ctx cluster.GrainContext) (*userpb.ForwardMessageResponse, error) {
 	pids := g.state.connectionPIDs()
 	slog.Info(middleware.EventGrainFanout,
-		"grain_type", kindName,
+		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
 		"msg_type", "ForwardMessage.fanout",
 		"sender_id", req.GetSenderId(),
@@ -364,7 +359,7 @@ func (g *Grain) ForwardMessage(req *userpb.ForwardMessageRequest, ctx cluster.Gr
 func (g *Grain) NotifyRoomEvent(req *userpb.NotifyRoomEventRequest, ctx cluster.GrainContext) (*userpb.NotifyRoomEventResponse, error) {
 	pids := g.state.connectionPIDs()
 	slog.Info(middleware.EventGrainFanout,
-		"grain_type", kindName,
+		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
 		"msg_type", "NotifyRoomEvent.fanout",
 		"room_id", req.GetRoomId(),
@@ -381,7 +376,7 @@ func (g *Grain) NotifyRoomEvent(req *userpb.NotifyRoomEventRequest, ctx cluster.
 func (g *Grain) GetJoinedRooms(_ *userpb.GetJoinedRoomsRequest, ctx cluster.GrainContext) (*userpb.GetJoinedRoomsResponse, error) {
 	roomIDs := g.state.joinedRoomIDs()
 	slog.Info(eventUserRoomsQueried,
-		"grain_type", kindName,
+		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
 		"room_count", len(roomIDs),
 	)

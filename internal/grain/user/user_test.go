@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/asynkron/protoactor-go/actor"
+	"github.com/asynkron/protoactor-go/cluster"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -32,6 +33,14 @@ func mustRoomID(t *testing.T, raw string) id.RoomID {
 		t.Fatalf("mustRoomID(%q): %v", raw, err)
 	}
 	return r
+}
+
+// fakeUserCtx returns a fake grain context with kind="UserGrain", matching
+// what cluster.NewKind("UserGrain", ...) produces in production. Handlers
+// in this package now derive grain_type from ctx.Kind(), so tests have to
+// populate it.
+func fakeUserCtx(identity string, opts ...graintest.FakeGrainContextOption) cluster.GrainContext {
+	return graintest.NewFakeGrainContext(identity, append([]graintest.FakeGrainContextOption{graintest.WithKind("UserGrain")}, opts...)...)
 }
 
 // fakeRoomClient is a recording roomClient. Each method records its inputs
@@ -156,7 +165,7 @@ func newGrain(t *testing.T) *grainHarness {
 	g.SetRoomClient(rc)
 	sender := &recordingSender{}
 	g.SetSender(sender.Send())
-	g.Init(graintest.NewFakeGrainContext("alice"))
+	g.Init(fakeUserCtx("alice"))
 	return &grainHarness{g: g, rooms: rc, sender: sender, watcher: &graintest.WatchRecorder{}}
 }
 
@@ -169,7 +178,7 @@ func TestGrain_RegisterConnection(t *testing.T) {
 
 		resp, err := h.g.RegisterConnection(
 			pidRegisterReq(pid),
-			graintest.NewFakeGrainContext("alice", graintest.WithWatchRecorder(h.watcher)),
+			fakeUserCtx("alice", graintest.WithWatchRecorder(h.watcher)),
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -190,7 +199,7 @@ func TestGrain_RegisterConnection(t *testing.T) {
 
 		resp, err := h.g.RegisterConnection(
 			&userpb.RegisterConnectionRequest{},
-			graintest.NewFakeGrainContext("alice", graintest.WithWatchRecorder(h.watcher)),
+			fakeUserCtx("alice", graintest.WithWatchRecorder(h.watcher)),
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -208,7 +217,7 @@ func TestGrain_RegisterConnection(t *testing.T) {
 			&userpb.RegisterConnectionRequest{
 				RequesterPid: &userpb.PID{Id: "id"},
 			},
-			graintest.NewFakeGrainContext("alice", graintest.WithWatchRecorder(h.watcher)),
+			fakeUserCtx("alice", graintest.WithWatchRecorder(h.watcher)),
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -223,7 +232,7 @@ func TestGrain_RegisterConnection(t *testing.T) {
 			&userpb.RegisterConnectionRequest{
 				RequesterPid: &userpb.PID{Address: "addr"},
 			},
-			graintest.NewFakeGrainContext("alice", graintest.WithWatchRecorder(h.watcher)),
+			fakeUserCtx("alice", graintest.WithWatchRecorder(h.watcher)),
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -235,8 +244,8 @@ func TestGrain_RegisterConnection(t *testing.T) {
 		h := newGrain(t)
 		pid := actor.NewPID("addr", "conn-1")
 
-		_, _ = h.g.RegisterConnection(pidRegisterReq(pid), graintest.NewFakeGrainContext("alice", graintest.WithWatchRecorder(h.watcher)))
-		resp, err := h.g.RegisterConnection(pidRegisterReq(pid), graintest.NewFakeGrainContext("alice", graintest.WithWatchRecorder(h.watcher)))
+		_, _ = h.g.RegisterConnection(pidRegisterReq(pid), fakeUserCtx("alice", graintest.WithWatchRecorder(h.watcher)))
+		resp, err := h.g.RegisterConnection(pidRegisterReq(pid), fakeUserCtx("alice", graintest.WithWatchRecorder(h.watcher)))
 		if err != nil {
 			t.Fatalf("unexpected error on re-register: %v", err)
 		}
@@ -264,7 +273,7 @@ func TestGrain_Terminated_EvictsConnection(t *testing.T) {
 		pid := actor.NewPID("addr", "conn-1")
 		mustRegister(t, h, pid)
 
-		h.g.ReceiveDefault(graintest.NewFakeGrainContext("alice",
+		h.g.ReceiveDefault(fakeUserCtx("alice",
 			graintest.WithMessage(&actor.Terminated{Who: pid}),
 		))
 
@@ -279,7 +288,7 @@ func TestGrain_Terminated_EvictsConnection(t *testing.T) {
 		mustRegister(t, h, pidLive)
 		pidStranger := actor.NewPID("addr", "stranger")
 
-		h.g.ReceiveDefault(graintest.NewFakeGrainContext("alice",
+		h.g.ReceiveDefault(fakeUserCtx("alice",
 			graintest.WithMessage(&actor.Terminated{Who: pidStranger}),
 		))
 
@@ -295,7 +304,7 @@ func TestGrain_Terminated_EvictsConnection(t *testing.T) {
 		mustRegister(t, h, pidA)
 		mustRegister(t, h, pidB)
 
-		h.g.ReceiveDefault(graintest.NewFakeGrainContext("alice",
+		h.g.ReceiveDefault(fakeUserCtx("alice",
 			graintest.WithMessage(&actor.Terminated{Who: pidA}),
 		))
 
@@ -311,7 +320,7 @@ func TestGrain_JoinRoom(t *testing.T) {
 	t.Run("success records room and forwards user_id", func(t *testing.T) {
 		h := newGrain(t)
 
-		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -329,7 +338,7 @@ func TestGrain_JoinRoom(t *testing.T) {
 	t.Run("empty room_id returns 4001 with no Room call", func(t *testing.T) {
 		h := newGrain(t)
 
-		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: ""}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: ""}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -345,7 +354,7 @@ func TestGrain_JoinRoom(t *testing.T) {
 			Error: &commonpb.ErrorDetail{Code: 2002, Status: "ROOM_ALREADY_MEMBER", Message: "already a member"},
 		}
 
-		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -361,7 +370,7 @@ func TestGrain_JoinRoom(t *testing.T) {
 			return nil, errors.New("dial timeout")
 		}
 
-		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -377,10 +386,10 @@ func TestGrain_JoinRoom(t *testing.T) {
 func TestGrain_LeaveRoom(t *testing.T) {
 	t.Run("success removes room and forwards user_id", func(t *testing.T) {
 		h := newGrain(t)
-		_, _ = h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, graintest.NewFakeGrainContext("alice"))
+		_, _ = h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
 		h.rooms.joinCalls = nil
 
-		resp, err := h.g.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: "general"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -398,7 +407,7 @@ func TestGrain_LeaveRoom(t *testing.T) {
 	t.Run("empty room_id returns 4001", func(t *testing.T) {
 		h := newGrain(t)
 
-		resp, err := h.g.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: ""}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: ""}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -414,7 +423,7 @@ func TestGrain_LeaveRoom(t *testing.T) {
 			Error: &commonpb.ErrorDetail{Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member"},
 		}
 
-		resp, err := h.g.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: "general"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -427,7 +436,7 @@ func TestGrain_LeaveRoom(t *testing.T) {
 			return nil, errors.New("dial timeout")
 		}
 
-		resp, err := h.g.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: "general"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -444,7 +453,7 @@ func TestGrain_SendMessage(t *testing.T) {
 		want := time.UnixMilli(9999)
 		h.rooms.defaultPost = &roompb.PostMessageResponse{Timestamp: timestamppb.New(want)}
 
-		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -462,7 +471,7 @@ func TestGrain_SendMessage(t *testing.T) {
 	t.Run("whitespace-only text returns 4002", func(t *testing.T) {
 		h := newGrain(t)
 
-		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: " \t\n"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: " \t\n"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -475,7 +484,7 @@ func TestGrain_SendMessage(t *testing.T) {
 	t.Run("empty room_id returns 4001", func(t *testing.T) {
 		h := newGrain(t)
 
-		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "", Text: "hi"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "", Text: "hi"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -488,7 +497,7 @@ func TestGrain_SendMessage(t *testing.T) {
 			Error: &commonpb.ErrorDetail{Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member"},
 		}
 
-		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -504,7 +513,7 @@ func TestGrain_SendMessage(t *testing.T) {
 			return nil, errors.New("dial timeout")
 		}
 
-		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -522,7 +531,7 @@ func TestGrain_ForwardMessage(t *testing.T) {
 		mustRegister(t, h, actor.NewPID("addr", "conn-c"))
 
 		req := &userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice", Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(42))}
-		resp, err := h.g.ForwardMessage(req, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.ForwardMessage(req, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -544,7 +553,7 @@ func TestGrain_ForwardMessage(t *testing.T) {
 	t.Run("with 0 connections returns success and does not call sender", func(t *testing.T) {
 		h := newGrain(t)
 
-		resp, err := h.g.ForwardMessage(&userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice"}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.ForwardMessage(&userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice"}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -571,7 +580,7 @@ func TestGrain_NotifyRoomEvent(t *testing.T) {
 			UserId:    "bob",
 			EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 		}
-		resp, err := h.g.NotifyRoomEvent(req, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.NotifyRoomEvent(req, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -595,7 +604,7 @@ func TestGrain_GetJoinedRooms(t *testing.T) {
 	t.Run("empty returns empty list", func(t *testing.T) {
 		h := newGrain(t)
 
-		resp, err := h.g.GetJoinedRooms(&userpb.GetJoinedRoomsRequest{}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.GetJoinedRooms(&userpb.GetJoinedRoomsRequest{}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -606,10 +615,10 @@ func TestGrain_GetJoinedRooms(t *testing.T) {
 
 	t.Run("after two joins returns sorted list", func(t *testing.T) {
 		h := newGrain(t)
-		_, _ = h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "zulu"}, graintest.NewFakeGrainContext("alice"))
-		_, _ = h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "alpha"}, graintest.NewFakeGrainContext("alice"))
+		_, _ = h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "zulu"}, fakeUserCtx("alice"))
+		_, _ = h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "alpha"}, fakeUserCtx("alice"))
 
-		resp, err := h.g.GetJoinedRooms(&userpb.GetJoinedRoomsRequest{}, graintest.NewFakeGrainContext("alice"))
+		resp, err := h.g.GetJoinedRooms(&userpb.GetJoinedRoomsRequest{}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -630,7 +639,7 @@ func TestGrain_MultiDeviceEcho(t *testing.T) {
 	h.rooms.defaultPost = &roompb.PostMessageResponse{Timestamp: timestamppb.New(time.UnixMilli(7))}
 
 	// 1. SendMessage: alice posts "hi" — Room grain returns success.
-	sendResp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, graintest.NewFakeGrainContext("alice"))
+	sendResp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, fakeUserCtx("alice"))
 	if err != nil {
 		t.Fatalf("SendMessage unexpected error: %v", err)
 	}
@@ -645,7 +654,7 @@ func TestGrain_MultiDeviceEcho(t *testing.T) {
 
 	// 3. Simulate Room grain fan-out back to alice.
 	fwd := &userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice", Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(7))}
-	_, err = h.g.ForwardMessage(fwd, graintest.NewFakeGrainContext("alice"))
+	_, err = h.g.ForwardMessage(fwd, fakeUserCtx("alice"))
 	if err != nil {
 		t.Fatalf("ForwardMessage unexpected error: %v", err)
 	}
@@ -693,7 +702,7 @@ func TestGrain_DoesNotLogMessageText(t *testing.T) {
 		buf := captureLogs(t)
 		h := newGrain(t)
 
-		_, _ = h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: text}, graintest.NewFakeGrainContext("alice"))
+		_, _ = h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: text}, fakeUserCtx("alice"))
 
 		out := buf.String()
 		if strings.Contains(out, text) {
@@ -712,7 +721,7 @@ func TestGrain_DoesNotLogMessageText(t *testing.T) {
 
 		_, _ = h.g.ForwardMessage(&userpb.ForwardMessageRequest{
 			RoomId: "general", SenderId: "alice", Text: text, Timestamp: timestamppb.New(time.UnixMilli(1)),
-		}, graintest.NewFakeGrainContext("alice"))
+		}, fakeUserCtx("alice"))
 
 		out := buf.String()
 		if strings.Contains(out, text) {
@@ -734,7 +743,7 @@ func TestGrain_DoesNotLogMessageText(t *testing.T) {
 func TestGrain_ReceiveDefault_LogsUnhandled(t *testing.T) {
 	buf := captureLogs(t)
 	h := newGrain(t)
-	h.g.ReceiveDefault(graintest.NewFakeGrainContext("alice", graintest.WithMessage(struct{ X int }{X: 1})))
+	h.g.ReceiveDefault(fakeUserCtx("alice", graintest.WithMessage(struct{ X int }{X: 1})))
 
 	if !strings.Contains(buf.String(), "grain.unhandled") {
 		t.Errorf("ReceiveDefault did not emit grain.unhandled log: %s", buf.String())
@@ -753,7 +762,7 @@ func mustRegister(t *testing.T, h *grainHarness, pid *actor.PID) {
 	t.Helper()
 	resp, err := h.g.RegisterConnection(
 		pidRegisterReq(pid),
-		graintest.NewFakeGrainContext("alice", graintest.WithWatchRecorder(h.watcher)),
+		fakeUserCtx("alice", graintest.WithWatchRecorder(h.watcher)),
 	)
 	if err != nil {
 		t.Fatalf("RegisterConnection(%v) unexpected error: %v", pid, err)

@@ -163,26 +163,27 @@ func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 	// at least once. Lifecycle events (grain.activated) are covered by
 	// the package's unit tests.
 	expect := []struct {
-		event   string
-		grainID string // empty = match any
+		event     string
+		grainType string
+		grainID   string // empty = match any
 	}{
 		// Room.Join trail.
-		{event: "grain.msg", grainID: general}, // Join envelope
-		{event: "room.member.joined", grainID: general},
-		{event: "grain.fanout", grainID: general}, // Join.fanout
-		{event: "grain.msg", grainID: alice},      // NotifyRoomEvent envelope
-		{event: "grain.fanout", grainID: alice},   // NotifyRoomEvent.fanout
+		{event: "grain.msg", grainType: "RoomGrain", grainID: general}, // Join envelope
+		{event: "room.member.joined", grainType: "RoomGrain", grainID: general},
+		{event: "grain.fanout", grainType: "RoomGrain", grainID: general}, // Join.fanout
+		{event: "grain.msg", grainType: "UserGrain", grainID: alice},      // NotifyRoomEvent envelope
+		{event: "grain.fanout", grainType: "UserGrain", grainID: alice},   // NotifyRoomEvent.fanout
 
 		// Room.PostMessage trail.
-		{event: "grain.msg", grainID: general}, // PostMessage envelope
-		{event: "room.message.posted", grainID: general},
-		{event: "grain.fanout", grainID: general}, // PostMessage.fanout
-		{event: "grain.msg", grainID: alice},      // ForwardMessage envelope
-		{event: "grain.fanout", grainID: alice},   // ForwardMessage.fanout
+		{event: "grain.msg", grainType: "RoomGrain", grainID: general}, // PostMessage envelope
+		{event: "room.message.posted", grainType: "RoomGrain", grainID: general},
+		{event: "grain.fanout", grainType: "RoomGrain", grainID: general}, // PostMessage.fanout
+		{event: "grain.msg", grainType: "UserGrain", grainID: alice},      // ForwardMessage envelope
+		{event: "grain.fanout", grainType: "UserGrain", grainID: alice},   // ForwardMessage.fanout
 	}
 	for _, want := range expect {
-		if !containsLine(lines, want.event, want.grainID) {
-			t.Errorf("missing trace line: event=%q grain_id=%q", want.event, want.grainID)
+		if !containsLine(lines, want.event, want.grainType, want.grainID) {
+			t.Errorf("missing trace line: event=%q grain_type=%q grain_id=%q", want.event, want.grainType, want.grainID)
 		}
 	}
 
@@ -233,9 +234,12 @@ func parseJSONLines(t *testing.T, raw string) []map[string]any {
 	return out
 }
 
-func containsLine(lines []map[string]any, event, grainID string) bool {
+func containsLine(lines []map[string]any, event, grainType, grainID string) bool {
 	for _, line := range lines {
 		if line["msg"] != event {
+			continue
+		}
+		if grainType != "" && line["grain_type"] != grainType {
 			continue
 		}
 		if grainID == "" {
