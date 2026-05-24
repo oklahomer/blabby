@@ -1,0 +1,67 @@
+// Package api owns the HTTP + WebSocket transport between the TUI
+// client and the blabby server. It defines the typed wire schema, the
+// tea.Cmd-shaped operations the root Model dispatches (LoginCmd,
+// DialAndAuthCmd, ReadLoopCmd), and small helpers for translating
+// server URLs and decoding JWT payloads.
+//
+// The wire types deliberately duplicate the server's gateway and
+// connection schemas. The gateway is the project's JSON boundary;
+// inverting the dependency to share a types package would couple the
+// client to server-internal packages. Drift is caught by the
+// integration test that exercises the real server through
+// httptest.Server.
+package api
+
+// LoginRequest mirrors internal/gateway/handler.go LoginRequest. The
+// server treats both fields as required and trims whitespace before
+// authenticating.
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// LoginResponse mirrors internal/gateway/handler.go LoginResponse for
+// HTTP 200 outcomes.
+type LoginResponse struct {
+	Token string `json:"token"`
+}
+
+// ErrorDetail mirrors internal/gateway/errors.go ErrorDetail. Code is
+// modelled as int (not int32) to match the server's emitted JSON shape
+// exactly — the server's ErrorCode underlies int.
+type ErrorDetail struct {
+	Code    int    `json:"code"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+// ErrorEnvelope mirrors internal/gateway/errors.go ErrorResponse. All
+// HTTP error paths from the gateway wrap their ErrorDetail in this
+// envelope.
+type ErrorEnvelope struct {
+	Error ErrorDetail `json:"error"`
+}
+
+// AuthFrame is the outbound first WebSocket frame the client sends
+// after the upgrade succeeds — mirrors the server's
+// internal/actor/connection/decoder.go auth wire shape.
+type AuthFrame struct {
+	Type  string `json:"type"`
+	Token string `json:"token"`
+}
+
+// FrameEnvelope is the minimal inbound frame shape used to dispatch
+// server messages by Type. Higher layers decode the full payload
+// once they see a Type they care about.
+type FrameEnvelope struct {
+	Type string `json:"type"`
+}
+
+// AuthErrorFrame mirrors internal/actor/connection/encoder.go's
+// auth_error payload (1001/1002/1003).
+type AuthErrorFrame struct {
+	Type    string `json:"type"`
+	Code    int    `json:"code"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
