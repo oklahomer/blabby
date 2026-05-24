@@ -65,3 +65,13 @@ The output in `gen/` should be identical each run. Verify with:
 ```bash
 buf generate && git diff --exit-code gen/
 ```
+
+## TUI Client
+
+Run the terminal client with:
+
+```bash
+go run ./cmd/client --server http://localhost:8080
+```
+
+On launch the alternate screen paints a three-pane workspace (rooms / messages / profile + clock) with a centered sign-in modal. Type your username, press `tab`, type your password, press `enter`. After authentication the modal closes and the Profile pane shows your identity. Press `ctrl+c` at any time to quit cleanly.
