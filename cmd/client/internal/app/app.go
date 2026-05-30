@@ -17,6 +17,7 @@ import (
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/info"
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/mainview"
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/rooms"
+	"github.com/oklahomer/blabby/cmd/client/internal/roomsearch"
 )
 
 // Model is the root tea.Model for the TUI client. State transitions
@@ -48,6 +49,12 @@ type Model struct {
 	username string
 	userID   string
 	conn     *websocket.Conn
+
+	// active-room state populated after the user joins or selects a
+	// room. activeRoomID is empty pre-join; nameForID maps a joined
+	// room's ID to the friendly name captured at join time.
+	activeRoomID string
+	nameForID    map[string]string
 }
 
 // New constructs the root Model for the given parsed --server URL.
@@ -106,6 +113,24 @@ func (m Model) loginSubmitter() login.Submitter {
 	}
 }
 
+// joinRoomSubmitter returns the closure the search modal calls when
+// the user presses enter on a row. The closure captures the current
+// session's HTTP client + token so the modal does not need to know
+// about them.
+func (m Model) joinRoomSubmitter() roomsearch.Submitter {
+	return func(roomID, roomName string) tea.Cmd {
+		return api.JoinRoomCmd(m.httpClient, m.server.String(), m.token, roomID, roomName, api.DefaultRoomCallTimeout)
+	}
+}
+
+// roomsLoader returns the closure the search modal invokes from Init
+// to fetch the server catalogue. Same seam pattern as loginSubmitter.
+func (m Model) roomsLoader() roomsearch.Loader {
+	return func() tea.Cmd {
+		return api.LoadRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout)
+	}
+}
+
 // Update routes incoming messages through the state-machine
 // dispatch table. Every behavior transition lives here — sub-Models
 // surface outcomes via typed messages and Update maps each outcome
@@ -155,12 +180,85 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.infoState.UserID = m.userID
 		m.modal = nil
 		m.focus = focusRooms
-		return m, api.ReadLoopCmd(m.ctx, m.program, m.conn)
+		m.roomsState.Loading = true
+		return m, tea.Batch(
+			api.ReadLoopCmd(m.ctx, m.program, m.conn),
+			api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout),
+		)
 
 	case api.LoginRejected, api.LoginTransportError, api.WSAuthRejected, api.WSDialFailed, api.WSAuthTimedOut:
 		if m.modal != nil {
 			nextModal, cmd := m.modal.Update(msg)
 			m.modal = nextModal
+			return m, cmd
+		}
+		return m, nil
+
+	case api.JoinedRoomsLoaded:
+		m.roomsState.JoinedIDs = v.RoomIDs
+		m.roomsState.Loading = false
+		m.roomsState.LoadError = ""
+		if len(v.RoomIDs) == 0 {
+			m.roomsState.Cursor = 0
+		} else if m.roomsState.Cursor > len(v.RoomIDs)-1 {
+			m.roomsState.Cursor = len(v.RoomIDs) - 1
+		}
+		return m, nil
+
+	case api.JoinedRoomsLoadFailed:
+		if v.HTTPStatus == http.StatusUnauthorized {
+			return m.handleSessionExpiry()
+		}
+		m.roomsState.Loading = false
+		m.roomsState.LoadError = api.Humanise(v.Status, v.Message)
+		return m, nil
+
+	case api.RoomJoined:
+		if m.token == "" || m.conn == nil {
+			// Join HTTP completed after the session ended
+			// (WSDisconnected raced the response). Drop the message —
+			// the user is already looking at a fresh login modal.
+			return m, nil
+		}
+		if m.nameForID == nil {
+			m.nameForID = map[string]string{}
+		}
+		m.nameForID[v.RoomID] = v.RoomName
+		m.roomsState.NameForID = m.nameForID
+		m.activeRoomID = v.RoomID
+		m.mainviewState.RoomLabel = v.RoomName
+		m.modal = nil
+		// Reload from the server so the Rooms pane reflects the
+		// authoritative membership; the modal's optimistic-add does
+		// not own this state.
+		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout)
+
+	case api.RoomsLoaded:
+		if m.modal != nil {
+			next, cmd := m.modal.Update(msg)
+			m.modal = next
+			return m, cmd
+		}
+		return m, nil
+
+	case api.RoomsLoadFailed:
+		if v.HTTPStatus == http.StatusUnauthorized {
+			return m.handleSessionExpiry()
+		}
+		if m.modal != nil {
+			next, cmd := m.modal.Update(msg)
+			m.modal = next
+			return m, cmd
+		}
+		return m, nil
+
+	case api.RoomJoinFailed:
+		if v.HTTPStatus == http.StatusUnauthorized {
+			return m.handleSessionExpiry()
+		}
+		if m.modal != nil {
+			next, cmd := m.modal.Update(msg)
+			m.modal = next
 			return m, cmd
 		}
 		return m, nil
@@ -179,6 +277,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.userID = ""
 		m.infoState.Username = ""
 		m.infoState.UserID = ""
+		m.activeRoomID = ""
+		m.nameForID = nil
+		m.mainviewState.RoomLabel = ""
+		m.roomsState = rooms.State{}
 		m.modal = m.openLoginModalWithError("Connection lost — please sign in again", previousUsername)
 		return m, m.modal.Init()
 
@@ -204,8 +306,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleKey applies the chrome's modal/focus dispatch rules: ctrl+c
 // quits unconditionally; a modal absorbs everything else when open;
-// otherwise focus keys are interpreted before passing the event to
-// the focused pane.
+// `/` opens the search modal post-auth; otherwise focus keys are
+// interpreted before passing the event to the focused pane.
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.String() == "ctrl+c" {
 		// The actual conn shutdown happens in the tea.QuitMsg
@@ -220,14 +322,58 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if k.String() == "/" {
+		m.modal = roomsearch.New(m.joinRoomSubmitter(), m.roomsLoader(), m.server.String())
+		return m, m.modal.Init()
+	}
+
 	if nextFocus, consumed := interpret(k.String(), m.focus); consumed {
 		m.focus = nextFocus
 		return m, nil
 	}
 
-	// No editable focused panes yet; pass-through is a no-op until
-	// the panes grow real input handlers.
+	if m.focus == focusRooms {
+		nextState, outcome := rooms.HandleKey(m.roomsState, k.String())
+		m.roomsState = nextState
+		switch outcome {
+		case rooms.OutcomeSwitchActiveRoom:
+			if id := nextState.ActiveID(); id != "" {
+				m.activeRoomID = id
+				m.mainviewState.RoomLabel = nextState.ResolveName(id)
+			}
+			return m, nil
+		case rooms.OutcomeRetryLoad:
+			m.roomsState.Loading = true
+			m.roomsState.LoadError = ""
+			return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout)
+		}
+		return m, nil
+	}
+
+	// focusMainView and focusMainInput are placeholders until
+	// Story 4.3 wires send/receive into the Main pane.
 	return m, nil
+}
+
+// handleSessionExpiry discards the current JWT, closes the WebSocket
+// with a normal-closure frame, and reopens the login modal with the
+// "Session expired" headline and the prior username pre-filled. Mirrors
+// the WSDisconnected recovery path.
+func (m Model) handleSessionExpiry() (tea.Model, tea.Cmd) {
+	previousUsername := m.username
+	api.CloseGracefully(m.conn)
+	m.conn = nil
+	m.token = ""
+	m.username = ""
+	m.userID = ""
+	m.infoState.Username = ""
+	m.infoState.UserID = ""
+	m.activeRoomID = ""
+	m.nameForID = nil
+	m.mainviewState.RoomLabel = ""
+	m.roomsState = rooms.State{}
+	m.modal = m.openLoginModalWithError("Session expired — please sign in again", previousUsername)
+	return m, m.modal.Init()
 }
 
 // View renders the chrome with the current pane content and, if a

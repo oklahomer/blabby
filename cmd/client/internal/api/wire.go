@@ -65,3 +65,31 @@ type AuthErrorFrame struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
 }
+
+// Room mirrors internal/gateway/handler_room_query.go roomDescriptor —
+// one entry in the catalogue returned by GET /rooms.
+type Room struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// RoomListResponse mirrors internal/gateway/handler_room_query.go
+// roomListResponse for HTTP 200 outcomes of GET /rooms.
+type RoomListResponse struct {
+	Rooms []Room `json:"rooms"`
+}
+
+// JoinedRoomsResponse mirrors internal/gateway/handler_room_query.go
+// joinedRoomsResponse for HTTP 200 outcomes of GET /rooms/joined. The
+// server normalises an empty list to `[]`, never `null`.
+type JoinedRoomsResponse struct {
+	RoomIDs []string `json:"room_ids"`
+}
+
+// JoinSuccessResponse mirrors internal/gateway/handler_room.go
+// successResponse for the join endpoint's 200 outcome. The server
+// emits the same shape from leave and other room-mutation endpoints;
+// the type is named for the join site that consumes it today.
+type JoinSuccessResponse struct {
+	Success bool `json:"success"`
+}
