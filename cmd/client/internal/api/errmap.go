@@ -14,6 +14,9 @@ var errorMessages = map[string]string{
 	"INTERNAL_ERROR":      "Server error — please try again",
 	"SERVICE_UNAVAILABLE": "Server unavailable — please try again",
 	"RATE_LIMIT_EXCEEDED": "Too many attempts — please wait and try again",
+	"ROOM_ALREADY_MEMBER": "Already joined this room",
+	"ROOM_NOT_FOUND":      "Room not found",
+	"ROOM_NOT_MEMBER":     "Not a member of this room",
 }
 
 // Humanise returns the UX-friendly message for the given gateway

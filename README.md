@@ -74,4 +74,4 @@ Run the terminal client with:
 go run ./cmd/client --server http://localhost:8080
 ```
 
-On launch the alternate screen paints a three-pane workspace (rooms / messages / profile + clock) with a centered sign-in modal. Type your username, press `tab`, type your password, press `enter`. After authentication the modal closes and the Profile pane shows your identity. Press `ctrl+c` at any time to quit cleanly.
+On launch the alternate screen paints a three-pane workspace (rooms / messages / profile + clock) with a centered sign-in modal. Type your username, press `tab`, type your password, press `enter`. After authentication the modal closes and the Profile pane shows your identity. Once signed in, press `/` to open the search modal and join a room, then highlight a joined room in the Rooms pane and press `enter` to make it the active room. Press `ctrl+c` at any time to quit cleanly.
