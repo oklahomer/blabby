@@ -93,3 +93,30 @@ type JoinedRoomsResponse struct {
 type JoinSuccessResponse struct {
 	Success bool `json:"success"`
 }
+
+// SendMessageRequestBody mirrors internal/gateway/handler_room.go
+// sendMessageRequest — the JSON body of POST /rooms/{id}/messages.
+type SendMessageRequestBody struct {
+	Text string `json:"text"`
+}
+
+// SendMessageResponse mirrors internal/gateway/handler_room.go
+// sendMessageSuccessResponse for the 200 outcome. Timestamp is the
+// server-assigned post time in Unix milliseconds; SendMessageCmd
+// parses it into a time.Time at the boundary.
+type SendMessageResponse struct {
+	Success   bool  `json:"success"`
+	Timestamp int64 `json:"timestamp"`
+}
+
+// MessageFrame mirrors internal/actor/connection/encoder.go
+// encodeMessage — the inbound {"type":"message"} chat frame the Room
+// grain fans out to every member (the sender included). Timestamp is
+// Unix milliseconds; the server emits 0 for a zero-value time.
+type MessageFrame struct {
+	Type      string `json:"type"`
+	RoomID    string `json:"room_id"`
+	SenderID  string `json:"sender_id"`
+	Text      string `json:"text"`
+	Timestamp int64  `json:"timestamp"`
+}

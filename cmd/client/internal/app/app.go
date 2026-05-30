@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -45,16 +46,26 @@ type Model struct {
 	modal modal.Modal
 
 	// session state populated after the WS handshake succeeds
-	token    string
-	username string
-	userID   string
-	conn     *websocket.Conn
+	token             string
+	username          string
+	userID            string
+	conn              *websocket.Conn
+	sessionGeneration api.SessionGeneration
 
 	// active-room state populated after the user joins or selects a
 	// room. activeRoomID is empty pre-join; nameForID maps a joined
 	// room's ID to the friendly name captured at join time.
 	activeRoomID string
 	nameForID    map[string]string
+
+	// chat state populated after the WS handshake succeeds. composer is
+	// the Main-pane message input; messages holds the per-room
+	// scrollback buckets keyed by room ID; connected drives the passive
+	// status indicator; mainError is the inline Main-pane error string.
+	composer  textinput.Model
+	messages  map[string][]mainview.Message
+	connected bool
+	mainError string
 }
 
 // New constructs the root Model for the given parsed --server URL.
@@ -150,6 +161,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.height = 0
 		}
+		m.composer.Width = composerWidth(m.width, m.height)
 		return m, nil
 
 	case tickMsg:
@@ -163,11 +175,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case api.LoginSucceeded:
 		m.token = v.Token
 		m.username = v.Username
+		m.sessionGeneration++
 		nextModal, _ := m.advanceLoginToConnecting()
 		m.modal = nextModal
-		return m, api.DialAndAuthCmd(m.server.String(), m.token, api.DefaultWSDialTimeout, api.DefaultWSAuthTimeout)
+		return m, api.DialAndAuthCmd(api.DialAndAuthRequest{
+			Server:      m.server.String(),
+			Token:       m.token,
+			Generation:  m.sessionGeneration,
+			DialTimeout: api.DefaultWSDialTimeout,
+			AuthTimeout: api.DefaultWSAuthTimeout,
+		})
 
 	case api.WSAuthSucceeded:
+		if v.Generation != m.sessionGeneration {
+			if v.Conn != nil {
+				_ = v.Conn.Close()
+			}
+			return m, nil
+		}
 		// SetProgram is a construction-time contract enforced by
 		// main. A nil program here means the read loop would never
 		// run — fail loudly instead of silently authenticating.
@@ -181,12 +206,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modal = nil
 		m.focus = focusRooms
 		m.roomsState.Loading = true
+		m.connected = true
+		m.messages = map[string][]mainview.Message{}
+		m.composer = newComposer(composerWidth(m.width, m.height))
 		return m, tea.Batch(
-			api.ReadLoopCmd(m.ctx, m.program, m.conn),
+			api.ReadLoopCmd(api.ReadLoopRequest{
+				Context:    m.ctx,
+				Sender:     m.program,
+				Conn:       m.conn,
+				Generation: m.sessionGeneration,
+			}),
 			api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout),
 		)
 
-	case api.LoginRejected, api.LoginTransportError, api.WSAuthRejected, api.WSDialFailed, api.WSAuthTimedOut:
+	case api.LoginRejected, api.LoginTransportError:
+		if m.modal != nil {
+			nextModal, cmd := m.modal.Update(msg)
+			m.modal = nextModal
+			return m, cmd
+		}
+		return m, nil
+
+	case api.WSAuthRejected:
+		if v.Generation != m.sessionGeneration {
+			return m, nil
+		}
+		if m.modal != nil {
+			nextModal, cmd := m.modal.Update(msg)
+			m.modal = nextModal
+			return m, cmd
+		}
+		return m, nil
+
+	case api.WSDialFailed:
+		if v.Generation != m.sessionGeneration {
+			return m, nil
+		}
+		if m.modal != nil {
+			nextModal, cmd := m.modal.Update(msg)
+			m.modal = nextModal
+			return m, cmd
+		}
+		return m, nil
+
+	case api.WSAuthTimedOut:
+		if v.Generation != m.sessionGeneration {
+			return m, nil
+		}
 		if m.modal != nil {
 			nextModal, cmd := m.modal.Update(msg)
 			m.modal = nextModal
@@ -264,12 +330,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case api.WSFrameReceived:
-		// joined / left / message / error / ping frames are dropped
-		// silently here; the room-list and chat panes will register
-		// handlers when they grow real state.
+		if v.Generation != m.sessionGeneration {
+			return m, nil
+		}
+		// message and error frames render into the Main pane; joined /
+		// left / ping are delivered but ignored in this phase (see the
+		// deferred-work notes for system lines and pong replies).
+		switch v.Type {
+		case "message":
+			if cm, ok := api.DecodeChatMessage(v.Raw); ok {
+				m = m.appendChatMessage(cm)
+			}
+			return m, nil
+		case "error":
+			if ef, ok := api.DecodeErrorFrame(v.Raw); ok {
+				m.mainError = api.Humanise(ef.Status, ef.Message)
+			}
+			return m, nil
+		default:
+			return m, nil
+		}
+
+	case api.SendMessageSucceeded:
+		if m.token == "" || m.conn == nil || v.Generation != m.sessionGeneration {
+			return m, nil
+		}
+		// The sent message renders when its echo frame arrives over the
+		// WebSocket, not here; the HTTP 200 only clears any prior error.
+		m.mainError = ""
+		return m, nil
+
+	case api.SendMessageFailed:
+		if m.token == "" || m.conn == nil || v.Generation != m.sessionGeneration {
+			return m, nil
+		}
+		if v.HTTPStatus == http.StatusUnauthorized {
+			return m.handleSessionExpiry()
+		}
+		m.mainError = api.Humanise(v.Status, v.Message)
 		return m, nil
 
 	case api.WSDisconnected:
+		if v.Generation != m.sessionGeneration {
+			return m, nil
+		}
 		previousUsername := m.username
 		m.conn = nil
 		m.token = ""
@@ -281,6 +385,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.nameForID = nil
 		m.mainviewState.RoomLabel = ""
 		m.roomsState = rooms.State{}
+		m.connected = false
+		m.messages = nil
+		m.composer = textinput.Model{}
+		m.mainError = ""
 		m.modal = m.openLoginModalWithError("Connection lost — please sign in again", previousUsername)
 		return m, m.modal.Init()
 
@@ -322,13 +430,25 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	if k.String() == "/" {
+	// `/` opens the room search globally, except while the composer is
+	// focused — there it is a literal character of the message.
+	if k.String() == "/" && m.focus != focusMainInput {
 		m.modal = roomsearch.New(m.joinRoomSubmitter(), m.roomsLoader(), m.server.String())
 		return m, m.modal.Init()
 	}
 
 	if nextFocus, consumed := interpret(k.String(), m.focus); consumed {
+		leavingInput := m.focus == focusMainInput
 		m.focus = nextFocus
+		if leavingInput {
+			m.composer.Blur()
+		}
+		// Entering the input region with an active room focuses the
+		// composer; dispatch the blink Cmd it returns so the cursor
+		// blinks. Without an active room the composer stays disabled.
+		if nextFocus == focusMainInput && m.activeRoomID != "" {
+			return m, m.composer.Focus()
+		}
 		return m, nil
 	}
 
@@ -340,6 +460,9 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if id := nextState.ActiveID(); id != "" {
 				m.activeRoomID = id
 				m.mainviewState.RoomLabel = nextState.ResolveName(id)
+				// Drop any inline error left over from the previous
+				// room so it does not linger over a different scrollback.
+				m.mainError = ""
 			}
 			return m, nil
 		case rooms.OutcomeRetryLoad:
@@ -350,8 +473,35 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// focusMainView and focusMainInput are placeholders until
-	// Story 4.3 wires send/receive into the Main pane.
+	if m.focus == focusMainInput {
+		// enter sends the composed message over HTTP when there is a
+		// non-empty value and an active room; the input clears on send,
+		// and the message renders when its echo frame arrives. Enter
+		// with empty text or no active room is a no-op.
+		if k.String() == "enter" {
+			text := strings.TrimSpace(m.composer.Value())
+			if text == "" || m.activeRoomID == "" {
+				return m, nil
+			}
+			cmd := api.SendMessageCmd(api.SendMessageCommandRequest{
+				Client:     m.httpClient,
+				Server:     m.server.String(),
+				Token:      m.token,
+				Generation: m.sessionGeneration,
+				RoomID:     m.activeRoomID,
+				Text:       text,
+				Timeout:    api.DefaultRoomCallTimeout,
+			})
+			m.composer.SetValue("")
+			return m, cmd
+		}
+		var cmd tea.Cmd
+		m.composer, cmd = m.composer.Update(k)
+		return m, cmd
+	}
+
+	// focusMainView has no key bindings in this phase; scrollback scroll
+	// keys are out of scope (see the deferred-work notes).
 	return m, nil
 }
 
@@ -372,6 +522,10 @@ func (m Model) handleSessionExpiry() (tea.Model, tea.Cmd) {
 	m.nameForID = nil
 	m.mainviewState.RoomLabel = ""
 	m.roomsState = rooms.State{}
+	m.connected = false
+	m.messages = nil
+	m.composer = textinput.Model{}
+	m.mainError = ""
 	m.modal = m.openLoginModalWithError("Session expired — please sign in again", previousUsername)
 	return m, m.modal.Init()
 }
@@ -383,11 +537,21 @@ func (m Model) View() string {
 		return ""
 	}
 
+	mainW, mainH := mainInnerDims(m.width, m.height)
+	mainState := mainview.State{
+		RoomLabel: m.mainviewState.RoomLabel,
+		Messages:  m.messages[m.activeRoomID],
+		Composer:  m.composer.View(),
+		ErrorLine: m.mainError,
+		CanType:   m.activeRoomID != "",
+		Connected: m.connected,
+	}
+
 	background := chrome.Render(chrome.State{
 		Width:        m.width,
 		Height:       m.height,
 		RoomsView:    rooms.View(m.roomsState, m.focus == focusRooms, 0, 0),
-		MainView:     mainview.View(m.mainviewState, m.focus == focusMainView, 0, 0),
+		MainView:     mainview.View(mainState, m.focus == focusMainView, mainW, mainH),
 		InfoView:     info.View(m.infoState, false, 0, 0),
 		FocusedRooms: m.focus == focusRooms,
 		FocusedMain:  m.focus == focusMainView || m.focus == focusMainInput,

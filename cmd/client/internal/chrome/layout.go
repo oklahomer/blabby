@@ -59,3 +59,19 @@ func Compute(width, height int) (Layout, error) {
 		RightW:  right,
 	}, nil
 }
+
+// InnerHeight returns the content height available inside any pane
+// after the chrome's top/bottom border budget. Every pane shares the
+// chrome's full height, so this applies uniformly. It reuses the same
+// border arithmetic Render applies, so the two never drift.
+func (l Layout) InnerHeight() int {
+	return innerHeight(l.Height)
+}
+
+// MiddleInnerWidth returns the content width available inside the Main
+// (middle) pane after the chrome's left/right border budget. Used by
+// the Main pane to size its composer and clip overflowing scrollback
+// lines without re-deriving the border arithmetic.
+func (l Layout) MiddleInnerWidth() int {
+	return innerWidth(l.MiddleW)
+}

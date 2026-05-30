@@ -169,7 +169,13 @@ func TestDialAndAuthCmdSuccess(t *testing.T) {
 
 	httpURL := "http://" + srv.Listener.Addr().String()
 	tok := validJWT(t, "u-rina")
-	msg := DialAndAuthCmd(httpURL, tok, time.Second, time.Second)()
+	msg := DialAndAuthCmd(DialAndAuthRequest{
+		Server:      httpURL,
+		Token:       tok,
+		Generation:  testGeneration,
+		DialTimeout: time.Second,
+		AuthTimeout: time.Second,
+	})()
 	got, ok := msg.(WSAuthSucceeded)
 	if !ok {
 		t.Fatalf("expected WSAuthSucceeded, got %T: %#v", msg, msg)
@@ -179,6 +185,9 @@ func TestDialAndAuthCmdSuccess(t *testing.T) {
 	}
 	if got.Conn == nil {
 		t.Fatal("expected non-nil conn")
+	}
+	if got.Generation != testGeneration {
+		t.Fatalf("Generation = %d, want %d", got.Generation, testGeneration)
 	}
 	_ = got.Conn.Close()
 }
@@ -200,13 +209,22 @@ func TestDialAndAuthCmdRejected(t *testing.T) {
 	defer srv.Close()
 
 	httpURL := "http://" + srv.Listener.Addr().String()
-	msg := DialAndAuthCmd(httpURL, validJWT(t, "u-rina"), time.Second, time.Second)()
+	msg := DialAndAuthCmd(DialAndAuthRequest{
+		Server:      httpURL,
+		Token:       validJWT(t, "u-rina"),
+		Generation:  testGeneration,
+		DialTimeout: time.Second,
+		AuthTimeout: time.Second,
+	})()
 	got, ok := msg.(WSAuthRejected)
 	if !ok {
 		t.Fatalf("expected WSAuthRejected, got %T", msg)
 	}
 	if got.Status != "AUTH_INVALID_TOKEN" {
 		t.Fatalf("got status %q", got.Status)
+	}
+	if got.Generation != testGeneration {
+		t.Fatalf("Generation = %d, want %d", got.Generation, testGeneration)
 	}
 }
 
@@ -216,9 +234,19 @@ func TestDialAndAuthCmdDialFails(t *testing.T) {
 	addr := srv.Listener.Addr().String()
 	srv.Close()
 
-	msg := DialAndAuthCmd("http://"+addr, validJWT(t, "u-rina"), 250*time.Millisecond, 250*time.Millisecond)()
-	if _, ok := msg.(WSDialFailed); !ok {
+	msg := DialAndAuthCmd(DialAndAuthRequest{
+		Server:      "http://" + addr,
+		Token:       validJWT(t, "u-rina"),
+		Generation:  testGeneration,
+		DialTimeout: 250 * time.Millisecond,
+		AuthTimeout: 250 * time.Millisecond,
+	})()
+	got, ok := msg.(WSDialFailed)
+	if !ok {
 		t.Fatalf("expected WSDialFailed, got %T", msg)
+	}
+	if got.Generation != testGeneration {
+		t.Fatalf("Generation = %d, want %d", got.Generation, testGeneration)
 	}
 }
 
@@ -239,9 +267,19 @@ func TestDialAndAuthCmdTimedOut(t *testing.T) {
 	defer srv.Close()
 
 	httpURL := "http://" + srv.Listener.Addr().String()
-	msg := DialAndAuthCmd(httpURL, validJWT(t, "u-rina"), time.Second, 200*time.Millisecond)()
-	if _, ok := msg.(WSAuthTimedOut); !ok {
+	msg := DialAndAuthCmd(DialAndAuthRequest{
+		Server:      httpURL,
+		Token:       validJWT(t, "u-rina"),
+		Generation:  testGeneration,
+		DialTimeout: time.Second,
+		AuthTimeout: 200 * time.Millisecond,
+	})()
+	got, ok := msg.(WSAuthTimedOut)
+	if !ok {
 		t.Fatalf("expected WSAuthTimedOut, got %T", msg)
+	}
+	if got.Generation != testGeneration {
+		t.Fatalf("Generation = %d, want %d", got.Generation, testGeneration)
 	}
 }
 
@@ -298,7 +336,12 @@ func TestReadLoopCmdDispatchesFramesAndDisconnect(t *testing.T) {
 	}
 
 	sender := newCaptureSender()
-	if msg := ReadLoopCmd(context.Background(), sender, conn)(); msg != nil {
+	if msg := ReadLoopCmd(ReadLoopRequest{
+		Context:    context.Background(),
+		Sender:     sender,
+		Conn:       conn,
+		Generation: testGeneration,
+	})(); msg != nil {
 		t.Fatalf("ReadLoopCmd should return nil immediately, got %T", msg)
 	}
 
@@ -315,12 +358,18 @@ func TestReadLoopCmdDispatchesFramesAndDisconnect(t *testing.T) {
 	// First two should be WSFrameReceived; last should be WSDisconnected.
 	if fr, ok := msgs[0].(WSFrameReceived); !ok || fr.Type != "joined" {
 		t.Errorf("msg[0] = %#v, want WSFrameReceived joined", msgs[0])
+	} else if fr.Generation != testGeneration {
+		t.Errorf("frame generation = %d, want %d", fr.Generation, testGeneration)
 	}
 	if fr, ok := msgs[1].(WSFrameReceived); !ok || fr.Type != "message" {
 		t.Errorf("msg[1] = %#v, want WSFrameReceived message", msgs[1])
+	} else if fr.Generation != testGeneration {
+		t.Errorf("frame generation = %d, want %d", fr.Generation, testGeneration)
 	}
-	if _, ok := msgs[len(msgs)-1].(WSDisconnected); !ok {
+	if dc, ok := msgs[len(msgs)-1].(WSDisconnected); !ok {
 		t.Errorf("last msg = %#v, want WSDisconnected", msgs[len(msgs)-1])
+	} else if dc.Generation != testGeneration {
+		t.Errorf("disconnect generation = %d, want %d", dc.Generation, testGeneration)
 	}
 }
 

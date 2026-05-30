@@ -40,6 +40,21 @@ func TestComputeWidthsSumToTotal(t *testing.T) {
 	}
 }
 
+func TestLayoutInnerDimensionsSubtractBorderBudget(t *testing.T) {
+	l, err := Compute(120, 40)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Two rows of border (top + bottom) come off the height; two
+	// columns (left + right) come off the middle pane's width.
+	if got, want := l.InnerHeight(), l.Height-2; got != want {
+		t.Errorf("InnerHeight() = %d, want %d", got, want)
+	}
+	if got, want := l.MiddleInnerWidth(), l.MiddleW-2; got != want {
+		t.Errorf("MiddleInnerWidth() = %d, want %d", got, want)
+	}
+}
+
 func TestComputeRejectsTooSmall(t *testing.T) {
 	tests := []struct {
 		name string
