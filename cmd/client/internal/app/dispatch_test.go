@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/oklahomer/blabby/cmd/client/internal/api"
 	"github.com/oklahomer/blabby/cmd/client/internal/login"
+	"github.com/oklahomer/blabby/cmd/client/internal/panes/mainview"
 )
 
 // makeModel builds a baseline app.Model with the login modal
@@ -82,6 +84,9 @@ func TestUpdateLoginSucceededAdvancesToConnecting(t *testing.T) {
 	if got.username != "rina" {
 		t.Fatalf("username not retained: %q", got.username)
 	}
+	if got.sessionGeneration != 1 {
+		t.Fatalf("sessionGeneration = %d, want 1", got.sessionGeneration)
+	}
 }
 
 func TestUpdateLoginRejectedForwardedToModal(t *testing.T) {
@@ -114,6 +119,9 @@ func TestUpdateWSDisconnectedReopensLoginModal(t *testing.T) {
 	m.userID = "u-rina-1"
 	m.infoState.Username = "rina"
 	m.infoState.UserID = "u-rina-1"
+	m.connected = true
+	m.messages = map[string][]mainview.Message{"general": {{Sender: "alice", Text: "hi"}}}
+	m.mainError = "stale error"
 
 	next, cmd := m.Update(api.WSDisconnected{Err: errors.New("server closed")})
 	got := next.(Model)
@@ -126,6 +134,18 @@ func TestUpdateWSDisconnectedReopensLoginModal(t *testing.T) {
 	}
 	if got.infoState.Username != "" || got.infoState.UserID != "" {
 		t.Fatal("expected Profile cleared")
+	}
+	// The passive status indicator and the chat surface must reset on a
+	// drop so the reopened session does not show ● live or a stale
+	// scrollback / error.
+	if got.connected {
+		t.Fatal("expected connected=false after disconnect")
+	}
+	if got.messages != nil {
+		t.Fatalf("expected message buckets cleared, got %#v", got.messages)
+	}
+	if got.mainError != "" {
+		t.Fatalf("expected inline error cleared, got %q", got.mainError)
 	}
 	if cmd == nil {
 		t.Fatal("expected modal Init cmd")
@@ -396,5 +416,405 @@ func TestHandleKeyRoomsPaneEnterSwitchesActiveRoom(t *testing.T) {
 	}
 	if got.mainviewState.RoomLabel != "General" {
 		t.Fatalf("RoomLabel = %q, want General", got.mainviewState.RoomLabel)
+	}
+}
+
+// chatReadyModel returns a Model in a post-auth, room-active state with
+// the chat surface usable: a live connection, an initialised bucket
+// map, and focus on the input region.
+func chatReadyModel(t *testing.T) Model {
+	t.Helper()
+	m := makeModel(t)
+	m.modal = nil
+	m.token = "fake.jwt"
+	m.conn = &websocket.Conn{}
+	m.userID = "u-rina-1"
+	m.connected = true
+	m.sessionGeneration = 1
+	m.messages = map[string][]mainview.Message{}
+	m.activeRoomID = "general"
+	m.mainviewState.RoomLabel = "general"
+	m.focus = focusMainInput
+	return m
+}
+
+// messageFrameJSON builds a raw {"type":"message"} frame for dispatch
+// tests without threading json.Marshal through every call site.
+func messageFrameJSON(room, sender, text string, ms int64) []byte {
+	return []byte(fmt.Sprintf(
+		`{"type":"message","room_id":%q,"sender_id":%q,"text":%q,"timestamp":%d}`,
+		room, sender, text, ms))
+}
+
+func chatFrame(m Model, typ string, raw []byte) api.WSFrameReceived {
+	return api.WSFrameReceived{Type: typ, Raw: raw, Generation: m.sessionGeneration}
+}
+
+func TestUpdateMessageFrameAppendsToActiveBucket(t *testing.T) {
+	m := chatReadyModel(t)
+	next, cmd := m.Update(chatFrame(m, "message", messageFrameJSON("general", "alice", "hello", 1000)))
+	got := next.(Model)
+	if cmd != nil {
+		t.Fatal("inbound message frame must not dispatch a cmd")
+	}
+	bucket := got.messages["general"]
+	if len(bucket) != 1 || bucket[0].Text != "hello" || bucket[0].Sender != "alice" {
+		t.Fatalf("bucket = %#v", bucket)
+	}
+}
+
+func TestUpdateMessageFrameSortsByTimestamp(t *testing.T) {
+	m := chatReadyModel(t)
+	// Arrive out of order: the later timestamp lands first.
+	n1, _ := m.Update(chatFrame(m, "message", messageFrameJSON("general", "a", "late", 5000)))
+	n1Model := n1.(Model)
+	n2, _ := n1Model.Update(chatFrame(n1Model, "message", messageFrameJSON("general", "b", "early", 1000)))
+	bucket := n2.(Model).messages["general"]
+	if len(bucket) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(bucket))
+	}
+	if bucket[0].Text != "early" || bucket[1].Text != "late" {
+		t.Fatalf("messages not sorted by timestamp: %#v", bucket)
+	}
+}
+
+func TestUpdateMessageFrameForOtherRoomRetainedNotShown(t *testing.T) {
+	m := chatReadyModel(t)
+	m.width, m.height = 120, 35
+	next, _ := m.Update(chatFrame(m, "message", messageFrameJSON("random", "a", "hidden-text", 1000)))
+	got := next.(Model)
+	if len(got.messages["random"]) != 1 {
+		t.Fatalf("frame for non-active room not retained: %#v", got.messages)
+	}
+	if len(got.messages["general"]) != 0 {
+		t.Fatalf("frame leaked into the active room: %#v", got.messages["general"])
+	}
+	if strings.Contains(got.View(), "hidden-text") {
+		t.Fatal("non-active room message rendered in the active scrollback")
+	}
+}
+
+func TestUpdateOwnMessageLabelledYou(t *testing.T) {
+	m := chatReadyModel(t) // userID == u-rina-1
+	next, _ := m.Update(chatFrame(m, "message", messageFrameJSON("general", "u-rina-1", "mine", 1000)))
+	if got := next.(Model).messages["general"][0].Sender; got != "you" {
+		t.Fatalf("own message sender = %q, want \"you\"", got)
+	}
+}
+
+func TestUpdateMessageFrameMalformedIgnored(t *testing.T) {
+	m := chatReadyModel(t)
+	next, _ := m.Update(chatFrame(m, "message", []byte(`{bad json`)))
+	if len(next.(Model).messages["general"]) != 0 {
+		t.Fatal("malformed message frame must not append")
+	}
+}
+
+func TestUpdateErrorFrameSetsInlineError(t *testing.T) {
+	m := chatReadyModel(t)
+	raw := []byte(`{"type":"error","code":2001,"status":"ROOM_NOT_MEMBER","message":"x"}`)
+	next, _ := m.Update(chatFrame(m, "error", raw))
+	if got := next.(Model).mainError; got != "Not a member of this room" {
+		t.Fatalf("mainError = %q", got)
+	}
+}
+
+func TestUpdateSendMessageFailedUnauthorizedReopensLogin(t *testing.T) {
+	m := chatReadyModel(t)
+	m.width, m.height = 100, 30
+	m.messages["general"] = []mainview.Message{{Sender: "alice", Text: "hi"}}
+	m.mainError = "stale error"
+	next, cmd := m.Update(api.SendMessageFailed{
+		Generation: m.sessionGeneration,
+		HTTPStatus: http.StatusUnauthorized,
+		Status:     "AUTH_EXPIRED_TOKEN",
+	})
+	got := next.(Model)
+	if got.token != "" {
+		t.Fatalf("token not discarded on 401: %q", got.token)
+	}
+	if _, ok := got.modal.(login.Model); !ok {
+		t.Fatalf("expected login modal reopened, got %T", got.modal)
+	}
+	// Session expiry tears down the chat surface just like a disconnect.
+	if got.connected {
+		t.Fatal("expected connected=false after session expiry")
+	}
+	if got.messages != nil {
+		t.Fatalf("expected message buckets cleared, got %#v", got.messages)
+	}
+	if got.mainError != "" {
+		t.Fatalf("expected inline error cleared, got %q", got.mainError)
+	}
+	if cmd == nil {
+		t.Fatal("expected login modal Init cmd")
+	}
+}
+
+func TestUpdateSendMessageFailedBusinessErrorKeepsSession(t *testing.T) {
+	m := chatReadyModel(t)
+	next, _ := m.Update(api.SendMessageFailed{
+		Generation: m.sessionGeneration,
+		HTTPStatus: http.StatusForbidden,
+		Status:     "ROOM_NOT_MEMBER",
+		Message:    "x",
+	})
+	got := next.(Model)
+	if got.mainError != "Not a member of this room" {
+		t.Fatalf("mainError = %q", got.mainError)
+	}
+	if got.conn == nil {
+		t.Fatal("session torn down on a business-error send failure")
+	}
+	if got.modal != nil {
+		t.Fatalf("modal opened on a business-error send failure: %T", got.modal)
+	}
+}
+
+func TestUpdateSendMessageSucceededClearsError(t *testing.T) {
+	m := chatReadyModel(t)
+	m.mainError = "stale error"
+	next, _ := m.Update(api.SendMessageSucceeded{RoomID: "general", Generation: m.sessionGeneration})
+	if got := next.(Model).mainError; got != "" {
+		t.Fatalf("mainError not cleared on success: %q", got)
+	}
+}
+
+func TestUpdateSendMessageSucceededFromOldGenerationDropped(t *testing.T) {
+	m := chatReadyModel(t)
+	m.sessionGeneration = 2
+	m.mainError = "current session error"
+
+	next, cmd := m.Update(api.SendMessageSucceeded{RoomID: "general", Generation: 1})
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected stale success to dispatch no command")
+	}
+	if got.mainError != "current session error" {
+		t.Fatalf("mainError overwritten by stale success: %q", got.mainError)
+	}
+	if got.token == "" || got.conn == nil {
+		t.Fatal("stale success tore down the current session")
+	}
+	if got.modal != nil {
+		t.Fatalf("stale success opened a modal: %T", got.modal)
+	}
+}
+
+func TestUpdateSendMessageFailedFromOldGenerationDropped(t *testing.T) {
+	m := chatReadyModel(t)
+	m.width, m.height = 100, 30
+	m.sessionGeneration = 2
+	m.mainError = "current session error"
+
+	next, cmd := m.Update(api.SendMessageFailed{
+		Generation: 1,
+		HTTPStatus: http.StatusUnauthorized,
+		Status:     "AUTH_EXPIRED_TOKEN",
+	})
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected stale failure to dispatch no command")
+	}
+	if got.mainError != "current session error" {
+		t.Fatalf("mainError overwritten by stale failure: %q", got.mainError)
+	}
+	if got.token == "" || got.conn == nil {
+		t.Fatal("stale failure expired the current session")
+	}
+	if got.modal != nil {
+		t.Fatalf("stale failure opened a modal: %T", got.modal)
+	}
+}
+
+func TestUpdateWSDisconnectedFromOldGenerationDropped(t *testing.T) {
+	m := chatReadyModel(t)
+	m.width, m.height = 100, 30
+	m.sessionGeneration = 2
+	m.username = "rina"
+	m.infoState.Username = "rina"
+	m.messages["general"] = []mainview.Message{{Sender: "alice", Text: "current"}}
+	m.mainError = "current session error"
+
+	next, cmd := m.Update(api.WSDisconnected{Err: errors.New("lost"), Generation: 1})
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected stale disconnect to dispatch no command")
+	}
+	if got.token != "fake.jwt" || got.conn == nil {
+		t.Fatal("stale disconnect tore down the current session")
+	}
+	if !got.connected {
+		t.Fatal("stale disconnect cleared connected state")
+	}
+	if got.modal != nil {
+		t.Fatalf("stale disconnect opened a modal: %T", got.modal)
+	}
+	if got.mainError != "current session error" {
+		t.Fatalf("mainError overwritten by stale disconnect: %q", got.mainError)
+	}
+	if len(got.messages["general"]) != 1 {
+		t.Fatalf("messages changed after stale disconnect: %#v", got.messages)
+	}
+}
+
+func TestUpdateWSFrameReceivedFromOldGenerationDropped(t *testing.T) {
+	m := chatReadyModel(t)
+	m.sessionGeneration = 2
+	m.messages["general"] = []mainview.Message{{Sender: "alice", Text: "current"}}
+	m.mainError = "current session error"
+
+	next, cmd := m.Update(api.WSFrameReceived{
+		Type:       "message",
+		Raw:        messageFrameJSON("general", "bob", "stale", 2000),
+		Generation: 1,
+	})
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected stale frame to dispatch no command")
+	}
+	if got.token != "fake.jwt" || got.conn == nil {
+		t.Fatal("stale frame tore down the current session")
+	}
+	if got.mainError != "current session error" {
+		t.Fatalf("mainError overwritten by stale frame: %q", got.mainError)
+	}
+	bucket := got.messages["general"]
+	if len(bucket) != 1 || bucket[0].Text != "current" {
+		t.Fatalf("stale frame mutated messages: %#v", bucket)
+	}
+	if got.modal != nil {
+		t.Fatalf("stale frame opened a modal: %T", got.modal)
+	}
+}
+
+func TestUpdateSendMessageCompletionAfterDisconnectAndReloginDropped(t *testing.T) {
+	m := chatReadyModel(t)
+	oldGeneration := m.sessionGeneration
+
+	afterDisconnect, _ := m.Update(api.WSDisconnected{Err: errors.New("lost"), Generation: oldGeneration})
+	afterLogin, _ := afterDisconnect.(Model).Update(api.LoginSucceeded{Token: "new.jwt", Username: "rina"})
+	current := afterLogin.(Model)
+	current.modal = nil
+	current.conn = &websocket.Conn{}
+	current.activeRoomID = "general"
+	current.mainError = "current session error"
+
+	next, cmd := current.Update(api.SendMessageFailed{
+		Generation: oldGeneration,
+		HTTPStatus: http.StatusUnauthorized,
+		Status:     "AUTH_EXPIRED_TOKEN",
+	})
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected stale completion to dispatch no command")
+	}
+	if got.sessionGeneration != oldGeneration+1 {
+		t.Fatalf("sessionGeneration = %d, want %d", got.sessionGeneration, oldGeneration+1)
+	}
+	if got.token != "new.jwt" || got.conn == nil {
+		t.Fatal("stale completion expired the relogged-in session")
+	}
+	if got.mainError != "current session error" {
+		t.Fatalf("mainError overwritten by stale completion: %q", got.mainError)
+	}
+}
+
+func TestUpdateWSAuthSucceededMarksConnectedAndInitsChat(t *testing.T) {
+	m := makeModel(t)
+	m.token = "fake.jwt"
+	m.username = "rina"
+	next, _ := m.Update(api.WSAuthSucceeded{UserID: "u-rina-1"})
+	got := next.(Model)
+	if !got.connected {
+		t.Fatal("connected not set on WSAuthSucceeded")
+	}
+	if got.messages == nil {
+		t.Fatal("message bucket map not initialised on WSAuthSucceeded")
+	}
+}
+
+func TestHandleKeyEnterEmptyComposerNoSend(t *testing.T) {
+	m := chatReadyModel(t)
+	m.composer = newComposer(40) // empty value
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("enter with an empty composer must not dispatch a send cmd")
+	}
+}
+
+func TestHandleKeyEnterWithTextDispatchesSendAndClears(t *testing.T) {
+	m := chatReadyModel(t)
+	m.composer = newComposer(40)
+	m.composer.SetValue("hello there")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected a send cmd for a non-empty composer with an active room")
+	}
+	if got := next.(Model).composer.Value(); got != "" {
+		t.Fatalf("composer not cleared after send: %q", got)
+	}
+}
+
+func TestHandleKeyEnterNoActiveRoomNoSend(t *testing.T) {
+	m := chatReadyModel(t)
+	m.activeRoomID = ""
+	m.composer = newComposer(40)
+	m.composer.SetValue("hello")
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("enter with no active room must not dispatch a send cmd")
+	}
+}
+
+func TestHandleKeyEnteringInputFocusesComposer(t *testing.T) {
+	m := chatReadyModel(t)
+	m.focus = focusMainView
+	m.composer = newComposer(40)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	got := next.(Model)
+	if got.focus != focusMainInput {
+		t.Fatalf("focus = %v, want focusMainInput", got.focus)
+	}
+	if cmd == nil {
+		t.Fatal("expected the composer blink cmd on entering the input region")
+	}
+	if !got.composer.Focused() {
+		t.Fatal("composer not focused on entering the input region")
+	}
+}
+
+func TestHandleKeySlashLiteralWhenComposerFocused(t *testing.T) {
+	m := chatReadyModel(t)
+	m.composer = newComposer(40)
+	m.composer.Focus()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	got := next.(Model)
+	if got.modal != nil {
+		t.Fatalf("/ opened a modal while the composer was focused: %T", got.modal)
+	}
+	if got.composer.Value() != "/" {
+		t.Fatalf("/ not inserted into the composer: %q", got.composer.Value())
+	}
+}
+
+func TestHandleKeyRoomSwitchClearsInlineError(t *testing.T) {
+	m := chatReadyModel(t)
+	m.focus = focusRooms
+	m.roomsState.JoinedIDs = []string{"general", "random"}
+	m.roomsState.Cursor = 1
+	m.mainError = "stale"
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(Model)
+	if got.activeRoomID != "random" {
+		t.Fatalf("activeRoomID = %q, want random", got.activeRoomID)
+	}
+	if got.mainError != "" {
+		t.Fatalf("mainError not cleared on room switch: %q", got.mainError)
 	}
 }

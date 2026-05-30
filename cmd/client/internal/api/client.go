@@ -65,28 +65,48 @@ type LoginTransportError struct {
 
 // Outbound tea.Msg types emitted by DialAndAuthCmd.
 
+// SessionGeneration identifies the login session that started an
+// asynchronous command. App Update drops completions whose generation
+// no longer matches the current session.
+type SessionGeneration uint64
+
+// DialAndAuthRequest groups the inputs needed to open and authenticate
+// a WebSocket connection for one login session.
+type DialAndAuthRequest struct {
+	Server      string
+	Token       string
+	Generation  SessionGeneration
+	DialTimeout time.Duration
+	AuthTimeout time.Duration
+}
+
 // WSAuthSucceeded carries the open websocket connection and the
 // decoded user-id once the server's auth_ok frame is received.
 type WSAuthSucceeded struct {
-	Conn   *websocket.Conn
-	UserID string
+	Conn       *websocket.Conn
+	UserID     string
+	Generation SessionGeneration
 }
 
 // WSAuthRejected reports an auth_error frame from the server.
 type WSAuthRejected struct {
-	Status  string
-	Message string
+	Status     string
+	Message    string
+	Generation SessionGeneration
 }
 
 // WSDialFailed reports a failure during HTTP upgrade or any IO issue
 // before the first server frame arrives.
 type WSDialFailed struct {
-	Err error
+	Err        error
+	Generation SessionGeneration
 }
 
 // WSAuthTimedOut reports that the auth_ok / auth_error frame did not
 // arrive before the per-attempt deadline.
-type WSAuthTimedOut struct{}
+type WSAuthTimedOut struct {
+	Generation SessionGeneration
+}
 
 // Outbound tea.Msg types emitted by ReadLoopCmd.
 
@@ -95,13 +115,15 @@ type WSAuthTimedOut struct{}
 // every frame type silently; frame handlers will register as
 // individual panes grow real state.
 type WSFrameReceived struct {
-	Type string
-	Raw  []byte
+	Type       string
+	Raw        []byte
+	Generation SessionGeneration
 }
 
 // WSDisconnected reports that the read loop has exited.
 type WSDisconnected struct {
-	Err error
+	Err        error
+	Generation SessionGeneration
 }
 
 // LoginCmd performs POST {server}/login and emits exactly one
@@ -176,62 +198,62 @@ func LoginCmd(client *http.Client, server, username, password string, timeout ti
 //
 // The token is enclosed inside the AuthFrame struct and never appears
 // in any returned message.
-func DialAndAuthCmd(server, token string, dialTimeout, authTimeout time.Duration) tea.Cmd {
-	if dialTimeout <= 0 {
-		dialTimeout = DefaultWSDialTimeout
+func DialAndAuthCmd(req DialAndAuthRequest) tea.Cmd {
+	if req.DialTimeout <= 0 {
+		req.DialTimeout = DefaultWSDialTimeout
 	}
-	if authTimeout <= 0 {
-		authTimeout = DefaultWSAuthTimeout
+	if req.AuthTimeout <= 0 {
+		req.AuthTimeout = DefaultWSAuthTimeout
 	}
 	return func() tea.Msg {
-		wsAddr, err := wsURL(server)
+		wsAddr, err := wsURL(req.Server)
 		if err != nil {
-			return WSDialFailed{Err: err}
+			return WSDialFailed{Err: err, Generation: req.Generation}
 		}
 
-		dialer := &websocket.Dialer{HandshakeTimeout: dialTimeout}
+		dialer := &websocket.Dialer{HandshakeTimeout: req.DialTimeout}
 		conn, _, err := dialer.Dial(wsAddr, nil)
 		if err != nil {
-			return WSDialFailed{Err: err}
+			return WSDialFailed{Err: err, Generation: req.Generation}
 		}
 		conn.SetReadLimit(defaultMaxInboundFrame)
 
-		auth := AuthFrame{Type: "auth", Token: token}
+		auth := AuthFrame{Type: "auth", Token: req.Token}
 		if err := conn.WriteJSON(auth); err != nil {
 			_ = conn.Close()
-			return WSDialFailed{Err: fmt.Errorf("send auth frame: %w", err)}
+			return WSDialFailed{Err: fmt.Errorf("send auth frame: %w", err), Generation: req.Generation}
 		}
 
-		if err := conn.SetReadDeadline(time.Now().Add(authTimeout)); err != nil {
+		if err := conn.SetReadDeadline(time.Now().Add(req.AuthTimeout)); err != nil {
 			_ = conn.Close()
-			return WSDialFailed{Err: fmt.Errorf("set auth read deadline: %w", err)}
+			return WSDialFailed{Err: fmt.Errorf("set auth read deadline: %w", err), Generation: req.Generation}
 		}
 
 		_, frame, err := conn.ReadMessage()
 		if err != nil {
 			_ = conn.Close()
 			if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
-				return WSAuthTimedOut{}
+				return WSAuthTimedOut{Generation: req.Generation}
 			}
-			return WSDialFailed{Err: err}
+			return WSDialFailed{Err: err, Generation: req.Generation}
 		}
 
 		// Clear the deadline so the steady-state read loop is not
 		// bounded by the auth timeout.
 		if err := conn.SetReadDeadline(time.Time{}); err != nil {
 			_ = conn.Close()
-			return WSDialFailed{Err: fmt.Errorf("clear read deadline: %w", err)}
+			return WSDialFailed{Err: fmt.Errorf("clear read deadline: %w", err), Generation: req.Generation}
 		}
 
 		var env FrameEnvelope
 		if err := json.Unmarshal(frame, &env); err != nil {
 			_ = conn.Close()
-			return WSDialFailed{Err: fmt.Errorf("decode auth response: %w", err)}
+			return WSDialFailed{Err: fmt.Errorf("decode auth response: %w", err), Generation: req.Generation}
 		}
 
 		switch env.Type {
 		case "auth_ok":
-			userID, err := DecodeSub(token)
+			userID, err := DecodeSub(req.Token)
 			if err != nil {
 				// The server already validated the token; an
 				// undecodable sub claim is a strange but non-fatal
@@ -239,18 +261,18 @@ func DialAndAuthCmd(server, token string, dialTimeout, authTimeout time.Duration
 				// let the Profile pane fall back to an empty ID.
 				userID = ""
 			}
-			return WSAuthSucceeded{Conn: conn, UserID: userID}
+			return WSAuthSucceeded{Conn: conn, UserID: userID, Generation: req.Generation}
 		case "auth_error":
 			var ae AuthErrorFrame
 			if err := json.Unmarshal(frame, &ae); err != nil {
 				_ = conn.Close()
-				return WSDialFailed{Err: fmt.Errorf("decode auth_error frame: %w", err)}
+				return WSDialFailed{Err: fmt.Errorf("decode auth_error frame: %w", err), Generation: req.Generation}
 			}
 			_ = conn.Close()
-			return WSAuthRejected{Status: ae.Status, Message: ae.Message}
+			return WSAuthRejected{Status: ae.Status, Message: ae.Message, Generation: req.Generation}
 		default:
 			_ = conn.Close()
-			return WSDialFailed{Err: fmt.Errorf("unexpected first frame type %q", env.Type)}
+			return WSDialFailed{Err: fmt.Errorf("unexpected first frame type %q", env.Type), Generation: req.Generation}
 		}
 	}
 }
@@ -262,6 +284,15 @@ func DialAndAuthCmd(server, token string, dialTimeout, authTimeout time.Duration
 // program.
 type FrameSender interface {
 	Send(tea.Msg)
+}
+
+// ReadLoopRequest groups the inputs for a session-scoped WebSocket
+// read loop.
+type ReadLoopRequest struct {
+	Context    context.Context
+	Sender     FrameSender
+	Conn       *websocket.Conn
+	Generation SessionGeneration
 }
 
 // ReadLoopCmd starts a long-lived goroutine that drains the
@@ -281,10 +312,10 @@ type FrameSender interface {
 // to terminate the loop should call CloseGracefully(conn) (which
 // sends a normal-closure frame), or cancel ctx, or both. Either
 // path unblocks ReadMessage and the deferred Close runs exactly once.
-func ReadLoopCmd(ctx context.Context, p FrameSender, conn *websocket.Conn) tea.Cmd {
+func ReadLoopCmd(req ReadLoopRequest) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
-			defer func() { _ = conn.Close() }()
+			defer func() { _ = req.Conn.Close() }()
 
 			// Watch ctx for cancellation. Forcing the read deadline
 			// to "now" unblocks the ReadMessage below; gorilla
@@ -294,16 +325,16 @@ func ReadLoopCmd(ctx context.Context, p FrameSender, conn *websocket.Conn) tea.C
 			defer close(watchDone)
 			go func() {
 				select {
-				case <-ctx.Done():
-					_ = conn.SetReadDeadline(time.Now())
+				case <-req.Context.Done():
+					_ = req.Conn.SetReadDeadline(time.Now())
 				case <-watchDone:
 				}
 			}()
 
 			for {
-				_, frame, err := conn.ReadMessage()
+				_, frame, err := req.Conn.ReadMessage()
 				if err != nil {
-					p.Send(WSDisconnected{Err: err})
+					req.Sender.Send(WSDisconnected{Err: err, Generation: req.Generation})
 					return
 				}
 				var env FrameEnvelope
@@ -312,7 +343,7 @@ func ReadLoopCmd(ctx context.Context, p FrameSender, conn *websocket.Conn) tea.C
 					// bug; drop it silently rather than crashing the UI.
 					continue
 				}
-				p.Send(WSFrameReceived{Type: env.Type, Raw: frame})
+				req.Sender.Send(WSFrameReceived{Type: env.Type, Raw: frame, Generation: req.Generation})
 			}
 		}()
 		return nil
