@@ -102,6 +102,7 @@ func newGrain(t *testing.T) (*room.Grain, *fakeNotifier, *time.Time) {
 		clock = clock.Add(time.Millisecond)
 		return clock
 	})
+	g.UseSyncFanout()
 	g.Init(fakeRoomCtx("general"))
 	return g, notifier, &clock
 }
@@ -406,6 +407,7 @@ func TestGrain_FanOutErrorIsLoggedNotFatal(t *testing.T) {
 func TestGrain_Init_DefaultsClockWhenAbsent(t *testing.T) {
 	g := &room.Grain{}
 	g.SetNotifier(&fakeNotifier{})
+	g.UseSyncFanout()
 	g.Init(fakeRoomCtx("general"))
 
 	mustJoin(t, g, "alice")

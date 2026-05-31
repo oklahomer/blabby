@@ -107,6 +107,7 @@ type Grain struct {
 	state    roomState
 	notifier userNotifier
 	now      func() time.Time
+	fanout   fanoutDispatcher
 }
 
 // NewKind registers Room grain with a proto.actor cluster, returning a
@@ -136,6 +137,17 @@ func (g *Grain) Init(ctx cluster.GrainContext) {
 	}
 	if g.notifier == nil {
 		g.notifier = &clusterUserNotifier{c: ctx.Cluster()}
+	}
+	if g.fanout == nil {
+		// Spawn a long-lived child actor to perform member fan-out off this
+		// grain's message goroutine, so command handlers return without
+		// blocking on (and re-entering via) the per-member notification RPCs.
+		// The child is part of the grain's actor hierarchy and stops with it.
+		// See ADR-015.
+		pid := ctx.Spawn(actor.PropsFromProducer(func() actor.Actor {
+			return &fanoutWorker{notifier: g.notifier}
+		}))
+		g.fanout = &actorDispatcher{pid: pid}
 	}
 }
 
@@ -298,40 +310,32 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 	return &roompb.PostMessageResponse{Timestamp: timestamppb.New(timestamp)}, nil
 }
 
-// fanOutNotify delivers a NotifyRoomEvent to each recipient. Failures are
-// logged at warn level but do not abort the operation — Phase 1 fan-out is
-// best-effort (architecture.md "Process Patterns: no automatic retries").
-//
-// Phase 1 uses a sequential loop; concurrency can be added later if measured
-// fan-out latency demands it.
+// fanOutNotify hands a NotifyRoomEvent fan-out job to the grain's fan-out
+// child, which performs the best-effort per-recipient delivery off this
+// grain's message goroutine (see ADR-015 and fanout.go). The grain context is
+// read here, not in the child: ctx.Kind/ctx.Identity are captured into the
+// job because the GrainContext must not be touched outside this handler.
 func (g *Grain) fanOutNotify(ctx cluster.GrainContext, recipients []id.UserID, payload *userpb.NotifyRoomEventRequest, msgType string) {
-	for _, recipientID := range recipients {
-		if err := g.notifier.NotifyRoomEvent(recipientID, payload); err != nil {
-			slog.Warn(middleware.EventGrainFanoutError,
-				"grain_type", ctx.Kind(),
-				"grain_id", ctx.Identity(),
-				"msg_type", msgType,
-				"recipient_id", recipientID,
-				"error", err,
-			)
-		}
-	}
+	g.fanout.notify(ctx, &fanoutNotify{
+		recipients: recipients,
+		payload:    payload,
+		msgType:    msgType,
+		grainKind:  ctx.Kind(),
+		grainID:    ctx.Identity(),
+	})
 }
 
-// fanOutForward delivers a ForwardMessage to each recipient. Same best-effort
-// semantics as fanOutNotify.
+// fanOutForward hands a ForwardMessage fan-out job to the grain's fan-out
+// child. Same best-effort, off-the-message-goroutine semantics as
+// fanOutNotify.
 func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []id.UserID, payload *userpb.ForwardMessageRequest, msgType string) {
-	for _, recipientID := range recipients {
-		if err := g.notifier.ForwardMessage(recipientID, payload); err != nil {
-			slog.Warn(middleware.EventGrainFanoutError,
-				"grain_type", ctx.Kind(),
-				"grain_id", ctx.Identity(),
-				"msg_type", msgType,
-				"recipient_id", recipientID,
-				"error", err,
-			)
-		}
-	}
+	g.fanout.forward(ctx, &fanoutForward{
+		recipients: recipients,
+		payload:    payload,
+		msgType:    msgType,
+		grainKind:  ctx.Kind(),
+		grainID:    ctx.Identity(),
+	})
 }
 
 func joinErr(code int32, status, msg string) *roompb.JoinResponse {

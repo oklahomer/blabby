@@ -21,6 +21,12 @@ func (g *Grain) SetNotifier(n userNotifier) { g.notifier = n }
 // SetClock injects the timestamp source for tests.
 func (g *Grain) SetClock(now func() time.Time) { g.now = now }
 
+// UseSyncFanout installs an inline (synchronous) fan-out dispatcher backed by
+// the grain's current notifier, so unit tests observe fan-out deterministically
+// and Init does not spawn the production fan-out child actor. Call after
+// SetNotifier and before Init.
+func (g *Grain) UseSyncFanout() { g.fanout = &syncDispatcher{notifier: g.notifier} }
+
 // UserNotifier is the test-visible alias of the unexported userNotifier
 // interface so test fakes outside this file can declare conformance.
 type UserNotifier = userNotifier

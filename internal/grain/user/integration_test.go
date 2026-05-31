@@ -13,9 +13,11 @@ import (
 )
 
 // stubRoomGrain is a minimal RoomGrain implementation used to exercise the
-// clusterRoomClient production path end-to-end without triggering Room
-// grain's fan-out (which would call back into the same UserGrain and
-// deadlock the request the test is awaiting).
+// clusterRoomClient production path end-to-end in isolation from the Room
+// grain's member fan-out, so this test asserts command routing and call
+// counts without fan-out interleaving. (Real Room→User fan-out, including the
+// acting user's self-echo, is covered by the room package's fan-out
+// integration test.)
 type stubRoomGrain struct {
 	joinCount    *int64
 	leaveCount   *int64

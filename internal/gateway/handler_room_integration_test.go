@@ -48,11 +48,12 @@ func (a *integrationAuth) ValidateToken(_ context.Context, token string) (*auth.
 	return &auth.Claims{UserID: uid}, nil
 }
 
-// stubRoomGrain stands in for the production Room grain so the User
-// grain's outgoing Join/Leave/PostMessage RPCs return immediately
-// without fanning back into the User grain — that fan-out would
-// deadlock against the in-flight gateway request on a single-member
-// cluster. Mirrors the pattern in internal/grain/user/integration_test.go.
+// stubRoomGrain stands in for the production Room grain so this test
+// exercises the gateway → User grain HTTP path in isolation, without the
+// Room grain's member fan-out. (Real Room→User fan-out, including the
+// acting user's self-echo, is covered by the room package's fan-out
+// integration test.) Mirrors the pattern in
+// internal/grain/user/integration_test.go.
 type stubRoomGrain struct {
 	postCount *int64
 	postTime  time.Time
