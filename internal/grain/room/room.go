@@ -173,8 +173,9 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 			"grain_id", ctx.Identity(),
 			"user_id", req.GetUser().GetId(),
 			"reason", statusInvalidRequest,
+			"error", err,
 		)
-		return joinErr(codeInvalidRequest, statusInvalidRequest, "user is required"), nil
+		return joinErr(codeInvalidRequest, statusInvalidRequest, "user id and display name are required"), nil
 	}
 	userID := joiner.ID()
 	if g.state.isMember(userID) {
@@ -262,8 +263,9 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 			"grain_id", ctx.Identity(),
 			"user_id", req.GetUser().GetId(),
 			"reason", statusInvalidRequest,
+			"error", err,
 		)
-		return postErr(codeInvalidRequest, statusInvalidRequest, "user is required"), nil
+		return postErr(codeInvalidRequest, statusInvalidRequest, "user id and display name are required"), nil
 	}
 	userID := sender.ID()
 	if strings.TrimSpace(req.GetText()) == "" {
