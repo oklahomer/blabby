@@ -41,24 +41,22 @@ func newComposer(width int) textinput.Model {
 }
 
 // appendChatMessage inserts a decoded inbound message into the active
-// room's bucket, ordered by the server timestamp. The sender is
-// resolved for display here (the user's own messages render as "you");
-// mainview stays render-only and never sees the raw user ID logic.
+// room's bucket, ordered by the server timestamp. The sender name is
+// resolved here and the user's own messages are flagged Self; mainview
+// owns how Self is styled and never sees the raw user ID logic.
 func (m Model) appendChatMessage(cm api.ChatMessageReceived) Model {
 	if m.messages == nil {
 		m.messages = map[string][]mainview.Message{}
 	}
-	// Display the human-readable name; the user's own messages render as
-	// "you". Fall back to the raw ID if the server sent no name (older
-	// frames or a directory miss).
+	// Show the human-readable name, falling back to the raw ID only if the
+	// server sent no name (older frames or a directory miss). The user's own
+	// messages are flagged Self so mainview can mute them — the name is still
+	// shown, just dimmed, so other members stand out.
 	sender := cm.SenderName
 	if sender == "" {
 		sender = cm.SenderID
 	}
-	if cm.SenderID == m.userID {
-		sender = "you"
-	}
-	msg := mainview.Message{Sender: sender, Text: cm.Text, At: cm.At}
+	msg := mainview.Message{Sender: sender, Text: cm.Text, At: cm.At, Self: cm.SenderID == m.userID}
 	m.messages[cm.RoomID] = insertOrdered(m.messages[cm.RoomID], msg, messageBucketCap)
 	return m
 }

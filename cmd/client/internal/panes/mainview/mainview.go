@@ -27,13 +27,16 @@ const zeroTimeGlyph = "--:--:--"
 // more; visibleMessages accounts for it via hasError.
 const reservedRows = 5
 
-// Message is one rendered scrollback entry. Sender is already resolved
-// for display (the user's own messages may render as "you"); At is the
-// server-assigned post time, zero when unknown.
+// Message is one rendered scrollback entry. Sender is the display name
+// (the server-assigned name, or the raw id as a fallback). Self marks the
+// viewing user's own messages, which render with a muted sender name so
+// other members stand out. At is the server-assigned post time, zero when
+// unknown.
 type Message struct {
 	Sender string
 	Text   string
 	At     time.Time
+	Self   bool
 }
 
 // State holds the rendering inputs for the Main pane. A zero State
@@ -103,7 +106,7 @@ func scrollback(msgs []Message, width, height int, hasError bool) string {
 	}
 	lines := make([]string, 0, len(visible))
 	for _, m := range visible {
-		lines = append(lines, clip(formatMessageLine(m), width))
+		lines = append(lines, formatMessageLine(m, width))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -130,14 +133,37 @@ func visibleMessages(msgs []Message, height int, hasError bool) []Message {
 	return msgs[len(msgs)-avail:]
 }
 
-// formatMessageLine renders one scrollback row as "HH:MM:SS  sender  text".
-// A zero timestamp renders the placeholder glyph instead of the epoch.
-func formatMessageLine(m Message) string {
+// formatMessageLine renders one scrollback row as "HH:MM:SS  sender  text",
+// clipped to width. A zero timestamp renders the placeholder glyph instead of
+// the epoch. The viewing user's own messages render with a muted sender name.
+//
+// Width is enforced by clipping only the trailing text, so the styled (ANSI)
+// sender name is never fed to rune-based truncation. When the pane is too
+// narrow to fit even the "HH:MM:SS  sender  " prefix, the whole line is
+// clipped unstyled — a rare, graceful degrade rather than a split escape
+// sequence.
+func formatMessageLine(m Message, width int) string {
 	ts := zeroTimeGlyph
 	if !m.At.IsZero() {
 		ts = m.At.Format("15:04:05")
 	}
-	return ts + "  " + m.Sender + "  " + m.Text
+
+	prefix := ts + "  " + m.Sender + "  "
+	if width > 0 && len([]rune(prefix)) >= width {
+		return clip(ts+"  "+m.Sender+"  "+m.Text, width)
+	}
+
+	text := m.Text
+	if width > 0 {
+		text = clip(text, width-len([]rune(prefix)))
+	}
+
+	sender := m.Sender
+	if m.Self {
+		// Mute the viewer's own name (light grey) so other members read louder.
+		sender = ui.Subtle().Render(m.Sender)
+	}
+	return ts + "  " + sender + "  " + text
 }
 
 // inputRow renders the composer when typing is enabled, or the disabled
