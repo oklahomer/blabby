@@ -22,4 +22,4 @@ Each ADR follows a standard format: Title, Status, Context, Decision, Consequenc
 | [ADR-012](adr-012-watch-based-connection-lifecycle.md) | Watch-based connection lifecycle -- no explicit Deregister, key by PID | Accepted | 2026-05-02 |
 | [ADR-013](adr-013-business-errors-as-response-values.md) | Business errors as response values -- carried by a shared `ErrorDetail`, not gRPC status | Accepted | 2026-05-03 |
 | [ADR-014](adr-014-domain-identifier-types-and-boundary-parsing.md) | Domain identifier types -- `UserID` / `RoomID` value objects parsed once at four boundaries | Accepted | 2026-05-16 |
-| [ADR-015](adr-015-asynchronous-fan-out.md) | Asynchronous member fan-out -- Room grain notifies members through a dedicated child actor | Accepted | 2026-05-31 |
+| [ADR-015](adr-015-command-query-vs-notification.md) | Command/query vs. notification -- synchronous request/response or asynchronous best-effort (Room fan-out as the worked example) | Accepted | 2026-05-31 |
