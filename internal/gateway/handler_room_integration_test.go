@@ -89,7 +89,7 @@ func TestGateway_RoomEndpoints_Integration(t *testing.T) {
 	roomKind := roompb.NewRoomGrainKind(func() roompb.RoomGrain {
 		return &stubRoomGrain{postCount: &postCount, postTime: stubPostTime}
 	}, time.Minute)
-	userKind := user.NewKind()
+	userKind := user.NewKind(nil)
 
 	c := clustertest.Start(t, roomKind, userKind)
 

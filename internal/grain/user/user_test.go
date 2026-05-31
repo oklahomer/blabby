@@ -60,22 +60,24 @@ type fakeRoomClient struct {
 }
 
 type joinCall struct {
-	RoomID string
-	UserID string
+	RoomID   string
+	UserID   string
+	UserName string
 }
 type leaveCall struct {
 	RoomID string
 	UserID string
 }
 type postCall struct {
-	RoomID string
-	UserID string
-	Text   string
+	RoomID   string
+	UserID   string
+	UserName string
+	Text     string
 }
 
 func (f *fakeRoomClient) Join(roomID id.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error) {
 	f.mu.Lock()
-	f.joinCalls = append(f.joinCalls, joinCall{RoomID: roomID.String(), UserID: req.GetUserId()})
+	f.joinCalls = append(f.joinCalls, joinCall{RoomID: roomID.String(), UserID: req.GetUser().GetId(), UserName: req.GetUser().GetName()})
 	fn := f.joinFn
 	def := f.defaultJoin
 	f.mu.Unlock()
@@ -105,7 +107,7 @@ func (f *fakeRoomClient) Leave(roomID id.RoomID, req *roompb.LeaveRequest) (*roo
 
 func (f *fakeRoomClient) PostMessage(roomID id.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error) {
 	f.mu.Lock()
-	f.postCalls = append(f.postCalls, postCall{RoomID: roomID.String(), UserID: req.GetUserId(), Text: req.GetText()})
+	f.postCalls = append(f.postCalls, postCall{RoomID: roomID.String(), UserID: req.GetUser().GetId(), UserName: req.GetUser().GetName(), Text: req.GetText()})
 	fn := f.postFn
 	def := f.defaultPost
 	f.mu.Unlock()
@@ -330,8 +332,8 @@ func TestGrain_JoinRoom(t *testing.T) {
 		if got := h.g.JoinedRooms(); !reflect.DeepEqual(got, []id.RoomID{mustRoomID(t, "general")}) {
 			t.Errorf("JoinedRooms: got %v, want [general]", got)
 		}
-		if len(h.rooms.joinCalls) != 1 || h.rooms.joinCalls[0] != (joinCall{RoomID: "general", UserID: "alice"}) {
-			t.Errorf("joinCalls: got %+v, want [{general alice}]", h.rooms.joinCalls)
+		if len(h.rooms.joinCalls) != 1 || h.rooms.joinCalls[0] != (joinCall{RoomID: "general", UserID: "alice", UserName: "alice"}) {
+			t.Errorf("joinCalls: got %+v, want [{general alice alice}]", h.rooms.joinCalls)
 		}
 	})
 
@@ -460,8 +462,8 @@ func TestGrain_SendMessage(t *testing.T) {
 		if resp.GetError() != nil || !resp.GetTimestamp().AsTime().Equal(want) {
 			t.Fatalf("got %+v, want error=nil ts=%v", resp, want)
 		}
-		if len(h.rooms.postCalls) != 1 || h.rooms.postCalls[0] != (postCall{RoomID: "general", UserID: "alice", Text: "hi"}) {
-			t.Errorf("postCalls: got %+v, want one call with alice/hi", h.rooms.postCalls)
+		if len(h.rooms.postCalls) != 1 || h.rooms.postCalls[0] != (postCall{RoomID: "general", UserID: "alice", UserName: "alice", Text: "hi"}) {
+			t.Errorf("postCalls: got %+v, want one call with alice/alice/hi", h.rooms.postCalls)
 		}
 		if got := h.sender.Calls(); len(got) != 0 {
 			t.Errorf("sender.Calls: got %d, want 0 (SendMessage must not echo locally)", len(got))
@@ -530,7 +532,7 @@ func TestGrain_ForwardMessage(t *testing.T) {
 		mustRegister(t, h, actor.NewPID("addr", "conn-b"))
 		mustRegister(t, h, actor.NewPID("addr", "conn-c"))
 
-		req := &userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice", Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(42))}
+		req := &userpb.ForwardMessageRequest{RoomId: "general", Sender: &commonpb.UserRef{Id: "alice", Name: "Alice Example"}, Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(42))}
 		resp, err := h.g.ForwardMessage(req, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -553,7 +555,7 @@ func TestGrain_ForwardMessage(t *testing.T) {
 	t.Run("with 0 connections returns success and does not call sender", func(t *testing.T) {
 		h := newGrain(t)
 
-		resp, err := h.g.ForwardMessage(&userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice"}, fakeUserCtx("alice"))
+		resp, err := h.g.ForwardMessage(&userpb.ForwardMessageRequest{RoomId: "general", Sender: &commonpb.UserRef{Id: "alice", Name: "Alice Example"}}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -577,7 +579,7 @@ func TestGrain_NotifyRoomEvent(t *testing.T) {
 
 		req := &userpb.NotifyRoomEventRequest{
 			RoomId:    "general",
-			UserId:    "bob",
+			User:      &commonpb.UserRef{Id: "bob", Name: "Bob Example"},
 			EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 		}
 		resp, err := h.g.NotifyRoomEvent(req, fakeUserCtx("alice"))
@@ -653,7 +655,7 @@ func TestGrain_MultiDeviceEcho(t *testing.T) {
 	}
 
 	// 3. Simulate Room grain fan-out back to alice.
-	fwd := &userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice", Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(7))}
+	fwd := &userpb.ForwardMessageRequest{RoomId: "general", Sender: &commonpb.UserRef{Id: "alice", Name: "Alice Example"}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(7))}
 	_, err = h.g.ForwardMessage(fwd, fakeUserCtx("alice"))
 	if err != nil {
 		t.Fatalf("ForwardMessage unexpected error: %v", err)
@@ -720,7 +722,7 @@ func TestGrain_DoesNotLogMessageText(t *testing.T) {
 		h := newGrain(t)
 
 		_, _ = h.g.ForwardMessage(&userpb.ForwardMessageRequest{
-			RoomId: "general", SenderId: "alice", Text: text, Timestamp: timestamppb.New(time.UnixMilli(1)),
+			RoomId: "general", Sender: &commonpb.UserRef{Id: "alice", Name: "Alice Example"}, Text: text, Timestamp: timestamppb.New(time.UnixMilli(1)),
 		}, fakeUserCtx("alice"))
 
 		out := buf.String()
@@ -751,7 +753,7 @@ func TestGrain_ReceiveDefault_LogsUnhandled(t *testing.T) {
 }
 
 func TestGrain_NewKind_ReturnsRegisteredKind(t *testing.T) {
-	if k := user.NewKind(); k == nil {
+	if k := user.NewKind(nil); k == nil {
 		t.Fatal("NewKind: got nil, want non-nil *cluster.Kind")
 	}
 }

@@ -22,13 +22,13 @@ func encodeOutboundMessage(msg any) (encodedFrame, bool) {
 	case *ChatDelivered:
 		return encodedFrame{
 			messageType: websocket.TextMessage,
-			data:        encodeMessage(m.RoomID, m.SenderID, m.Text, timestampMillis(m.Timestamp)),
+			data:        encodeMessage(m.RoomID, m.SenderID, m.SenderName, m.Text, timestampMillis(m.Timestamp)),
 			eventKind:   "message",
 		}, true
 	case *RoomJoined:
-		return encodedFrame{messageType: websocket.TextMessage, data: encodeJoined(m.RoomID, m.UserID), eventKind: "event"}, true
+		return encodedFrame{messageType: websocket.TextMessage, data: encodeJoined(m.RoomID, m.UserID, m.UserName), eventKind: "event"}, true
 	case *RoomLeft:
-		return encodedFrame{messageType: websocket.TextMessage, data: encodeLeft(m.RoomID, m.UserID), eventKind: "event"}, true
+		return encodedFrame{messageType: websocket.TextMessage, data: encodeLeft(m.RoomID, m.UserID, m.UserName), eventKind: "event"}, true
 	case *ErrorResponse:
 		return encodedFrame{
 			messageType: websocket.TextMessage,
@@ -70,13 +70,14 @@ func encodeAuthError(code int32, status, message string) []byte {
 	})
 }
 
-func encodeMessage(roomID, senderID, text string, timestampMs int64) []byte {
+func encodeMessage(roomID, senderID, senderName, text string, timestampMs int64) []byte {
 	return mustMarshal(map[string]any{
-		"type":      "message",
-		"room_id":   roomID,
-		"sender_id": senderID,
-		"text":      text,
-		"timestamp": timestampMs,
+		"type":        "message",
+		"room_id":     roomID,
+		"sender_id":   senderID,
+		"sender_name": senderName,
+		"text":        text,
+		"timestamp":   timestampMs,
 	})
 }
 
@@ -87,18 +88,20 @@ func timestampMillis(t time.Time) int64 {
 	return t.UnixMilli()
 }
 
-func encodeJoined(roomID, userID string) []byte {
+func encodeJoined(roomID, userID, userName string) []byte {
 	return mustMarshal(map[string]any{
-		"type":    "joined",
-		"room_id": roomID,
-		"user_id": userID,
+		"type":      "joined",
+		"room_id":   roomID,
+		"user_id":   userID,
+		"user_name": userName,
 	})
 }
 
-func encodeLeft(roomID, userID string) []byte {
+func encodeLeft(roomID, userID, userName string) []byte {
 	return mustMarshal(map[string]any{
-		"type":    "left",
-		"room_id": roomID,
-		"user_id": userID,
+		"type":      "left",
+		"room_id":   roomID,
+		"user_id":   userID,
+		"user_name": userName,
 	})
 }

@@ -114,9 +114,10 @@ type SendMessageResponse struct {
 // grain fans out to every member (the sender included). Timestamp is
 // Unix milliseconds; the server emits 0 for a zero-value time.
 type MessageFrame struct {
-	Type      string `json:"type"`
-	RoomID    string `json:"room_id"`
-	SenderID  string `json:"sender_id"`
-	Text      string `json:"text"`
-	Timestamp int64  `json:"timestamp"`
+	Type       string `json:"type"`
+	RoomID     string `json:"room_id"`
+	SenderID   string `json:"sender_id"`
+	SenderName string `json:"sender_name"`
+	Text       string `json:"text"`
+	Timestamp  int64  `json:"timestamp"`
 }

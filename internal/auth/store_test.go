@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/id"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -63,6 +64,47 @@ func TestInMemoryUserStore_Lookup(t *testing.T) {
 			}
 			if user.Username != tt.username {
 				t.Errorf("Username = %q, want %q", user.Username, tt.username)
+			}
+		})
+	}
+}
+
+func TestInMemoryUserStore_Resolve(t *testing.T) {
+	store := auth.NewInMemoryUserStore()
+
+	tests := []struct {
+		name     string
+		rawID    string
+		wantErr  bool
+		wantName string
+	}{
+		{name: "alice resolves to her username", rawID: auth.UserIDAlice.String(), wantName: "alice"},
+		{name: "bob resolves to his username", rawID: auth.UserIDBob.String(), wantName: "bob"},
+		{name: "charlie resolves to his username", rawID: auth.UserIDCharlie.String(), wantName: "charlie"},
+		{name: "unknown id returns error", rawID: "nonexistent-user", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			uid, err := id.NewUserID(tt.rawID)
+			if err != nil {
+				t.Fatalf("NewUserID(%q): %v", tt.rawID, err)
+			}
+			ref, err := store.Resolve(uid)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", ref)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if ref.ID() != uid {
+				t.Errorf("ID() = %v, want %v", ref.ID(), uid)
+			}
+			if ref.Name() != tt.wantName {
+				t.Errorf("Name() = %q, want %q", ref.Name(), tt.wantName)
 			}
 		})
 	}

@@ -28,7 +28,10 @@ type chatMessage struct {
 // global immutability rule does not apply to grain state (architecture.md
 // "Grain State Management").
 type roomState struct {
-	members           map[id.UserID]struct{}
+	// members caches each member's denormalized UserRef (id + display name),
+	// keyed by id. The Room owns this cache so fan-out can label events
+	// locally — never a synchronous lookup back to the User grain.
+	members           map[id.UserID]id.UserRef
 	recentMessages    []chatMessage
 	maxRecentMessages int
 }
@@ -37,19 +40,36 @@ type roomState struct {
 // bound. The caller (the Grain) is responsible for invoking this from Init.
 func newRoomState() roomState {
 	return roomState{
-		members:           map[id.UserID]struct{}{},
+		members:           map[id.UserID]id.UserRef{},
 		maxRecentMessages: maxRecentMessages,
 	}
 }
 
-// addMember records userID as a member of the room. Returns false if the
-// user was already a member; in that case the state is unchanged.
-func (s *roomState) addMember(userID id.UserID) bool {
-	if _, ok := s.members[userID]; ok {
+// addMember records ref as a new member, keyed by its id. Returns false if the
+// user was already a member; in that case the cache is unchanged (use
+// refreshMember to update an existing member's name).
+func (s *roomState) addMember(ref id.UserRef) bool {
+	if _, ok := s.members[ref.ID()]; ok {
 		return false
 	}
-	s.members[userID] = struct{}{}
+	s.members[ref.ID()] = ref
 	return true
+}
+
+// refreshMember updates an existing member's cached UserRef (e.g. a newer
+// display name carried on a message). It is a no-op if the user is not a
+// member, so it never resurrects a removed one.
+func (s *roomState) refreshMember(ref id.UserRef) {
+	if _, ok := s.members[ref.ID()]; ok {
+		s.members[ref.ID()] = ref
+	}
+}
+
+// memberRef returns the cached UserRef for userID and whether the user is
+// currently a member.
+func (s *roomState) memberRef(userID id.UserID) (id.UserRef, bool) {
+	ref, ok := s.members[userID]
+	return ref, ok
 }
 
 // removeMember erases userID from the member set. Returns false if the user

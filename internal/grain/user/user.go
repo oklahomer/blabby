@@ -44,6 +44,7 @@ const (
 	eventUserMessageSent                = "user.message.sent"
 	eventUserMessageSendRejected        = "user.message.send_rejected"
 	eventUserRoomsQueried               = "user.rooms.queried"
+	eventUserProfileSeedFailed          = "user.profile.seed_failed"
 )
 
 // Error code constants mirror the canonical taxonomy in
@@ -89,16 +90,38 @@ type Grain struct {
 	state userState
 	rooms roomClient
 	send  pidSender
+
+	// directory resolves this user's profile on activation. Left nil in tests
+	// that do not exercise name seeding; production injects it via NewKind.
+	// self is the resolved UserRef (id + display name), built once and reused
+	// (read-only) on every command this grain routes to a Room grain.
+	directory Directory
+	self      *commonpb.UserRef
+}
+
+// Directory resolves a user's profile (a UserRef of id + display name) from
+// their identity. The User grain seeds its UserRef from it on activation; the
+// production implementation is the auth user store. A one-method interface so
+// the grain unit-tests can inject a fake (or omit it and fall back to the raw
+// identity).
+//
+// Cluster note: the Phase-1 implementation is a per-node, identically-seeded
+// in-memory store. It is coherent across nodes only because that data never
+// changes; a mutable directory (renames, persistence) must be backed by a
+// shared source so every node resolves the same profile.
+type Directory interface {
+	Resolve(userID id.UserID) (id.UserRef, error)
 }
 
 // NewKind registers User grain with a proto.actor cluster, returning a
-// *cluster.Kind that callers pass to cluster.WithKinds(...). The default
+// *cluster.Kind that callers pass to cluster.WithKinds(...). The dir argument
+// is the directory each activation seeds its display name from. The default
 // roomClient is built lazily during Init from ctx.Cluster(), avoiding a
 // chicken-and-egg with cluster.New requiring kinds in its config.
-func NewKind() *cluster.Kind {
+func NewKind(dir Directory) *cluster.Kind {
 	return userpb.NewUserGrainKind(
 		func() userpb.UserGrain {
-			return &Grain{}
+			return &Grain{directory: dir}
 		},
 		passivationTimeout,
 		actor.WithReceiverMiddleware(middleware.GrainLogging("UserGrain")),
@@ -114,6 +137,31 @@ func (g *Grain) Init(ctx cluster.GrainContext) {
 	if g.rooms == nil {
 		g.rooms = newClusterRoomClient(ctx.Cluster())
 	}
+	g.self = g.resolveSelf(ctx)
+}
+
+// resolveSelf builds the grain's own UserRef once at activation, seeding the
+// display name from the directory. It falls back to the raw identity as the
+// name when no directory is injected, the identity is unparseable, or the
+// directory has no entry — a miss degrades to showing the user ID rather than
+// breaking message flow. The cached result is reused read-only on every
+// outbound command.
+func (g *Grain) resolveSelf(ctx cluster.GrainContext) *commonpb.UserRef {
+	identity := ctx.Identity()
+	uid, err := id.NewUserID(identity)
+	if err != nil {
+		slog.Warn(eventUserProfileSeedFailed,
+			"grain_type", ctx.Kind(), "grain_id", identity, "reason", "invalid_identity")
+		return &commonpb.UserRef{Id: identity, Name: identity}
+	}
+	if g.directory != nil {
+		if ref, err := g.directory.Resolve(uid); err == nil {
+			return &commonpb.UserRef{Id: ref.ID().String(), Name: ref.Name()}
+		}
+		slog.Warn(eventUserProfileSeedFailed,
+			"grain_type", ctx.Kind(), "grain_id", identity, "reason", "directory_miss")
+	}
+	return &commonpb.UserRef{Id: identity, Name: identity}
 }
 
 // Terminate is a passivation hook; state is not persisted across activations.
@@ -203,7 +251,7 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 		return &userpb.JoinRoomResponse{Error: errDetail(codeInvalidRequest, statusInvalidRequest, "room_id is required")}, nil
 	}
 
-	roomResp, err := g.rooms.Join(roomID, &roompb.JoinRequest{UserId: ctx.Identity()})
+	roomResp, err := g.rooms.Join(roomID, &roompb.JoinRequest{User: g.self})
 	if err != nil {
 		// Transport failures are translated into a structured business
 		// error so the gateway treats them uniformly with domain failures.
@@ -299,8 +347,8 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 	}
 
 	roomResp, err := g.rooms.PostMessage(roomID, &roompb.PostMessageRequest{
-		UserId: ctx.Identity(),
-		Text:   req.GetText(),
+		User: g.self,
+		Text: req.GetText(),
 	})
 	if err != nil {
 		slog.Warn(middleware.EventGrainTransportError,
@@ -340,7 +388,7 @@ func (g *Grain) ForwardMessage(req *userpb.ForwardMessageRequest, ctx cluster.Gr
 		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
 		"msg_type", "ForwardMessage.fanout",
-		"sender_id", req.GetSenderId(),
+		"sender_id", req.GetSender().GetId(),
 		"room_id", req.GetRoomId(),
 		"target_count", len(pids),
 		"text_len", len(req.GetText()),
@@ -363,7 +411,7 @@ func (g *Grain) NotifyRoomEvent(req *userpb.NotifyRoomEventRequest, ctx cluster.
 		"grain_id", ctx.Identity(),
 		"msg_type", "NotifyRoomEvent.fanout",
 		"room_id", req.GetRoomId(),
-		"event_user_id", req.GetUserId(),
+		"event_user_id", req.GetUser().GetId(),
 		"event_type", req.GetEventType().String(),
 		"target_count", len(pids),
 	)

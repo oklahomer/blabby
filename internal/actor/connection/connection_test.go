@@ -391,7 +391,8 @@ func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {
 
 	when := time.UnixMilli(1700000000000)
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		RoomId: "general", SenderId: "bob", Text: "hello", Timestamp: timestamppb.New(when),
+		RoomId: "general", Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
+		Text: "hello", Timestamp: timestamppb.New(when),
 	})
 
 	got := readJSON(t, sess.client)
@@ -400,6 +401,9 @@ func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {
 	}
 	if got["room_id"] != "general" || got["sender_id"] != "bob" || got["text"] != "hello" {
 		t.Errorf("payload mismatch: %v", got)
+	}
+	if got["sender_name"] != "Bob Builder" {
+		t.Errorf("sender_name: got %v, want Bob Builder", got["sender_name"])
 	}
 	if got["timestamp"].(float64) != 1700000000000 {
 		t.Errorf("timestamp: got %v, want 1700000000000", got["timestamp"])
@@ -415,18 +419,18 @@ func TestRoomEvent_JoinedAndLeftSerialise(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", UserId: "carol",
+		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	})
-	if got := readJSON(t, sess.client); got["type"] != "joined" || got["user_id"] != "carol" {
+	if got := readJSON(t, sess.client); got["type"] != "joined" || got["user_id"] != "carol" || got["user_name"] != "Carol Danvers" {
 		t.Errorf("joined frame mismatch: %v", got)
 	}
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", UserId: "carol",
+		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT,
 	})
-	if got := readJSON(t, sess.client); got["type"] != "left" || got["user_id"] != "carol" {
+	if got := readJSON(t, sess.client); got["type"] != "left" || got["user_id"] != "carol" || got["user_name"] != "Carol Danvers" {
 		t.Errorf("left frame mismatch: %v", got)
 	}
 }
@@ -440,14 +444,14 @@ func TestRoomEvent_UnspecifiedDoesNotCloseSession(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", UserId: "carol",
+		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_UNSPECIFIED,
 	})
 
 	// Push a known event afterwards. If the unknown event killed the session
 	// we'd never see this frame.
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", UserId: "carol",
+		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	})
 	if got := readJSON(t, sess.client); got["type"] != "joined" {
@@ -551,7 +555,8 @@ func TestLogs_MessageBodyIsNeverLogged(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		RoomId: "general", SenderId: "bob", Text: secretBody,
+		RoomId: "general", Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
+		Text:      secretBody,
 		Timestamp: timestamppb.New(time.UnixMilli(1)),
 	})
 	_ = readJSON(t, sess.client)

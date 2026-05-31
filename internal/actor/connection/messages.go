@@ -44,20 +44,23 @@ type AuthFailed struct {
 }
 
 type ChatDelivered struct {
-	RoomID    string
-	SenderID  string
-	Text      string
-	Timestamp time.Time
+	RoomID     string
+	SenderID   string
+	SenderName string
+	Text       string
+	Timestamp  time.Time
 }
 
 type RoomJoined struct {
-	RoomID string
-	UserID string
+	RoomID   string
+	UserID   string
+	UserName string
 }
 
 type RoomLeft struct {
-	RoomID string
-	UserID string
+	RoomID   string
+	UserID   string
+	UserName string
 }
 
 type ErrorResponse struct {

@@ -10,8 +10,18 @@ import (
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
+	"github.com/oklahomer/blabby/internal/id"
 	clustertest "github.com/oklahomer/blabby/internal/testutil/cluster"
 )
+
+// stubDirectory is a user.Directory returning a fixed display name for any id,
+// so the test can prove the seeded name propagates end-to-end through both
+// real grains to the connection.
+type stubDirectory struct{ name string }
+
+func (d stubDirectory) Resolve(uid id.UserID) (id.UserRef, error) {
+	return id.NewUserRef(uid, d.name)
+}
 
 // fanoutProbe is a regular actor that records the fan-out messages a User
 // grain delivers to a registered connection PID. It stands in for a
@@ -63,7 +73,8 @@ func (p *fanoutProbe) firstForward() (*userpb.ForwardMessageRequest, bool) {
 //   - The events are still delivered: a probe registered as the user's
 //     connection receives the JOINED event and the forwarded message.
 func TestFanout_SelfEcho_NoDeadlock_AndDelivers(t *testing.T) {
-	c := clustertest.Start(t, user.NewKind(), room.NewKind())
+	const displayName = "Alice Example"
+	c := clustertest.Start(t, user.NewKind(stubDirectory{name: displayName}), room.NewKind())
 
 	const userID = "alice-fanout-int"
 	const roomID = "general"
@@ -118,10 +129,16 @@ func TestFanout_SelfEcho_NoDeadlock_AndDelivers(t *testing.T) {
 		t.Errorf("notify: got room=%q type=%v, want room=%q JOINED",
 			notify.GetRoomId(), notify.GetEventType(), roomID)
 	}
+	if got := notify.GetUser().GetName(); got != displayName {
+		t.Errorf("JOINED user name: got %q, want %q (the directory-seeded name must reach the connection)", got, displayName)
+	}
 	forward, _ := probe.firstForward()
 	if forward.GetRoomId() != roomID || forward.GetText() != "hello" {
 		t.Errorf("forward: got room=%q text=%q, want room=%q text=%q",
 			forward.GetRoomId(), forward.GetText(), roomID, "hello")
+	}
+	if got := forward.GetSender().GetName(); got != displayName {
+		t.Errorf("forwarded sender name: got %q, want %q (the directory-seeded name must reach the connection)", got, displayName)
 	}
 }
 

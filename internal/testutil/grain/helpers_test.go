@@ -36,15 +36,21 @@ func TestNewFakeGrainContext_PanicsOnUnsupportedActorOps(t *testing.T) {
 }
 
 func TestRequestConstructors(t *testing.T) {
-	if got := NewJoinRequest("alice"); got.GetUserId() != "alice" {
-		t.Errorf("NewJoinRequest user_id: got %q, want %q", got.GetUserId(), "alice")
+	if got := NewJoinRequest("alice"); got.GetUser().GetId() != "alice" {
+		t.Errorf("NewJoinRequest user id: got %q, want %q", got.GetUser().GetId(), "alice")
+	}
+	if got := NewJoinRequest("alice"); got.GetUser().GetName() != "alice" {
+		t.Errorf("NewJoinRequest user name: got %q, want %q (defaults to id)", got.GetUser().GetName(), "alice")
 	}
 	if got := NewLeaveRequest("bob"); got.GetUserId() != "bob" {
 		t.Errorf("NewLeaveRequest user_id: got %q, want %q", got.GetUserId(), "bob")
 	}
 	got := NewPostMessageRequest("carol", "hello")
-	if got.GetUserId() != "carol" || got.GetText() != "hello" {
+	if got.GetUser().GetId() != "carol" || got.GetText() != "hello" {
 		t.Errorf("NewPostMessageRequest: got (%q, %q), want (%q, %q)",
-			got.GetUserId(), got.GetText(), "carol", "hello")
+			got.GetUser().GetId(), got.GetText(), "carol", "hello")
+	}
+	if got.GetUser().GetName() != "carol" {
+		t.Errorf("NewPostMessageRequest user name: got %q, want %q (defaults to id)", got.GetUser().GetName(), "carol")
 	}
 }

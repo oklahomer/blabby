@@ -115,11 +115,11 @@ func newConfig(listen, secret string) (config, error) {
 	return cfg, nil
 }
 
-// clusterKinds returns the grain kinds the server hosts. It is separated from
-// bootstrapCluster so a test can assert the registered kinds without standing
-// up an actor system.
-func clusterKinds() []*cluster.Kind {
-	return []*cluster.Kind{user.NewKind(), room.NewKind()}
+// clusterKinds returns the grain kinds the server hosts. The User grain seeds
+// each activation's display name from dir. Separated from bootstrapCluster so
+// a test can assert the registered kinds without standing up an actor system.
+func clusterKinds(dir user.Directory) []*cluster.Kind {
+	return []*cluster.Kind{user.NewKind(dir), room.NewKind()}
 }
 
 // bootstrapCluster builds (but does not start) a single-node proto.actor
@@ -131,7 +131,7 @@ func clusterKinds() []*cluster.Kind {
 // cluster.Config.RequestLog is intentionally left at its false default: the
 // built-in RequestLog formatter logs whole proto request bodies via slog.Any,
 // which would leak message text and bearer tokens into the log stream.
-func bootstrapCluster() *cluster.Cluster {
+func bootstrapCluster(dir user.Directory) *cluster.Cluster {
 	system := actor.NewActorSystem()
 	remoteCfg := remote.Configure("127.0.0.1", 0)
 	provider := automanaged.New()
@@ -142,7 +142,7 @@ func bootstrapCluster() *cluster.Cluster {
 		provider,
 		lookup,
 		remoteCfg,
-		cluster.WithKinds(clusterKinds()...),
+		cluster.WithKinds(clusterKinds(dir)...),
 	)
 	return cluster.New(system, cfg)
 }
@@ -157,7 +157,11 @@ func run(cfg config) error {
 			"detail", "using built-in development JWT secret; set --jwt-secret for any real deployment")
 	}
 
-	c := bootstrapCluster()
+	// One store instance backs both credential lookup (authenticator) and
+	// display-name resolution (the User grain's directory).
+	store := auth.NewInMemoryUserStore()
+
+	c := bootstrapCluster(store)
 	c.StartMember()
 	defer c.Shutdown(true)
 
@@ -167,7 +171,7 @@ func run(cfg config) error {
 	// "nonhost".
 	slog.Info("server.cluster.started", "advertised_address", c.ActorSystem.Address())
 
-	authenticator := auth.NewJWTAuthenticator([]byte(cfg.jwtSecret), auth.NewInMemoryUserStore())
+	authenticator := auth.NewJWTAuthenticator([]byte(cfg.jwtSecret), store)
 	gw := gateway.NewGateway(authenticator, c, c.ActorSystem.Root)
 
 	srv := &http.Server{

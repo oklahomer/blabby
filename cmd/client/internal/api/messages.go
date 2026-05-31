@@ -37,10 +37,11 @@ type SendMessageFailed struct {
 // frame. At is the sender's post time parsed from the frame's Unix-ms
 // timestamp (zero time.Time when the server emitted 0).
 type ChatMessageReceived struct {
-	RoomID   string
-	SenderID string
-	Text     string
-	At       time.Time
+	RoomID     string
+	SenderID   string
+	SenderName string
+	Text       string
+	At         time.Time
 }
 
 // ErrorFrameReceived is the decoded form of an inbound {"type":"error"}
@@ -122,10 +123,11 @@ func DecodeChatMessage(raw []byte) (ChatMessageReceived, bool) {
 		return ChatMessageReceived{}, false
 	}
 	return ChatMessageReceived{
-		RoomID:   f.RoomID,
-		SenderID: f.SenderID,
-		Text:     f.Text,
-		At:       millisToTime(f.Timestamp),
+		RoomID:     f.RoomID,
+		SenderID:   f.SenderID,
+		SenderName: f.SenderName,
+		Text:       f.Text,
+		At:         millisToTime(f.Timestamp),
 	}, true
 }
 

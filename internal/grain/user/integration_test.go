@@ -8,6 +8,7 @@ import (
 	"github.com/asynkron/protoactor-go/cluster"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
 )
@@ -23,22 +24,32 @@ type stubRoomGrain struct {
 	leaveCount   *int64
 	postCount    *int64
 	postResponse *roompb.PostMessageResponse
+
+	// joinUserName / postUserName capture the most recent User.Name the
+	// stub observed on Join/PostMessage so the integration test can prove
+	// the directory-seeded display name reaches the Room grain unchanged.
+	joinUserName *atomic.Pointer[string]
+	postUserName *atomic.Pointer[string]
 }
 
 func (s *stubRoomGrain) Init(cluster.GrainContext)           {}
 func (s *stubRoomGrain) Terminate(cluster.GrainContext)      {}
 func (s *stubRoomGrain) ReceiveDefault(cluster.GrainContext) {}
 
-func (s *stubRoomGrain) Join(*roompb.JoinRequest, cluster.GrainContext) (*roompb.JoinResponse, error) {
+func (s *stubRoomGrain) Join(req *roompb.JoinRequest, _ cluster.GrainContext) (*roompb.JoinResponse, error) {
 	atomic.AddInt64(s.joinCount, 1)
+	name := req.GetUser().GetName()
+	s.joinUserName.Store(&name)
 	return &roompb.JoinResponse{}, nil
 }
 func (s *stubRoomGrain) Leave(*roompb.LeaveRequest, cluster.GrainContext) (*roompb.LeaveResponse, error) {
 	atomic.AddInt64(s.leaveCount, 1)
 	return &roompb.LeaveResponse{}, nil
 }
-func (s *stubRoomGrain) PostMessage(*roompb.PostMessageRequest, cluster.GrainContext) (*roompb.PostMessageResponse, error) {
+func (s *stubRoomGrain) PostMessage(req *roompb.PostMessageRequest, _ cluster.GrainContext) (*roompb.PostMessageResponse, error) {
 	atomic.AddInt64(s.postCount, 1)
+	name := req.GetUser().GetName()
+	s.postUserName.Store(&name)
 	if s.postResponse != nil {
 		return s.postResponse, nil
 	}
@@ -71,6 +82,11 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	if got := atomic.LoadInt64(&stubRoomJoinCount); got != 1 {
 		t.Errorf("stub RoomGrain.Join calls: got %d, want 1", got)
 	}
+	// The display name seeded by the fake directory (see main_test.go) must
+	// ride the JoinRequest.User ref all the way into the Room grain.
+	if got := stubRoomJoinUserName.Load(); got == nil || *got != seededDisplayName {
+		t.Errorf("Join UserRef name: got %v, want %q", got, seededDisplayName)
+	}
 
 	// GetJoinedRooms — verifies the User grain recorded the membership.
 	listResp, err := uc.GetJoinedRooms(&userpb.GetJoinedRoomsRequest{})
@@ -96,6 +112,10 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	}
 	if got := atomic.LoadInt64(&stubRoomPostCount); got != 1 {
 		t.Errorf("stub RoomGrain.PostMessage calls: got %d, want 1", got)
+	}
+	// Same seeded name must ride the PostMessageRequest.User ref too.
+	if got := stubRoomPostUserName.Load(); got == nil || *got != seededDisplayName {
+		t.Errorf("PostMessage UserRef name: got %v, want %q", got, seededDisplayName)
 	}
 
 	// LeaveRoom — exercises clusterRoomClient.Leave.
@@ -128,13 +148,13 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	}
 
 	if _, err := uc.ForwardMessage(&userpb.ForwardMessageRequest{
-		RoomId: "general", SenderId: userID, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
+		RoomId: "general", Sender: &commonpb.UserRef{Id: userID, Name: seededDisplayName}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
 	}); err != nil {
 		t.Fatalf("ForwardMessage via cluster: %v", err)
 	}
 
 	if _, err := uc.NotifyRoomEvent(&userpb.NotifyRoomEventRequest{
-		RoomId: "general", UserId: "bob", EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
+		RoomId: "general", User: &commonpb.UserRef{Id: "bob", Name: "Bob Example"}, EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	}); err != nil {
 		t.Fatalf("NotifyRoomEvent via cluster: %v", err)
 	}

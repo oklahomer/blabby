@@ -92,7 +92,7 @@ func TestParseConfig(t *testing.T) {
 }
 
 func TestClusterKindsRegistersUserAndRoom(t *testing.T) {
-	kinds := clusterKinds()
+	kinds := clusterKinds(nil)
 
 	got := make(map[string]bool, len(kinds))
 	for _, k := range kinds {

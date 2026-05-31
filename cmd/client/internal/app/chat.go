@@ -48,8 +48,14 @@ func (m Model) appendChatMessage(cm api.ChatMessageReceived) Model {
 	if m.messages == nil {
 		m.messages = map[string][]mainview.Message{}
 	}
-	sender := cm.SenderID
-	if sender == m.userID {
+	// Display the human-readable name; the user's own messages render as
+	// "you". Fall back to the raw ID if the server sent no name (older
+	// frames or a directory miss).
+	sender := cm.SenderName
+	if sender == "" {
+		sender = cm.SenderID
+	}
+	if cm.SenderID == m.userID {
 		sender = "you"
 	}
 	msg := mainview.Message{Sender: sender, Text: cm.Text, At: cm.At}

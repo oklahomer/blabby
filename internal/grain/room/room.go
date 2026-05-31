@@ -166,16 +166,17 @@ func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
 // Join adds the user to the room and fans out a JOINED event to every
 // current member (including the joiner — multi-device echo, FR4).
 func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb.JoinResponse, error) {
-	userID, err := id.NewUserID(req.GetUserId())
+	joiner, err := parseUserRef(req.GetUser())
 	if err != nil {
 		slog.Warn(eventRoomMemberJoinRejected,
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
-			"user_id", req.GetUserId(),
+			"user_id", req.GetUser().GetId(),
 			"reason", statusInvalidRequest,
 		)
-		return joinErr(codeInvalidRequest, statusInvalidRequest, "user_id is required"), nil
+		return joinErr(codeInvalidRequest, statusInvalidRequest, "user is required"), nil
 	}
+	userID := joiner.ID()
 	if g.state.isMember(userID) {
 		slog.Warn(eventRoomMemberJoinRejected,
 			"grain_type", ctx.Kind(),
@@ -186,7 +187,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 		return joinErr(codeRoomAlreadyMember, statusRoomAlreadyMember, "already a member of this room"), nil
 	}
 
-	g.state.addMember(userID)
+	g.state.addMember(joiner)
 	recipients := g.state.memberIDs()
 	slog.Info(eventRoomMemberJoined,
 		"grain_type", ctx.Kind(),
@@ -200,7 +201,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 		"sender_id", userID,
 		"target_count", len(recipients),
 	)
-	g.fanOutNotify(ctx, recipients, buildJoinedEvent(ctx.Identity(), userID), "Join.fanout")
+	g.fanOutNotify(ctx, recipients, buildJoinedEvent(ctx.Identity(), joiner), "Join.fanout")
 
 	return &roompb.JoinResponse{}, nil
 }
@@ -219,7 +220,8 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 		)
 		return leaveErr(codeInvalidRequest, statusInvalidRequest, "user_id is required"), nil
 	}
-	if !g.state.isMember(userID) {
+	leaver, ok := g.state.memberRef(userID)
+	if !ok {
 		slog.Warn(eventRoomMemberLeaveRejected,
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
@@ -229,7 +231,8 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 		return leaveErr(codeRoomNotMember, statusRoomNotMember, "not a member of this room"), nil
 	}
 
-	// Snapshot before removal so the leaver also receives the LEFT event.
+	// Snapshot before removal so the leaver also receives the LEFT event;
+	// leaver carries the cached display name for labeling.
 	recipients := g.state.memberIDs()
 	g.state.removeMember(userID)
 	slog.Info(eventRoomMemberLeft,
@@ -244,7 +247,7 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 		"sender_id", userID,
 		"target_count", len(recipients),
 	)
-	g.fanOutNotify(ctx, recipients, buildLeftEvent(ctx.Identity(), userID), "Leave.fanout")
+	g.fanOutNotify(ctx, recipients, buildLeftEvent(ctx.Identity(), leaver), "Leave.fanout")
 
 	return &roompb.LeaveResponse{}, nil
 }
@@ -252,16 +255,17 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 // PostMessage records the message, assigns the server-side timestamp, and
 // fans the message out unconditionally to every current member (FR4).
 func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainContext) (*roompb.PostMessageResponse, error) {
-	userID, err := id.NewUserID(req.GetUserId())
+	sender, err := parseUserRef(req.GetUser())
 	if err != nil {
 		slog.Warn(eventRoomMessagePostRejected,
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
-			"user_id", req.GetUserId(),
+			"user_id", req.GetUser().GetId(),
 			"reason", statusInvalidRequest,
 		)
-		return postErr(codeInvalidRequest, statusInvalidRequest, "user_id is required"), nil
+		return postErr(codeInvalidRequest, statusInvalidRequest, "user is required"), nil
 	}
+	userID := sender.ID()
 	if strings.TrimSpace(req.GetText()) == "" {
 		slog.Warn(eventRoomMessagePostRejected,
 			"grain_type", ctx.Kind(),
@@ -281,6 +285,10 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 		)
 		return postErr(codeRoomNotMember, statusRoomNotMember, "not a member of this room"), nil
 	}
+
+	// Refresh the cached name from the value carried on this message, so the
+	// room's roster reflects the sender's current display name.
+	g.state.refreshMember(sender)
 
 	timestamp := g.now()
 	g.state.recordMessage(chatMessage{
@@ -304,7 +312,7 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 		"target_count", len(recipients),
 		"text_len", textLen,
 	)
-	payload := buildForwardMessage(ctx.Identity(), userID, req.GetText(), timestamp)
+	payload := buildForwardMessage(ctx.Identity(), sender, req.GetText(), timestamp)
 	g.fanOutForward(ctx, recipients, payload, "PostMessage.fanout")
 
 	return &roompb.PostMessageResponse{Timestamp: timestamppb.New(timestamp)}, nil
@@ -336,6 +344,18 @@ func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []id.UserID, 
 		grainKind:  ctx.Kind(),
 		grainID:    ctx.Identity(),
 	})
+}
+
+// parseUserRef parses an inbound proto UserRef into a validated domain
+// UserRef at the grain boundary (parse, don't validate). A nil ref, an
+// invalid id, or an empty name is rejected so handlers can return
+// INVALID_REQUEST.
+func parseUserRef(p *commonpb.UserRef) (id.UserRef, error) {
+	userID, err := id.NewUserID(p.GetId())
+	if err != nil {
+		return id.UserRef{}, err
+	}
+	return id.NewUserRef(userID, p.GetName())
 }
 
 func joinErr(code int32, status, msg string) *roompb.JoinResponse {
