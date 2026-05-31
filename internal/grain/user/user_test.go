@@ -758,6 +758,106 @@ func TestGrain_NewKind_ReturnsRegisteredKind(t *testing.T) {
 	}
 }
 
+// resolveDirStub is a user.Directory whose Resolve result is fully configured
+// by the test: a fixed UserRef on success, or a non-nil error to exercise the
+// directory-miss fallback.
+type resolveDirStub struct {
+	ref id.UserRef
+	err error
+}
+
+func (d resolveDirStub) Resolve(id.UserID) (id.UserRef, error) { return d.ref, d.err }
+
+// TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully exercises the three
+// fallback branches of self-resolution at activation. The invariant under
+// test: Init always leaves a non-nil self UserRef so command routing can never
+// deref a nil sender — a directory miss or an unparseable identity degrades to
+// showing the raw id rather than breaking message flow, and each degradation
+// emits the seed-failure warning.
+func TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully(t *testing.T) {
+	aliceID, err := id.NewUserID("alice")
+	if err != nil {
+		t.Fatalf("NewUserID: %v", err)
+	}
+	seededRef, err := id.NewUserRef(aliceID, "Alice Display")
+	if err != nil {
+		t.Fatalf("NewUserRef: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		identity   string
+		directory  user.Directory // nil means no directory injected
+		wantID     string
+		wantName   string
+		wantReason string // seed-failure reason expected in logs; "" means no warning
+	}{
+		{
+			name:     "no directory falls back to identity as name",
+			identity: "alice",
+			wantID:   "alice",
+			wantName: "alice",
+		},
+		{
+			name:      "directory hit seeds the display name",
+			identity:  "alice",
+			directory: resolveDirStub{ref: seededRef},
+			wantID:    "alice",
+			wantName:  "Alice Display",
+		},
+		{
+			name:       "directory miss degrades to identity and warns",
+			identity:   "alice",
+			directory:  resolveDirStub{err: errors.New("not found")},
+			wantID:     "alice",
+			wantName:   "alice",
+			wantReason: "directory_miss",
+		},
+		{
+			name:       "unparseable identity degrades to identity and warns",
+			identity:   "bad/identity",
+			wantID:     "bad/identity",
+			wantName:   "bad/identity",
+			wantReason: "invalid_identity",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := captureLogs(t)
+
+			g := &user.Grain{}
+			g.SetRoomClient(&fakeRoomClient{})
+			if tt.directory != nil {
+				g.SetDirectory(tt.directory)
+			}
+			g.Init(fakeUserCtx(tt.identity))
+
+			self := g.Self()
+			if self == nil {
+				t.Fatal("Self(): got nil, want a non-nil UserRef (name seeding must never break message flow)")
+			}
+			if self.GetId() != tt.wantID {
+				t.Errorf("Self().Id: got %q, want %q", self.GetId(), tt.wantID)
+			}
+			if self.GetName() != tt.wantName {
+				t.Errorf("Self().Name: got %q, want %q", self.GetName(), tt.wantName)
+			}
+
+			out := logs.String()
+			if tt.wantReason == "" {
+				if strings.Contains(out, "user.profile.seed_failed") {
+					t.Errorf("expected no seed-failure warning, got logs:\n%s", out)
+				}
+				return
+			}
+			if !strings.Contains(out, "user.profile.seed_failed") || !strings.Contains(out, tt.wantReason) {
+				t.Errorf("expected a seed-failure warning with reason %q, got logs:\n%s", tt.wantReason, out)
+			}
+		})
+	}
+}
+
 // --- helpers -------------------------------------------------------------
 
 func mustRegister(t *testing.T, h *grainHarness, pid *actor.PID) {
