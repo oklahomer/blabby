@@ -1,77 +1,142 @@
 # blabby
 
-A distributed chat application built with Go and Proto.Actor virtual actors.
+A small, real-time group-chat system built on [Proto.Actor](https://proto.actor/) virtual actors (grains) in Go — designed to be **read**, not just run. blabby is a reference implementation that shows how the grain model maps onto identity-bearing entities (a user, a room), how a stateless gateway bridges plain HTTP/WebSocket clients to a cluster of grains, and how the pieces fit together end to end with a terminal client you can drive in a couple of minutes.
 
-## Project Structure
+What makes it worth a look:
 
-```
-blabby/
-├── buf.yaml                 # buf v2 workspace config
-├── buf.gen.yaml             # Protobuf code generation config
-├── cmd/
-│   ├── server/              # Chat server entry point
-│   └── client/              # TUI client entry point
-├── internal/
-│   ├── grain/
-│   │   ├── user/            # User virtual actor (grain)
-│   │   └── room/            # Room virtual actor (grain)
-│   ├── actor/
-│   │   └── connection/      # WebSocket connection actor
-│   ├── gateway/             # HTTP/WebSocket gateway
-│   ├── auth/                # Authentication (JWT)
-│   ├── persistence/         # Storage backends (Phase 2)
-│   ├── middleware/           # HTTP middleware
-│   └── testutil/
-│       ├── grain/           # Grain test helpers
-│       └── cluster/         # Test cluster bootstrap
-├── proto/                   # Protobuf service definitions
-│   ├── room/room.proto      # Room grain: Join, Leave, PostMessage
-│   └── user/user.proto      # User grain: connection, routing, events, queries
-├── gen/                     # Generated Go code (committed)
-│   ├── room/                # Room grain messages + client (package roompb)
-│   └── user/                # User grain messages + client (package userpb)
-├── api/                     # OpenAPI and AsyncAPI specs
-└── docs/
-    └── adr/                 # Architecture Decision Records
+- **Grain-per-entity modelling.** Each user and each room is a virtual actor with single-threaded state — no locks, no shared mutable maps. Commands route through a user's own grain to room grains.
+- **A clean client contract.** HTTP POST for commands, a WebSocket for the real-time event stream, JSON on the wire, JWT for identity.
+- **Decisions written down.** Non-obvious choices live in [Architecture Decision Records](docs/adr/), each with context and consequences.
+- **Clone-and-run.** Generated protobuf code is committed, there are no external dependencies (no database, broker, or cache), and a terminal client ships in the same module.
+
+## Architecture
+
+A stateless gateway fronts a cluster of grains. Clients speak HTTP + WebSocket; everything behind the gateway is actors.
+
+```mermaid
+flowchart LR
+    TUI["TUI client<br/>cmd/client"]
+    subgraph SERVER["blabby server — cmd/server"]
+        GW["Gateway<br/>HTTP + WebSocket"]
+        UC["UserConnection actor<br/>(one per WebSocket)"]
+        UG["User grain"]
+        RG["Room grain"]
+    end
+    TUI -- "HTTP POST: /login, /rooms/{id}/join, /rooms/{id}/messages" --> GW
+    TUI <-- "WebSocket events: message, joined, left" --> GW
+    GW -- "spawns per socket" --> UC
+    UC -- "RegisterConnection (PID in body)" --> UG
+    UG -- "route join / leave / send" --> RG
+    RG -- "fan-out to members" --> UG
+    UG -- "ForwardMessage / NotifyRoomEvent" --> UC
 ```
 
-## Code Generation
+- **Gateway** — translates client JSON/WebSocket frames to and from grain calls, validates JWTs, and shapes structured error responses.
+- **UserConnection actor** — one per WebSocket connection; it authenticates, registers itself with the user's grain, and writes events back to the socket. It is a regular actor, not a grain.
+- **User grain** — a user's agent inside the cluster: it holds the set of that user's live connections and routes the user's commands to room grains.
+- **Room grain** — owns room membership and the message pipeline; it stamps each message with a server timestamp and fans events out to every member (the sender included, so other devices echo).
 
-Blabby uses [buf](https://buf.build/) to orchestrate protobuf code generation with two plugins:
+For a deeper view, see [`docs/overall.puml`](docs/overall.puml) (component diagram) and [`docs/userconnection_design_en.md`](docs/userconnection_design_en.md) (the connection lifecycle).
 
-1. **`buf.build/protocolbuffers/go`** generates Go structs for protobuf messages (`.pb.go` files).
-2. **`protoc-gen-go-grain`** generates Proto.Actor grain interfaces, clients, and actor wrappers (`_grain.pb.go` files) from `service` definitions.
+## Quick Start
 
-The generated code in `gen/` is committed to the repository so developers can clone and build without running code generation locally.
+**Requirements:** Go 1.26 or newer. Nothing else — no database or external services.
 
-### Prerequisites
-
-To regenerate protobuf code after modifying `.proto` files:
-
-- [buf](https://buf.build/docs/installation/) CLI
-- `protoc-gen-go-grain`:
-  ```bash
-  go install github.com/asynkron/protoactor-go/protobuf/protoc-gen-go-grain@latest
-  ```
-
-### Regenerating
+**1. Start the server** (listens on `:8080` by default):
 
 ```bash
-buf generate
+go run ./cmd/server
 ```
 
-The output in `gen/` should be identical each run. Verify with:
-
-```bash
-buf generate && git diff --exit-code gen/
-```
-
-## TUI Client
-
-Run the terminal client with:
+**2. In another terminal, start the client:**
 
 ```bash
 go run ./cmd/client --server http://localhost:8080
 ```
 
-On launch the alternate screen paints a three-pane workspace (rooms / messages / profile + clock) with a centered sign-in modal. Type your username, press `tab`, type your password, press `enter`. After authentication the modal closes and the Profile pane shows your identity. Once signed in, press `/` to open the search modal and join a room, then highlight a joined room in the Rooms pane and press `enter` to make it the active room. Press `ctrl+c` at any time to quit cleanly.
+**3. Log in and chat.** The client opens a three-pane workspace with a centered sign-in modal. Sign in with one of the built-in development accounts:
+
+| Username | Password |
+|----------|-----------|
+| `alice`  | `alice123`  |
+| `bob`    | `bob123`    |
+| `charlie`| `charlie123`|
+
+Type the username, press `tab`, type the password, press `enter`. Then:
+
+- Press `/` to open room search, pick a room (`general` or `random`), and join it.
+- Highlight a joined room in the **Rooms** pane and press `enter` to make it active.
+- Type a message and press `enter` to send. Open a second client as another user (or the same one) to watch messages arrive in real time.
+- Press `ctrl+c` to quit.
+
+That's the whole loop — from a fresh clone to exchanging messages in well under five minutes.
+
+> The default JWT signing secret is a built-in development value (the server logs a warning). Pass `--jwt-secret` (and `--listen` to change the address) for anything beyond local experimentation.
+
+## Project Structure
+
+```
+blabby/
+├── cmd/
+│   ├── server/         # Chat server: gateway + single-node grain cluster
+│   └── client/         # Terminal (TUI) chat client
+├── internal/
+│   ├── grain/
+│   │   ├── user/       # User grain — connection set + command routing
+│   │   └── room/       # Room grain — membership + message fan-out
+│   ├── actor/
+│   │   └── connection/ # UserConnection actor — bridges a WebSocket to the User grain
+│   ├── gateway/        # HTTP/WebSocket gateway, auth middleware, error envelope
+│   ├── auth/           # Authenticator interface + JWT impl + in-memory user store
+│   ├── id/             # UserID / RoomID value types, parsed once at boundaries
+│   ├── logging/        # slog JSON setup
+│   ├── middleware/     # Receiver middleware for structured grain/actor logging
+│   ├── persistence/    # Placeholder for a future durable store (not wired yet)
+│   └── testutil/
+│       ├── grain/      # Grain unit-test helpers (fake grain context, etc.)
+│       └── cluster/    # In-process test cluster bootstrap
+├── proto/              # Protobuf service + message definitions
+├── gen/                # Generated Go from proto (committed — clone and build)
+├── api/                # Reserved for API specs (OpenAPI/AsyncAPI); not yet populated
+└── docs/
+    └── adr/            # Architecture Decision Records
+```
+
+## Code Generation
+
+blabby uses [buf](https://buf.build/) to orchestrate protobuf code generation with two plugins:
+
+1. **`buf.build/protocolbuffers/go`** generates Go structs for protobuf messages (`.pb.go` files).
+2. **`protoc-gen-go-grain`** generates Proto.Actor grain interfaces, clients, and actor wrappers (`_grain.pb.go` files) from `service` definitions.
+
+The generated code in `gen/` is committed, so you can clone and build without running code generation locally.
+
+To regenerate after editing `.proto` files you need the [buf](https://buf.build/docs/installation/) CLI and the grain plugin:
+
+```bash
+go install github.com/asynkron/protoactor-go/protobuf/protoc-gen-go-grain@latest
+buf generate
+```
+
+The output is deterministic; verify it matches what's committed with:
+
+```bash
+buf generate && git diff --exit-code gen/
+```
+
+## Development
+
+Common tasks are wrapped in the `Makefile`:
+
+```bash
+make build      # compile ./cmd/server and ./cmd/client
+make test       # go test ./...
+make lint       # golangci-lint
+make coverage   # test coverage report
+make generate   # buf generate
+```
+
+## Learn More
+
+- [`docs/adr/`](docs/adr/) — Architecture Decision Records explaining the major design choices and their trade-offs.
+- API details live in the Go docs: `go doc ./...`, or browse a package, e.g. `go doc ./internal/grain/room`.

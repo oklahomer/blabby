@@ -14,6 +14,7 @@ import (
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 )
 
@@ -138,10 +139,17 @@ func NewFakeGrainContextWithMessage(identity string, message any) cluster.GrainC
 	return NewFakeGrainContext(identity, WithMessage(message))
 }
 
-// NewJoinRequest returns a roompb.JoinRequest with the given user_id, kept
-// short so test bodies can stay tabular.
+// NewJoinRequest returns a roompb.JoinRequest for the given user, defaulting
+// the display name to the id so callers that don't care about names stay
+// terse. Use NewJoinRequestNamed to set a distinct name.
 func NewJoinRequest(userID string) *roompb.JoinRequest {
-	return &roompb.JoinRequest{UserId: userID}
+	return NewJoinRequestNamed(userID, userID)
+}
+
+// NewJoinRequestNamed returns a roompb.JoinRequest carrying a distinct id and
+// display name.
+func NewJoinRequestNamed(userID, name string) *roompb.JoinRequest {
+	return &roompb.JoinRequest{User: &commonpb.UserRef{Id: userID, Name: name}}
 }
 
 // NewLeaveRequest returns a roompb.LeaveRequest with the given user_id.
@@ -149,8 +157,14 @@ func NewLeaveRequest(userID string) *roompb.LeaveRequest {
 	return &roompb.LeaveRequest{UserId: userID}
 }
 
-// NewPostMessageRequest returns a roompb.PostMessageRequest with the given
-// sender user_id and message text.
+// NewPostMessageRequest returns a roompb.PostMessageRequest for the given
+// sender (name defaults to the id) and message text.
 func NewPostMessageRequest(userID, text string) *roompb.PostMessageRequest {
-	return &roompb.PostMessageRequest{UserId: userID, Text: text}
+	return NewPostMessageRequestNamed(userID, userID, text)
+}
+
+// NewPostMessageRequestNamed returns a roompb.PostMessageRequest carrying a
+// distinct sender id and display name.
+func NewPostMessageRequestNamed(userID, name, text string) *roompb.PostMessageRequest {
+	return &roompb.PostMessageRequest{User: &commonpb.UserRef{Id: userID, Name: name}, Text: text}
 }

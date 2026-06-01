@@ -142,7 +142,7 @@ func (s *chatStubServer) pushMessage(t *testing.T, room, sender, text string, ms
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	frame := map[string]any{
-		"type": "message", "room_id": room, "sender_id": sender, "text": text, "timestamp": ms,
+		"type": "message", "room_id": room, "sender": map[string]any{"id": sender}, "text": text, "timestamp": ms,
 	}
 	if err := conn.WriteJSON(frame); err != nil {
 		t.Errorf("push message frame: %v", err)
@@ -253,9 +253,14 @@ func TestChatSendAndEchoRenders(t *testing.T) {
 	if len(bucket) != 1 || bucket[0].Text != "hello" {
 		t.Fatalf("echoed message not in the scrollback bucket: %#v", bucket)
 	}
-	// The sender is the user themselves, so it renders as "you".
-	if bucket[0].Sender != "you" {
-		t.Errorf("own echoed message sender = %q, want \"you\"", bucket[0].Sender)
+	// The sender is the user themselves: the name is shown (here the raw id,
+	// since this stub echo carries no display name) and the message is flagged
+	// Self so mainview mutes it — it is no longer relabelled "you".
+	if bucket[0].Sender != "u-rina-1" {
+		t.Errorf("own echoed message sender = %q, want \"u-rina-1\"", bucket[0].Sender)
+	}
+	if !bucket[0].Self {
+		t.Error("own echoed message should be flagged Self")
 	}
 }
 

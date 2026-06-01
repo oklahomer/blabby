@@ -5,6 +5,8 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/oklahomer/blabby/internal/id"
 )
 
 // UserStore defines the contract for looking up user credentials.
@@ -22,7 +24,8 @@ type StoredUser struct {
 
 // InMemoryUserStore is a hardcoded user store for development and testing.
 type InMemoryUserStore struct {
-	users map[string]StoredUser
+	users map[string]StoredUser // keyed by username, for credential lookup
+	byID  map[string]StoredUser // keyed by user ID, for reverse profile lookup
 }
 
 // Pre-generated UUIDs for the hardcoded test users.
@@ -47,6 +50,7 @@ func NewInMemoryUserStore() *InMemoryUserStore {
 
 	store := &InMemoryUserStore{
 		users: make(map[string]StoredUser, len(users)),
+		byID:  make(map[string]StoredUser, len(users)),
 	}
 
 	for _, u := range users {
@@ -54,11 +58,13 @@ func NewInMemoryUserStore() *InMemoryUserStore {
 		if err != nil {
 			panic(fmt.Sprintf("failed to hash password for %s: %v", u.username, err))
 		}
-		store.users[u.username] = StoredUser{
+		stored := StoredUser{
 			ID:           u.id.String(),
 			Username:     u.username,
 			PasswordHash: hash,
 		}
+		store.users[u.username] = stored
+		store.byID[stored.ID] = stored
 	}
 
 	return store
@@ -71,4 +77,15 @@ func (s *InMemoryUserStore) Lookup(username string) (*StoredUser, error) {
 		return nil, fmt.Errorf("user not found: %s", username)
 	}
 	return &user, nil
+}
+
+// Resolve returns the profile (id + display name) for a user ID. It is the
+// reverse of credential lookup: the User grain calls it on activation to seed
+// its UserRef. Returns an error if no user has that ID.
+func (s *InMemoryUserStore) Resolve(userID id.UserID) (id.UserRef, error) {
+	user, ok := s.byID[userID.String()]
+	if !ok {
+		return id.UserRef{}, fmt.Errorf("user not found: %s", userID)
+	}
+	return id.NewUserRef(userID, user.Username)
 }

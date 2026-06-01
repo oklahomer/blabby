@@ -9,6 +9,7 @@ import (
 	"github.com/asynkron/protoactor-go/cluster"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 )
 
@@ -154,9 +155,10 @@ func TestUserGrain_SenderPID(t *testing.T) {
 		r, pid := spawnReceiver(t, c)
 		registerSelfWithPID(t, c, pid, r, userID)
 
+		const senderName = "Alice Delivery"
 		uc := userpb.GetUserGrainGrainClient(c, userID)
 		fwdReq := &userpb.ForwardMessageRequest{
-			RoomId: "general", SenderId: userID, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
+			RoomId: "general", Sender: &commonpb.UserRef{Id: userID, Name: senderName}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
 		}
 		if _, err := uc.ForwardMessage(fwdReq); err != nil {
 			t.Fatalf("ForwardMessage via cluster: %v", err)
@@ -167,8 +169,8 @@ func TestUserGrain_SenderPID(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("receiving actor got %d messages, want 1 (PID-in-payload design must deliver)", len(got))
 		}
-		if got[0].GetText() != "hi" || got[0].GetSenderId() != userID {
-			t.Errorf("payload mismatch: got %+v, want text=hi sender=%s", got[0], userID)
+		if got[0].GetText() != "hi" || got[0].GetSender().GetId() != userID || got[0].GetSender().GetName() != senderName {
+			t.Errorf("payload mismatch: got %+v, want text=hi sender id=%s name=%s", got[0], userID, senderName)
 		}
 	})
 
@@ -181,7 +183,7 @@ func TestUserGrain_SenderPID(t *testing.T) {
 
 		uc := userpb.GetUserGrainGrainClient(c, userID)
 		fwdReq := &userpb.ForwardMessageRequest{
-			RoomId: "general", SenderId: userID, Text: "multi-device", Timestamp: timestamppb.New(time.UnixMilli(42)),
+			RoomId: "general", Sender: &commonpb.UserRef{Id: userID, Name: "Alice Multi"}, Text: "multi-device", Timestamp: timestamppb.New(time.UnixMilli(42)),
 		}
 		if _, err := uc.ForwardMessage(fwdReq); err != nil {
 			t.Fatalf("ForwardMessage via cluster: %v", err)
@@ -221,7 +223,7 @@ func TestUserGrain_SenderPID(t *testing.T) {
 		// Poison has been applied, so within a small number of
 		// attempts the grain stops trying to send to A.
 		fwdReq := &userpb.ForwardMessageRequest{
-			RoomId: "general", SenderId: userID, Text: "after-evict", Timestamp: timestamppb.New(time.UnixMilli(99)),
+			RoomId: "general", Sender: &commonpb.UserRef{Id: userID, Name: "Alice Watch"}, Text: "after-evict", Timestamp: timestamppb.New(time.UnixMilli(99)),
 		}
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {

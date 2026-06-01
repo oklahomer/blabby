@@ -6,9 +6,10 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/oklahomer/blabby/gen/room;roompb";
 
-// JoinRequest is sent when a user wants to join a room.
+// JoinRequest is sent when a user wants to join a room. `user` carries the
+// joiner's id and display name; the Room grain caches the name for fan-out.
 message JoinRequest {
-  string user_id = 1;
+  common.UserRef user = 1;
 }
 
 // JoinResponse indicates whether the join operation succeeded.
@@ -28,9 +29,10 @@ message LeaveResponse {
   common.ErrorDetail error = 1;
 }
 
-// PostMessageRequest is sent when a user posts a message to a room.
+// PostMessageRequest is sent when a user posts a message to a room. `user`
+// carries the sender's id and display name.
 message PostMessageRequest {
-  string user_id = 1;
+  common.UserRef user = 1;
   string text = 2;
 }
 

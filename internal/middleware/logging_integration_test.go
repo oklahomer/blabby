@@ -14,6 +14,7 @@ import (
 	"github.com/asynkron/protoactor-go/cluster"
 	"github.com/google/uuid"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
@@ -34,7 +35,7 @@ func TestMain(m *testing.M) {
 	// cross-grain fan-out, so the default 2-second clustertest timeout
 	// is too tight for a fresh activator on each new identity. 10s
 	// leaves comfortable headroom under -race on shared CI runners.
-	sharedCluster = clustertest.StartWithTimeout(bootstrap, 10*time.Second, room.NewKind(), user.NewKind())
+	sharedCluster = clustertest.StartWithTimeout(bootstrap, 10*time.Second, room.NewKind(), user.NewKind(nil))
 
 	exit := func() int {
 		defer bootstrap.runCleanups()
@@ -130,7 +131,7 @@ func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 
 	// 1) Room.Join — Room grain fans out NotifyRoomEvent to alice's
 	//    User grain, which has no registered connections (target_count=0).
-	joinResp, err := roomClient.Join(&roompb.JoinRequest{UserId: alice})
+	joinResp, err := roomClient.Join(&roompb.JoinRequest{User: &commonpb.UserRef{Id: alice, Name: alice}})
 	if err != nil {
 		t.Fatalf("Room.Join via cluster: %v", err)
 	}
@@ -144,8 +145,8 @@ func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 	//    buffer (the body must never be logged).
 	bodyMarker := uuid.NewString()
 	postResp, err := roomClient.PostMessage(&roompb.PostMessageRequest{
-		UserId: alice,
-		Text:   bodyMarker,
+		User: &commonpb.UserRef{Id: alice, Name: alice},
+		Text: bodyMarker,
 	})
 	if err != nil {
 		t.Fatalf("Room.PostMessage via cluster: %v", err)

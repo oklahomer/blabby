@@ -59,9 +59,17 @@ type fakeRoomClient struct {
 	defaultPost  *roompb.PostMessageResponse
 }
 
+// userRef groups a user's id and display name the way the production proto
+// (commonpb.UserRef) carries them, so the recorders assert the pair travels
+// together to the Room grain rather than as two loose strings.
+type userRef struct {
+	ID   string
+	Name string
+}
+
 type joinCall struct {
 	RoomID string
-	UserID string
+	User   userRef
 }
 type leaveCall struct {
 	RoomID string
@@ -69,13 +77,13 @@ type leaveCall struct {
 }
 type postCall struct {
 	RoomID string
-	UserID string
+	User   userRef
 	Text   string
 }
 
 func (f *fakeRoomClient) Join(roomID id.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error) {
 	f.mu.Lock()
-	f.joinCalls = append(f.joinCalls, joinCall{RoomID: roomID.String(), UserID: req.GetUserId()})
+	f.joinCalls = append(f.joinCalls, joinCall{RoomID: roomID.String(), User: userRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()}})
 	fn := f.joinFn
 	def := f.defaultJoin
 	f.mu.Unlock()
@@ -105,7 +113,7 @@ func (f *fakeRoomClient) Leave(roomID id.RoomID, req *roompb.LeaveRequest) (*roo
 
 func (f *fakeRoomClient) PostMessage(roomID id.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error) {
 	f.mu.Lock()
-	f.postCalls = append(f.postCalls, postCall{RoomID: roomID.String(), UserID: req.GetUserId(), Text: req.GetText()})
+	f.postCalls = append(f.postCalls, postCall{RoomID: roomID.String(), User: userRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()}, Text: req.GetText()})
 	fn := f.postFn
 	def := f.defaultPost
 	f.mu.Unlock()
@@ -330,8 +338,8 @@ func TestGrain_JoinRoom(t *testing.T) {
 		if got := h.g.JoinedRooms(); !reflect.DeepEqual(got, []id.RoomID{mustRoomID(t, "general")}) {
 			t.Errorf("JoinedRooms: got %v, want [general]", got)
 		}
-		if len(h.rooms.joinCalls) != 1 || h.rooms.joinCalls[0] != (joinCall{RoomID: "general", UserID: "alice"}) {
-			t.Errorf("joinCalls: got %+v, want [{general alice}]", h.rooms.joinCalls)
+		if len(h.rooms.joinCalls) != 1 || h.rooms.joinCalls[0] != (joinCall{RoomID: "general", User: userRef{ID: "alice", Name: "alice"}}) {
+			t.Errorf("joinCalls: got %+v, want [{general {alice alice}}]", h.rooms.joinCalls)
 		}
 	})
 
@@ -460,8 +468,8 @@ func TestGrain_SendMessage(t *testing.T) {
 		if resp.GetError() != nil || !resp.GetTimestamp().AsTime().Equal(want) {
 			t.Fatalf("got %+v, want error=nil ts=%v", resp, want)
 		}
-		if len(h.rooms.postCalls) != 1 || h.rooms.postCalls[0] != (postCall{RoomID: "general", UserID: "alice", Text: "hi"}) {
-			t.Errorf("postCalls: got %+v, want one call with alice/hi", h.rooms.postCalls)
+		if len(h.rooms.postCalls) != 1 || h.rooms.postCalls[0] != (postCall{RoomID: "general", User: userRef{ID: "alice", Name: "alice"}, Text: "hi"}) {
+			t.Errorf("postCalls: got %+v, want one call with user={alice alice} text=hi", h.rooms.postCalls)
 		}
 		if got := h.sender.Calls(); len(got) != 0 {
 			t.Errorf("sender.Calls: got %d, want 0 (SendMessage must not echo locally)", len(got))
@@ -530,7 +538,7 @@ func TestGrain_ForwardMessage(t *testing.T) {
 		mustRegister(t, h, actor.NewPID("addr", "conn-b"))
 		mustRegister(t, h, actor.NewPID("addr", "conn-c"))
 
-		req := &userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice", Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(42))}
+		req := &userpb.ForwardMessageRequest{RoomId: "general", Sender: &commonpb.UserRef{Id: "alice", Name: "Alice Example"}, Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(42))}
 		resp, err := h.g.ForwardMessage(req, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -553,7 +561,7 @@ func TestGrain_ForwardMessage(t *testing.T) {
 	t.Run("with 0 connections returns success and does not call sender", func(t *testing.T) {
 		h := newGrain(t)
 
-		resp, err := h.g.ForwardMessage(&userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice"}, fakeUserCtx("alice"))
+		resp, err := h.g.ForwardMessage(&userpb.ForwardMessageRequest{RoomId: "general", Sender: &commonpb.UserRef{Id: "alice", Name: "Alice Example"}}, fakeUserCtx("alice"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -577,7 +585,7 @@ func TestGrain_NotifyRoomEvent(t *testing.T) {
 
 		req := &userpb.NotifyRoomEventRequest{
 			RoomId:    "general",
-			UserId:    "bob",
+			User:      &commonpb.UserRef{Id: "bob", Name: "Bob Example"},
 			EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 		}
 		resp, err := h.g.NotifyRoomEvent(req, fakeUserCtx("alice"))
@@ -653,7 +661,7 @@ func TestGrain_MultiDeviceEcho(t *testing.T) {
 	}
 
 	// 3. Simulate Room grain fan-out back to alice.
-	fwd := &userpb.ForwardMessageRequest{RoomId: "general", SenderId: "alice", Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(7))}
+	fwd := &userpb.ForwardMessageRequest{RoomId: "general", Sender: &commonpb.UserRef{Id: "alice", Name: "Alice Example"}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(7))}
 	_, err = h.g.ForwardMessage(fwd, fakeUserCtx("alice"))
 	if err != nil {
 		t.Fatalf("ForwardMessage unexpected error: %v", err)
@@ -720,7 +728,7 @@ func TestGrain_DoesNotLogMessageText(t *testing.T) {
 		h := newGrain(t)
 
 		_, _ = h.g.ForwardMessage(&userpb.ForwardMessageRequest{
-			RoomId: "general", SenderId: "alice", Text: text, Timestamp: timestamppb.New(time.UnixMilli(1)),
+			RoomId: "general", Sender: &commonpb.UserRef{Id: "alice", Name: "Alice Example"}, Text: text, Timestamp: timestamppb.New(time.UnixMilli(1)),
 		}, fakeUserCtx("alice"))
 
 		out := buf.String()
@@ -751,8 +759,108 @@ func TestGrain_ReceiveDefault_LogsUnhandled(t *testing.T) {
 }
 
 func TestGrain_NewKind_ReturnsRegisteredKind(t *testing.T) {
-	if k := user.NewKind(); k == nil {
+	if k := user.NewKind(nil); k == nil {
 		t.Fatal("NewKind: got nil, want non-nil *cluster.Kind")
+	}
+}
+
+// resolveDirStub is a user.Directory whose Resolve result is fully configured
+// by the test: a fixed UserRef on success, or a non-nil error to exercise the
+// directory-miss fallback.
+type resolveDirStub struct {
+	ref id.UserRef
+	err error
+}
+
+func (d resolveDirStub) Resolve(id.UserID) (id.UserRef, error) { return d.ref, d.err }
+
+// TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully exercises the three
+// fallback branches of self-resolution at activation. The invariant under
+// test: Init always leaves a non-nil self UserRef so command routing can never
+// deref a nil sender — a directory miss or an unparseable identity degrades to
+// showing the raw id rather than breaking message flow, and each degradation
+// emits the seed-failure warning.
+func TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully(t *testing.T) {
+	aliceID, err := id.NewUserID("alice")
+	if err != nil {
+		t.Fatalf("NewUserID: %v", err)
+	}
+	seededRef, err := id.NewUserRef(aliceID, "Alice Display")
+	if err != nil {
+		t.Fatalf("NewUserRef: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		identity   string
+		directory  user.Directory // nil means no directory injected
+		wantID     string
+		wantName   string
+		wantReason string // seed-failure reason expected in logs; "" means no warning
+	}{
+		{
+			name:     "no directory falls back to identity as name",
+			identity: "alice",
+			wantID:   "alice",
+			wantName: "alice",
+		},
+		{
+			name:      "directory hit seeds the display name",
+			identity:  "alice",
+			directory: resolveDirStub{ref: seededRef},
+			wantID:    "alice",
+			wantName:  "Alice Display",
+		},
+		{
+			name:       "directory miss degrades to identity and warns",
+			identity:   "alice",
+			directory:  resolveDirStub{err: errors.New("not found")},
+			wantID:     "alice",
+			wantName:   "alice",
+			wantReason: "directory_miss",
+		},
+		{
+			name:       "unparseable identity degrades to identity and warns",
+			identity:   "bad/identity",
+			wantID:     "bad/identity",
+			wantName:   "bad/identity",
+			wantReason: "invalid_identity",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := captureLogs(t)
+
+			g := &user.Grain{}
+			g.SetRoomClient(&fakeRoomClient{})
+			if tt.directory != nil {
+				g.SetDirectory(tt.directory)
+			}
+			g.Init(fakeUserCtx(tt.identity))
+
+			self := g.Self()
+			if self == nil {
+				t.Fatal("Self(): got nil, want a non-nil UserRef (name seeding must never break message flow)")
+			}
+			if self.GetId() != tt.wantID {
+				t.Errorf("Self().Id: got %q, want %q", self.GetId(), tt.wantID)
+			}
+			if self.GetName() != tt.wantName {
+				t.Errorf("Self().Name: got %q, want %q", self.GetName(), tt.wantName)
+			}
+
+			out := logs.String()
+			if tt.wantReason == "" {
+				if strings.Contains(out, "user.profile.seed_failed") {
+					t.Errorf("expected no seed-failure warning, got logs:\n%s", out)
+				}
+				return
+			}
+			if !strings.Contains(out, "user.profile.seed_failed") || !strings.Contains(out, tt.wantReason) {
+				t.Errorf("expected a seed-failure warning with reason %q, got logs:\n%s", tt.wantReason, out)
+			}
+		})
 	}
 }
 

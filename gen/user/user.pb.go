@@ -524,10 +524,11 @@ func (x *SendMessageResponse) GetError() *common.ErrorDetail {
 }
 
 // ForwardMessageRequest delivers a chat message to the User grain for fan-out.
+// `sender` carries the message author's id and display name.
 type ForwardMessageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RoomId        string                 `protobuf:"bytes,1,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
-	SenderId      string                 `protobuf:"bytes,2,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	Sender        *common.UserRef        `protobuf:"bytes,2,opt,name=sender,proto3" json:"sender,omitempty"`
 	Text          string                 `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
 	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -571,11 +572,11 @@ func (x *ForwardMessageRequest) GetRoomId() string {
 	return ""
 }
 
-func (x *ForwardMessageRequest) GetSenderId() string {
+func (x *ForwardMessageRequest) GetSender() *common.UserRef {
 	if x != nil {
-		return x.SenderId
+		return x.Sender
 	}
-	return ""
+	return nil
 }
 
 func (x *ForwardMessageRequest) GetText() string {
@@ -632,10 +633,11 @@ func (*ForwardMessageResponse) Descriptor() ([]byte, []int) {
 }
 
 // NotifyRoomEventRequest delivers a room event (join/leave) to the User grain.
+// `user` carries the subject's id and display name.
 type NotifyRoomEventRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RoomId        string                 `protobuf:"bytes,1,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	User          *common.UserRef        `protobuf:"bytes,2,opt,name=user,proto3" json:"user,omitempty"`
 	EventType     RoomEventType          `protobuf:"varint,3,opt,name=event_type,json=eventType,proto3,enum=user.RoomEventType" json:"event_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -678,11 +680,11 @@ func (x *NotifyRoomEventRequest) GetRoomId() string {
 	return ""
 }
 
-func (x *NotifyRoomEventRequest) GetUserId() string {
+func (x *NotifyRoomEventRequest) GetUser() *common.UserRef {
 	if x != nil {
-		return x.UserId
+		return x.User
 	}
-	return ""
+	return nil
 }
 
 func (x *NotifyRoomEventRequest) GetEventType() RoomEventType {
@@ -837,16 +839,16 @@ const file_user_user_proto_rawDesc = "" +
 	"\x04text\x18\x02 \x01(\tR\x04text\"z\n" +
 	"\x13SendMessageResponse\x128\n" +
 	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12)\n" +
-	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"\x9b\x01\n" +
+	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"\xa7\x01\n" +
 	"\x15ForwardMessageRequest\x12\x17\n" +
-	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x1b\n" +
-	"\tsender_id\x18\x02 \x01(\tR\bsenderId\x12\x12\n" +
+	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12'\n" +
+	"\x06sender\x18\x02 \x01(\v2\x0f.common.UserRefR\x06sender\x12\x12\n" +
 	"\x04text\x18\x03 \x01(\tR\x04text\x128\n" +
 	"\ttimestamp\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\x18\n" +
-	"\x16ForwardMessageResponse\"~\n" +
+	"\x16ForwardMessageResponse\"\x8a\x01\n" +
 	"\x16NotifyRoomEventRequest\x12\x17\n" +
-	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\x122\n" +
+	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12#\n" +
+	"\x04user\x18\x02 \x01(\v2\x0f.common.UserRefR\x04user\x122\n" +
 	"\n" +
 	"event_type\x18\x03 \x01(\x0e2\x13.user.RoomEventTypeR\teventType\"\x19\n" +
 	"\x17NotifyRoomEventResponse\"\x17\n" +
@@ -899,6 +901,7 @@ var file_user_user_proto_goTypes = []any{
 	(*GetJoinedRoomsResponse)(nil),     // 15: user.GetJoinedRoomsResponse
 	(*common.ErrorDetail)(nil),         // 16: common.ErrorDetail
 	(*timestamppb.Timestamp)(nil),      // 17: google.protobuf.Timestamp
+	(*common.UserRef)(nil),             // 18: common.UserRef
 }
 var file_user_user_proto_depIdxs = []int32{
 	1,  // 0: user.RegisterConnectionRequest.requester_pid:type_name -> user.PID
@@ -907,27 +910,29 @@ var file_user_user_proto_depIdxs = []int32{
 	16, // 3: user.LeaveRoomResponse.error:type_name -> common.ErrorDetail
 	17, // 4: user.SendMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
 	16, // 5: user.SendMessageResponse.error:type_name -> common.ErrorDetail
-	17, // 6: user.ForwardMessageRequest.timestamp:type_name -> google.protobuf.Timestamp
-	0,  // 7: user.NotifyRoomEventRequest.event_type:type_name -> user.RoomEventType
-	2,  // 8: user.UserGrain.RegisterConnection:input_type -> user.RegisterConnectionRequest
-	4,  // 9: user.UserGrain.JoinRoom:input_type -> user.JoinRoomRequest
-	6,  // 10: user.UserGrain.LeaveRoom:input_type -> user.LeaveRoomRequest
-	8,  // 11: user.UserGrain.SendMessage:input_type -> user.SendMessageRequest
-	10, // 12: user.UserGrain.ForwardMessage:input_type -> user.ForwardMessageRequest
-	12, // 13: user.UserGrain.NotifyRoomEvent:input_type -> user.NotifyRoomEventRequest
-	14, // 14: user.UserGrain.GetJoinedRooms:input_type -> user.GetJoinedRoomsRequest
-	3,  // 15: user.UserGrain.RegisterConnection:output_type -> user.RegisterConnectionResponse
-	5,  // 16: user.UserGrain.JoinRoom:output_type -> user.JoinRoomResponse
-	7,  // 17: user.UserGrain.LeaveRoom:output_type -> user.LeaveRoomResponse
-	9,  // 18: user.UserGrain.SendMessage:output_type -> user.SendMessageResponse
-	11, // 19: user.UserGrain.ForwardMessage:output_type -> user.ForwardMessageResponse
-	13, // 20: user.UserGrain.NotifyRoomEvent:output_type -> user.NotifyRoomEventResponse
-	15, // 21: user.UserGrain.GetJoinedRooms:output_type -> user.GetJoinedRoomsResponse
-	15, // [15:22] is the sub-list for method output_type
-	8,  // [8:15] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	18, // 6: user.ForwardMessageRequest.sender:type_name -> common.UserRef
+	17, // 7: user.ForwardMessageRequest.timestamp:type_name -> google.protobuf.Timestamp
+	18, // 8: user.NotifyRoomEventRequest.user:type_name -> common.UserRef
+	0,  // 9: user.NotifyRoomEventRequest.event_type:type_name -> user.RoomEventType
+	2,  // 10: user.UserGrain.RegisterConnection:input_type -> user.RegisterConnectionRequest
+	4,  // 11: user.UserGrain.JoinRoom:input_type -> user.JoinRoomRequest
+	6,  // 12: user.UserGrain.LeaveRoom:input_type -> user.LeaveRoomRequest
+	8,  // 13: user.UserGrain.SendMessage:input_type -> user.SendMessageRequest
+	10, // 14: user.UserGrain.ForwardMessage:input_type -> user.ForwardMessageRequest
+	12, // 15: user.UserGrain.NotifyRoomEvent:input_type -> user.NotifyRoomEventRequest
+	14, // 16: user.UserGrain.GetJoinedRooms:input_type -> user.GetJoinedRoomsRequest
+	3,  // 17: user.UserGrain.RegisterConnection:output_type -> user.RegisterConnectionResponse
+	5,  // 18: user.UserGrain.JoinRoom:output_type -> user.JoinRoomResponse
+	7,  // 19: user.UserGrain.LeaveRoom:output_type -> user.LeaveRoomResponse
+	9,  // 20: user.UserGrain.SendMessage:output_type -> user.SendMessageResponse
+	11, // 21: user.UserGrain.ForwardMessage:output_type -> user.ForwardMessageResponse
+	13, // 22: user.UserGrain.NotifyRoomEvent:output_type -> user.NotifyRoomEventResponse
+	15, // 23: user.UserGrain.GetJoinedRooms:output_type -> user.GetJoinedRoomsResponse
+	17, // [17:24] is the sub-list for method output_type
+	10, // [10:17] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_user_user_proto_init() }

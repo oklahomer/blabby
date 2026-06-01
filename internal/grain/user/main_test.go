@@ -13,6 +13,7 @@ import (
 
 	roompb "github.com/oklahomer/blabby/gen/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
+	"github.com/oklahomer/blabby/internal/id"
 	clustertest "github.com/oklahomer/blabby/internal/testutil/cluster"
 )
 
@@ -36,26 +37,49 @@ var (
 	stubRoomJoinCount  int64
 	stubRoomLeaveCount int64
 	stubRoomPostCount  int64
+
+	// stubRoomJoinUserName / stubRoomPostUserName hold the display name the
+	// stub Room grain last saw on a Join/PostMessage UserRef. The
+	// integration test reads them to confirm the seeded name propagated.
+	stubRoomJoinUserName atomic.Pointer[string]
+	stubRoomPostUserName atomic.Pointer[string]
 )
 
 // stubPostTimestamp is the deterministic timestamp the stub Room grain
 // returns for every PostMessage. Asserted by the integration test.
 var stubPostTimestamp = time.UnixMilli(9999)
 
+// seededDisplayName is the display name the fake directory hands back for
+// the integration test's user. The integration test asserts it propagated
+// all the way to the stub Room grain's JoinRequest/PostMessageRequest,
+// proving NewKind's directory seeding survives the full cluster round-trip.
+const seededDisplayName = "Alice Example"
+
+// fakeDirectory is a tiny user.Directory that returns seededDisplayName for
+// every identity. Injected into user.NewKind so cluster-using tests can
+// assert the seeded name flows into the Room grain.
+type fakeDirectory struct{}
+
+func (fakeDirectory) Resolve(uid id.UserID) (id.UserRef, error) {
+	return id.NewUserRef(uid, seededDisplayName)
+}
+
 func TestMain(m *testing.M) {
 	// Stub Room grain shared by all cluster-using tests. Counters are
 	// reset by tests that care via atomic.StoreInt64.
 	roomKind := roompb.NewRoomGrainKind(func() roompb.RoomGrain {
 		return &stubRoomGrain{
-			joinCount:  &stubRoomJoinCount,
-			leaveCount: &stubRoomLeaveCount,
-			postCount:  &stubRoomPostCount,
+			joinCount:    &stubRoomJoinCount,
+			leaveCount:   &stubRoomLeaveCount,
+			postCount:    &stubRoomPostCount,
+			joinUserName: &stubRoomJoinUserName,
+			postUserName: &stubRoomPostUserName,
 			postResponse: &roompb.PostMessageResponse{
 				Timestamp: timestamppb.New(stubPostTimestamp),
 			},
 		}
 	}, time.Minute)
-	userKind := user.NewKind()
+	userKind := user.NewKind(fakeDirectory{})
 
 	// We need to call clustertest.Start with a *testing.T, but TestMain
 	// runs before any test exists. Construct a minimal stand-in: the

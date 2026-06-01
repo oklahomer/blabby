@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	connection "github.com/oklahomer/blabby/internal/actor/connection"
 	"github.com/oklahomer/blabby/internal/auth"
@@ -29,7 +30,7 @@ var sharedCluster *cluster.Cluster
 
 func TestMain(m *testing.M) {
 	t := &mainT{}
-	sharedCluster = clustertest.Start(t, user.NewKind())
+	sharedCluster = clustertest.Start(t, user.NewKind(nil))
 
 	exit := func() int {
 		defer t.runCleanups()
@@ -97,7 +98,7 @@ func TestIntegration_AuthAndForwardThroughRealUserGrain(t *testing.T) {
 	resp, err := userpb.GetUserGrainGrainClient(sharedCluster, "alice-integration").
 		ForwardMessage(&userpb.ForwardMessageRequest{
 			RoomId:    "general",
-			SenderId:  "bob",
+			Sender:    &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
 			Text:      "hello-cluster",
 			Timestamp: timestamppb.New(time.UnixMilli(1700000000000)),
 		})
@@ -111,6 +112,13 @@ func TestIntegration_AuthAndForwardThroughRealUserGrain(t *testing.T) {
 	got := readFrame(t, cli)
 	if got["type"] != "message" || got["text"] != "hello-cluster" {
 		t.Errorf("expected message frame with text=hello-cluster, got %v", got)
+	}
+	sender, ok := got["sender"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested sender object, got %v (%T)", got["sender"], got["sender"])
+	}
+	if sender["id"] != "bob" || sender["name"] != "Bob Builder" {
+		t.Errorf("expected sender {id:bob name:Bob Builder}, got %v", sender)
 	}
 }
 

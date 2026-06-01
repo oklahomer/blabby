@@ -28,6 +28,9 @@ Thumbs.db
 
 # Build output
 /bin/
+# `go build ./cmd/server` / `./cmd/client` emit binaries here if -o is omitted
+/server
+/client
 
 # Environment files
 .env

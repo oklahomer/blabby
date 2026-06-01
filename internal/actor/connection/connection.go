@@ -550,7 +550,7 @@ func (uc *UserConnection) forwardMessage(ctx actor.Context, req *userpb.ForwardM
 	}
 	uc.sendOutbound(ctx, &ChatDelivered{
 		RoomID:    req.GetRoomId(),
-		SenderID:  req.GetSenderId(),
+		Sender:    UserRef{ID: req.GetSender().GetId(), Name: req.GetSender().GetName()},
 		Text:      req.GetText(),
 		Timestamp: timestamp,
 	})
@@ -559,7 +559,7 @@ func (uc *UserConnection) forwardMessage(ctx actor.Context, req *userpb.ForwardM
 		"pid", ctx.Self().String(),
 		"user_id", uc.userID.String(),
 		"room_id", req.GetRoomId(),
-		"sender_id", req.GetSenderId(),
+		"sender_id", req.GetSender().GetId(),
 		"text_len", len(req.GetText()),
 	)
 }
@@ -568,9 +568,9 @@ func (uc *UserConnection) forwardRoomEvent(ctx actor.Context, req *userpb.Notify
 	var out any
 	switch req.GetEventType() {
 	case userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED:
-		out = &RoomJoined{RoomID: req.GetRoomId(), UserID: req.GetUserId()}
+		out = &RoomJoined{RoomID: req.GetRoomId(), User: UserRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()}}
 	case userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT:
-		out = &RoomLeft{RoomID: req.GetRoomId(), UserID: req.GetUserId()}
+		out = &RoomLeft{RoomID: req.GetRoomId(), User: UserRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()}}
 	default:
 		slog.Warn(eventConnectionEventUnknown,
 			"actor_type", actorType,

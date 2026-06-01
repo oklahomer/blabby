@@ -26,3 +26,13 @@ message ErrorDetail {
   string status = 2;
   string message = 3;
 }
+
+// UserRef is a denormalized snapshot of a user as they appear in a room
+// event or message: their stable `id` plus the display `name` captured at
+// the moment the payload was produced. It travels with join/message/event
+// payloads so a recipient can label "who" without a separate lookup, and is
+// cached by the Room grain so fan-out never blocks on a per-member query.
+message UserRef {
+  string id = 1;
+  string name = 2;
+}

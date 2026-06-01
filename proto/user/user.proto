@@ -82,9 +82,10 @@ message SendMessageResponse {
 // --- Event Delivery (Room grain fan-out to User's connections) ---
 
 // ForwardMessageRequest delivers a chat message to the User grain for fan-out.
+// `sender` carries the message author's id and display name.
 message ForwardMessageRequest {
   string room_id = 1;
-  string sender_id = 2;
+  common.UserRef sender = 2;
   string text = 3;
   google.protobuf.Timestamp timestamp = 4;
 }
@@ -102,9 +103,10 @@ enum RoomEventType {
 }
 
 // NotifyRoomEventRequest delivers a room event (join/leave) to the User grain.
+// `user` carries the subject's id and display name.
 message NotifyRoomEventRequest {
   string room_id = 1;
-  string user_id = 2;
+  common.UserRef user = 2;
   RoomEventType event_type = 3;
 }
 

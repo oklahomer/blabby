@@ -391,19 +391,35 @@ func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {
 
 	when := time.UnixMilli(1700000000000)
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		RoomId: "general", SenderId: "bob", Text: "hello", Timestamp: timestamppb.New(when),
+		RoomId: "general", Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
+		Text: "hello", Timestamp: timestamppb.New(when),
 	})
 
 	got := readJSON(t, sess.client)
 	if got["type"] != "message" {
 		t.Errorf("type: got %v, want message", got["type"])
 	}
-	if got["room_id"] != "general" || got["sender_id"] != "bob" || got["text"] != "hello" {
+	if got["room_id"] != "general" || got["text"] != "hello" {
 		t.Errorf("payload mismatch: %v", got)
+	}
+	if sender := userObject(t, got, "sender"); sender["id"] != "bob" || sender["name"] != "Bob Builder" {
+		t.Errorf("sender: got %v, want {id:bob name:Bob Builder}", sender)
 	}
 	if got["timestamp"].(float64) != 1700000000000 {
 		t.Errorf("timestamp: got %v, want 1700000000000", got["timestamp"])
 	}
+}
+
+// userObject extracts the nested {"id","name"} object a message or
+// room-event frame carries under key, failing the test if it is absent or
+// not an object.
+func userObject(t *testing.T, frame map[string]any, key string) map[string]any {
+	t.Helper()
+	obj, ok := frame[key].(map[string]any)
+	if !ok {
+		t.Fatalf("%s: got %v (%T), want nested object", key, frame[key], frame[key])
+	}
+	return obj
 }
 
 func TestRoomEvent_JoinedAndLeftSerialise(t *testing.T) {
@@ -415,19 +431,27 @@ func TestRoomEvent_JoinedAndLeftSerialise(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", UserId: "carol",
+		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	})
-	if got := readJSON(t, sess.client); got["type"] != "joined" || got["user_id"] != "carol" {
-		t.Errorf("joined frame mismatch: %v", got)
+	joined := readJSON(t, sess.client)
+	if joined["type"] != "joined" {
+		t.Errorf("joined type: got %v, want joined", joined["type"])
+	}
+	if u := userObject(t, joined, "user"); u["id"] != "carol" || u["name"] != "Carol Danvers" {
+		t.Errorf("joined user mismatch: %v", u)
 	}
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", UserId: "carol",
+		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT,
 	})
-	if got := readJSON(t, sess.client); got["type"] != "left" || got["user_id"] != "carol" {
-		t.Errorf("left frame mismatch: %v", got)
+	left := readJSON(t, sess.client)
+	if left["type"] != "left" {
+		t.Errorf("left type: got %v, want left", left["type"])
+	}
+	if u := userObject(t, left, "user"); u["id"] != "carol" || u["name"] != "Carol Danvers" {
+		t.Errorf("left user mismatch: %v", u)
 	}
 }
 
@@ -440,14 +464,14 @@ func TestRoomEvent_UnspecifiedDoesNotCloseSession(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", UserId: "carol",
+		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_UNSPECIFIED,
 	})
 
 	// Push a known event afterwards. If the unknown event killed the session
 	// we'd never see this frame.
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", UserId: "carol",
+		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	})
 	if got := readJSON(t, sess.client); got["type"] != "joined" {
@@ -551,7 +575,8 @@ func TestLogs_MessageBodyIsNeverLogged(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		RoomId: "general", SenderId: "bob", Text: secretBody,
+		RoomId: "general", Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
+		Text:      secretBody,
 		Timestamp: timestamppb.New(time.UnixMilli(1)),
 	})
 	_ = readJSON(t, sess.client)

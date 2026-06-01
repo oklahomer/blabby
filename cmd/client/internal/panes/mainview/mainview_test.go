@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestViewDefaultLabel(t *testing.T) {
@@ -104,6 +107,52 @@ func TestViewOverflowErrorRowReservesScrollbackLine(t *testing.T) {
 	// shows exactly one fewer message than the no-error variant.
 	if vNo, vErr := countVisibleBracketed(noErr, 30), countVisibleBracketed(withErr, 30); vErr != vNo-1 {
 		t.Errorf("error row should reserve exactly one scrollback row: noErr=%d withErr=%d", vNo, vErr)
+	}
+}
+
+// forceColor pins a colour-capable profile for the duration of a test.
+// lipgloss otherwise strips colour when it cannot detect a colour terminal
+// (as under `go test`), which would make styled and unstyled output identical.
+func forceColor(t *testing.T) {
+	t.Helper()
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+}
+
+func TestSelfMessageSenderIsMuted(t *testing.T) {
+	forceColor(t)
+	at := time.Date(2026, 5, 30, 9, 8, 7, 0, time.Local)
+	mine := Message{Sender: "Rina", Text: "hi", At: at, Self: true}
+	theirs := Message{Sender: "Rina", Text: "hi", At: at, Self: false}
+
+	self := View(State{RoomLabel: "general", Messages: []Message{mine}}, false, 0, 0)
+	other := View(State{RoomLabel: "general", Messages: []Message{theirs}}, false, 0, 0)
+
+	// The name is always shown — Self never replaces it with "you".
+	if !strings.Contains(self, "Rina") || !strings.Contains(other, "Rina") {
+		t.Fatalf("sender name must appear in both renders:\nself=%q\nother=%q", self, other)
+	}
+	// Self styles the sender, so the two renders must differ.
+	if self == other {
+		t.Error("a Self message should render the sender differently (muted) than a non-self message")
+	}
+}
+
+func TestSelfMessageRespectsWidth(t *testing.T) {
+	forceColor(t) // emit real ANSI so the styled-name vs width-clip interaction is exercised
+	at := time.Date(2026, 5, 30, 9, 8, 7, 0, time.Local)
+	const width = 40
+	// A long own message: the styled sender name must not defeat width clipping.
+	out := View(State{
+		RoomLabel: "general",
+		Messages:  []Message{{Sender: "Rina", Text: strings.Repeat("x", 200), At: at, Self: true}},
+	}, false, width, 0)
+
+	for _, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Errorf("line exceeds width %d (visible width %d): %q", width, w, line)
+		}
 	}
 }
 

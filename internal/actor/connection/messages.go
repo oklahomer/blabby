@@ -43,21 +43,33 @@ type AuthFailed struct {
 	Message string
 }
 
+// UserRef carries a user's id and display name together as one value. It
+// is a plain, non-validating relay shape: the data it holds was already
+// parsed and validated by the Room grain (parseUserRef into id.UserRef)
+// before reaching this actor, so re-checking the invariants here would
+// only force handling an error that cannot occur. The grain RPC
+// (commonpb.UserRef) and the domain value (id.UserRef) own the rules; this
+// is the shape the connection relays toward the WebSocket.
+type UserRef struct {
+	ID   string
+	Name string
+}
+
 type ChatDelivered struct {
 	RoomID    string
-	SenderID  string
+	Sender    UserRef
 	Text      string
 	Timestamp time.Time
 }
 
 type RoomJoined struct {
 	RoomID string
-	UserID string
+	User   UserRef
 }
 
 type RoomLeft struct {
 	RoomID string
-	UserID string
+	User   UserRef
 }
 
 type ErrorResponse struct {

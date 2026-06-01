@@ -56,24 +56,24 @@ func TestEncodeAuthError(t *testing.T) {
 }
 
 func TestEncodeMessage(t *testing.T) {
-	got := encodeMessage("general", "alice", "hello world", 1700000000000)
-	want := `{"room_id":"general","sender_id":"alice","text":"hello world","timestamp":1700000000000,"type":"message"}`
+	got := encodeMessage("general", UserRef{ID: "alice", Name: "Alice Liddell"}, "hello world", 1700000000000)
+	want := `{"room_id":"general","sender":{"id":"alice","name":"Alice Liddell"},"text":"hello world","timestamp":1700000000000,"type":"message"}`
 	if string(got) != want {
 		t.Errorf("encodeMessage = %s\nwant %s", got, want)
 	}
 }
 
 func TestEncodeJoined(t *testing.T) {
-	got := encodeJoined("general", "alice")
-	want := `{"room_id":"general","type":"joined","user_id":"alice"}`
+	got := encodeJoined("general", UserRef{ID: "alice", Name: "Alice Liddell"})
+	want := `{"room_id":"general","type":"joined","user":{"id":"alice","name":"Alice Liddell"}}`
 	if string(got) != want {
 		t.Errorf("encodeJoined = %s\nwant %s", got, want)
 	}
 }
 
 func TestEncodeLeft(t *testing.T) {
-	got := encodeLeft("general", "alice")
-	want := `{"room_id":"general","type":"left","user_id":"alice"}`
+	got := encodeLeft("general", UserRef{ID: "alice", Name: "Alice Liddell"})
+	want := `{"room_id":"general","type":"left","user":{"id":"alice","name":"Alice Liddell"}}`
 	if string(got) != want {
 		t.Errorf("encodeLeft = %s\nwant %s", got, want)
 	}
@@ -83,9 +83,9 @@ func TestEncodeLeft(t *testing.T) {
 func TestNonAuthErrorBuildersOmitCode(t *testing.T) {
 	cases := map[string][]byte{
 		"auth_ok": encodeAuthOk(),
-		"message": encodeMessage("r", "s", "t", 1),
-		"joined":  encodeJoined("r", "u"),
-		"left":    encodeLeft("r", "u"),
+		"message": encodeMessage("r", UserRef{ID: "s", Name: "sn"}, "t", 1),
+		"joined":  encodeJoined("r", UserRef{ID: "u", Name: "un"}),
+		"left":    encodeLeft("r", UserRef{ID: "u", Name: "un"}),
 	}
 	for name, out := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestNonAuthErrorBuildersOmitCode(t *testing.T) {
 func TestEncodersNeverLeakSensitiveSubstrings(t *testing.T) {
 	const tokenSubstr = "ey-secret-jwt-payload"
 	const internalErr = "panic: runtime error"
-	out1 := encodeMessage("r", "s", "harmless body", 1)
+	out1 := encodeMessage("r", UserRef{ID: "s", Name: "sn"}, "harmless body", 1)
 	out2 := encodeAuthError(1001, "AUTH_INVALID_TOKEN", "invalid token")
 
 	for _, b := range [][]byte{out1, out2} {

@@ -442,8 +442,14 @@ func chatReadyModel(t *testing.T) Model {
 // tests without threading json.Marshal through every call site.
 func messageFrameJSON(room, sender, text string, ms int64) []byte {
 	return []byte(fmt.Sprintf(
-		`{"type":"message","room_id":%q,"sender_id":%q,"text":%q,"timestamp":%d}`,
+		`{"type":"message","room_id":%q,"sender":{"id":%q},"text":%q,"timestamp":%d}`,
 		room, sender, text, ms))
+}
+
+func messageFrameJSONNamed(room, senderID, senderName, text string, ms int64) []byte {
+	return []byte(fmt.Sprintf(
+		`{"type":"message","room_id":%q,"sender":{"id":%q,"name":%q},"text":%q,"timestamp":%d}`,
+		room, senderID, senderName, text, ms))
 }
 
 func chatFrame(m Model, typ string, raw []byte) api.WSFrameReceived {
@@ -494,11 +500,29 @@ func TestUpdateMessageFrameForOtherRoomRetainedNotShown(t *testing.T) {
 	}
 }
 
-func TestUpdateOwnMessageLabelledYou(t *testing.T) {
+func TestUpdateOwnMessageShowsMutedName(t *testing.T) {
 	m := chatReadyModel(t) // userID == u-rina-1
-	next, _ := m.Update(chatFrame(m, "message", messageFrameJSON("general", "u-rina-1", "mine", 1000)))
-	if got := next.(Model).messages["general"][0].Sender; got != "you" {
-		t.Fatalf("own message sender = %q, want \"you\"", got)
+	next, _ := m.Update(chatFrame(m, "message", messageFrameJSONNamed("general", "u-rina-1", "Rina", "mine", 1000)))
+	msg := next.(Model).messages["general"][0]
+	// Own messages now show the display name (not "you") and are flagged
+	// Self so mainview mutes the sender.
+	if msg.Sender != "Rina" {
+		t.Errorf("own message sender = %q, want display name %q", msg.Sender, "Rina")
+	}
+	if !msg.Self {
+		t.Error("own message should be flagged Self")
+	}
+}
+
+func TestUpdateOtherUserMessageNotSelf(t *testing.T) {
+	m := chatReadyModel(t) // userID == u-rina-1
+	next, _ := m.Update(chatFrame(m, "message", messageFrameJSONNamed("general", "u-bob-9", "Bob", "hi", 1000)))
+	msg := next.(Model).messages["general"][0]
+	if msg.Sender != "Bob" {
+		t.Errorf("other sender = %q, want %q", msg.Sender, "Bob")
+	}
+	if msg.Self {
+		t.Error("another user's message must not be flagged Self")
 	}
 }
 

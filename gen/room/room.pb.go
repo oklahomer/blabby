@@ -23,10 +23,11 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// JoinRequest is sent when a user wants to join a room.
+// JoinRequest is sent when a user wants to join a room. `user` carries the
+// joiner's id and display name; the Room grain caches the name for fan-out.
 type JoinRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	User          *common.UserRef        `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -61,11 +62,11 @@ func (*JoinRequest) Descriptor() ([]byte, []int) {
 	return file_room_room_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *JoinRequest) GetUserId() string {
+func (x *JoinRequest) GetUser() *common.UserRef {
 	if x != nil {
-		return x.UserId
+		return x.User
 	}
-	return ""
+	return nil
 }
 
 // JoinResponse indicates whether the join operation succeeded.
@@ -205,10 +206,11 @@ func (x *LeaveResponse) GetError() *common.ErrorDetail {
 	return nil
 }
 
-// PostMessageRequest is sent when a user posts a message to a room.
+// PostMessageRequest is sent when a user posts a message to a room. `user`
+// carries the sender's id and display name.
 type PostMessageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	User          *common.UserRef        `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
 	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -244,11 +246,11 @@ func (*PostMessageRequest) Descriptor() ([]byte, []int) {
 	return file_room_room_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *PostMessageRequest) GetUserId() string {
+func (x *PostMessageRequest) GetUser() *common.UserRef {
 	if x != nil {
-		return x.UserId
+		return x.User
 	}
-	return ""
+	return nil
 }
 
 func (x *PostMessageRequest) GetText() string {
@@ -318,17 +320,17 @@ var File_room_room_proto protoreflect.FileDescriptor
 
 const file_room_room_proto_rawDesc = "" +
 	"\n" +
-	"\x0froom/room.proto\x12\x04room\x1a\x13common/common.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"&\n" +
-	"\vJoinRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\tR\x06userId\"9\n" +
+	"\x0froom/room.proto\x12\x04room\x1a\x13common/common.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"2\n" +
+	"\vJoinRequest\x12#\n" +
+	"\x04user\x18\x01 \x01(\v2\x0f.common.UserRefR\x04user\"9\n" +
 	"\fJoinResponse\x12)\n" +
 	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"'\n" +
 	"\fLeaveRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\":\n" +
 	"\rLeaveResponse\x12)\n" +
-	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"A\n" +
-	"\x12PostMessageRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x12\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"M\n" +
+	"\x12PostMessageRequest\x12#\n" +
+	"\x04user\x18\x01 \x01(\v2\x0f.common.UserRefR\x04user\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\"z\n" +
 	"\x13PostMessageResponse\x128\n" +
 	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12)\n" +
@@ -358,25 +360,28 @@ var file_room_room_proto_goTypes = []any{
 	(*LeaveResponse)(nil),         // 3: room.LeaveResponse
 	(*PostMessageRequest)(nil),    // 4: room.PostMessageRequest
 	(*PostMessageResponse)(nil),   // 5: room.PostMessageResponse
-	(*common.ErrorDetail)(nil),    // 6: common.ErrorDetail
-	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
+	(*common.UserRef)(nil),        // 6: common.UserRef
+	(*common.ErrorDetail)(nil),    // 7: common.ErrorDetail
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
 }
 var file_room_room_proto_depIdxs = []int32{
-	6, // 0: room.JoinResponse.error:type_name -> common.ErrorDetail
-	6, // 1: room.LeaveResponse.error:type_name -> common.ErrorDetail
-	7, // 2: room.PostMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
-	6, // 3: room.PostMessageResponse.error:type_name -> common.ErrorDetail
-	0, // 4: room.RoomGrain.Join:input_type -> room.JoinRequest
-	2, // 5: room.RoomGrain.Leave:input_type -> room.LeaveRequest
-	4, // 6: room.RoomGrain.PostMessage:input_type -> room.PostMessageRequest
-	1, // 7: room.RoomGrain.Join:output_type -> room.JoinResponse
-	3, // 8: room.RoomGrain.Leave:output_type -> room.LeaveResponse
-	5, // 9: room.RoomGrain.PostMessage:output_type -> room.PostMessageResponse
-	7, // [7:10] is the sub-list for method output_type
-	4, // [4:7] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	6, // 0: room.JoinRequest.user:type_name -> common.UserRef
+	7, // 1: room.JoinResponse.error:type_name -> common.ErrorDetail
+	7, // 2: room.LeaveResponse.error:type_name -> common.ErrorDetail
+	6, // 3: room.PostMessageRequest.user:type_name -> common.UserRef
+	8, // 4: room.PostMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
+	7, // 5: room.PostMessageResponse.error:type_name -> common.ErrorDetail
+	0, // 6: room.RoomGrain.Join:input_type -> room.JoinRequest
+	2, // 7: room.RoomGrain.Leave:input_type -> room.LeaveRequest
+	4, // 8: room.RoomGrain.PostMessage:input_type -> room.PostMessageRequest
+	1, // 9: room.RoomGrain.Join:output_type -> room.JoinResponse
+	3, // 10: room.RoomGrain.Leave:output_type -> room.LeaveResponse
+	5, // 11: room.RoomGrain.PostMessage:output_type -> room.PostMessageResponse
+	9, // [9:12] is the sub-list for method output_type
+	6, // [6:9] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_room_room_proto_init() }

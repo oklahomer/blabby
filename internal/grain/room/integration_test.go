@@ -11,6 +11,7 @@ import (
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	clustertest "github.com/oklahomer/blabby/internal/testutil/cluster"
+	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
 )
 
 // stubUserGrain is a minimal UserGrain implementation used to exercise the
@@ -74,7 +75,7 @@ func TestRoomGrain_Integration_FanOutThroughCluster(t *testing.T) {
 	// retry internally until the topology is ready.
 	roomClient := roompb.GetRoomGrainGrainClient(c, "general")
 
-	joinResp, err := roomClient.Join(&roompb.JoinRequest{UserId: "alice"})
+	joinResp, err := roomClient.Join(graintest.NewJoinRequest("alice"))
 	if err != nil {
 		t.Fatalf("Join via cluster: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestRoomGrain_Integration_FanOutThroughCluster(t *testing.T) {
 		t.Fatalf("Join: error=%+v", joinResp.GetError())
 	}
 
-	postResp, err := roomClient.PostMessage(&roompb.PostMessageRequest{UserId: "alice", Text: "integration"})
+	postResp, err := roomClient.PostMessage(graintest.NewPostMessageRequest("alice", "integration"))
 	if err != nil {
 		t.Fatalf("PostMessage via cluster: %v", err)
 	}

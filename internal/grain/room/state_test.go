@@ -17,9 +17,23 @@ func mustUserID(t *testing.T, raw string) id.UserID {
 	return u
 }
 
+// mustUserRef builds a typed id.UserRef from a raw id and display name,
+// failing the test on any construction error. It keeps the member-cache
+// tests readable now that addMember/refreshMember take a UserRef.
+func mustUserRef(t *testing.T, rawID, name string) id.UserRef {
+	t.Helper()
+	ref, err := id.NewUserRef(mustUserID(t, rawID), name)
+	if err != nil {
+		t.Fatalf("mustUserRef(%q, %q): %v", rawID, name, err)
+	}
+	return ref
+}
+
 func TestRoomState_AddRemoveMember(t *testing.T) {
 	alice := mustUserID(t, "alice")
 	bob := mustUserID(t, "bob")
+	aliceRef := mustUserRef(t, "alice", "alice")
+	bobRef := mustUserRef(t, "bob", "bob")
 
 	tests := []struct {
 		name      string
@@ -30,27 +44,27 @@ func TestRoomState_AddRemoveMember(t *testing.T) {
 	}{
 		{
 			name:      "add new member returns true and stores id",
-			op:        func(s *roomState) bool { return s.addMember(alice) },
+			op:        func(s *roomState) bool { return s.addMember(aliceRef) },
 			wantOK:    true,
 			wantState: []id.UserID{alice},
 		},
 		{
 			name:      "add duplicate member returns false and keeps state",
-			setup:     func(s *roomState) { s.addMember(alice) },
-			op:        func(s *roomState) bool { return s.addMember(alice) },
+			setup:     func(s *roomState) { s.addMember(aliceRef) },
+			op:        func(s *roomState) bool { return s.addMember(aliceRef) },
 			wantOK:    false,
 			wantState: []id.UserID{alice},
 		},
 		{
 			name:      "remove existing member returns true and clears state",
-			setup:     func(s *roomState) { s.addMember(alice) },
+			setup:     func(s *roomState) { s.addMember(aliceRef) },
 			op:        func(s *roomState) bool { return s.removeMember(alice) },
 			wantOK:    true,
 			wantState: nil,
 		},
 		{
 			name:      "remove non-member returns false and keeps state",
-			setup:     func(s *roomState) { s.addMember(bob) },
+			setup:     func(s *roomState) { s.addMember(bobRef) },
 			op:        func(s *roomState) bool { return s.removeMember(alice) },
 			wantOK:    false,
 			wantState: []id.UserID{bob},
@@ -81,7 +95,7 @@ func TestRoomState_IsMember(t *testing.T) {
 	alice := mustUserID(t, "alice")
 	bob := mustUserID(t, "bob")
 	s := newRoomState()
-	s.addMember(alice)
+	s.addMember(mustUserRef(t, "alice", "alice"))
 
 	if !s.isMember(alice) {
 		t.Errorf("isMember(alice): got false, want true")
@@ -91,10 +105,41 @@ func TestRoomState_IsMember(t *testing.T) {
 	}
 }
 
+func TestRoomState_MemberRef_CachesNameAndRefresh(t *testing.T) {
+	alice := mustUserID(t, "alice")
+	bob := mustUserID(t, "bob")
+	s := newRoomState()
+	s.addMember(mustUserRef(t, "alice", "Alice"))
+
+	ref, ok := s.memberRef(alice)
+	if !ok {
+		t.Fatalf("memberRef(alice): got ok=false, want true")
+	}
+	if ref.ID() != alice {
+		t.Errorf("memberRef(alice).ID(): got %v, want %v", ref.ID(), alice)
+	}
+	if ref.Name() != "Alice" {
+		t.Errorf("memberRef(alice).Name(): got %q, want %q", ref.Name(), "Alice")
+	}
+
+	// refreshMember updates an existing member's cached display name.
+	s.refreshMember(mustUserRef(t, "alice", "Alice Renamed"))
+	ref, _ = s.memberRef(alice)
+	if ref.Name() != "Alice Renamed" {
+		t.Errorf("after refresh, memberRef(alice).Name(): got %q, want %q", ref.Name(), "Alice Renamed")
+	}
+
+	// refreshMember is a no-op for a non-member and must not resurrect one.
+	s.refreshMember(mustUserRef(t, "bob", "Bob"))
+	if _, ok := s.memberRef(bob); ok {
+		t.Errorf("memberRef(bob): got ok=true, want false (refresh must not add a non-member)")
+	}
+}
+
 func TestRoomState_MemberIDs_Sorted(t *testing.T) {
 	s := newRoomState()
-	for _, userID := range []id.UserID{mustUserID(t, "charlie"), mustUserID(t, "alice"), mustUserID(t, "bob")} {
-		s.addMember(userID)
+	for _, ref := range []id.UserRef{mustUserRef(t, "charlie", "charlie"), mustUserRef(t, "alice", "alice"), mustUserRef(t, "bob", "bob")} {
+		s.addMember(ref)
 	}
 
 	got := s.memberIDs()
