@@ -59,25 +59,31 @@ type fakeRoomClient struct {
 	defaultPost  *roompb.PostMessageResponse
 }
 
+// userRef groups a user's id and display name the way the production proto
+// (commonpb.UserRef) carries them, so the recorders assert the pair travels
+// together to the Room grain rather than as two loose strings.
+type userRef struct {
+	ID   string
+	Name string
+}
+
 type joinCall struct {
-	RoomID   string
-	UserID   string
-	UserName string
+	RoomID string
+	User   userRef
 }
 type leaveCall struct {
 	RoomID string
 	UserID string
 }
 type postCall struct {
-	RoomID   string
-	UserID   string
-	UserName string
-	Text     string
+	RoomID string
+	User   userRef
+	Text   string
 }
 
 func (f *fakeRoomClient) Join(roomID id.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error) {
 	f.mu.Lock()
-	f.joinCalls = append(f.joinCalls, joinCall{RoomID: roomID.String(), UserID: req.GetUser().GetId(), UserName: req.GetUser().GetName()})
+	f.joinCalls = append(f.joinCalls, joinCall{RoomID: roomID.String(), User: userRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()}})
 	fn := f.joinFn
 	def := f.defaultJoin
 	f.mu.Unlock()
@@ -107,7 +113,7 @@ func (f *fakeRoomClient) Leave(roomID id.RoomID, req *roompb.LeaveRequest) (*roo
 
 func (f *fakeRoomClient) PostMessage(roomID id.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error) {
 	f.mu.Lock()
-	f.postCalls = append(f.postCalls, postCall{RoomID: roomID.String(), UserID: req.GetUser().GetId(), UserName: req.GetUser().GetName(), Text: req.GetText()})
+	f.postCalls = append(f.postCalls, postCall{RoomID: roomID.String(), User: userRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()}, Text: req.GetText()})
 	fn := f.postFn
 	def := f.defaultPost
 	f.mu.Unlock()
@@ -332,8 +338,8 @@ func TestGrain_JoinRoom(t *testing.T) {
 		if got := h.g.JoinedRooms(); !reflect.DeepEqual(got, []id.RoomID{mustRoomID(t, "general")}) {
 			t.Errorf("JoinedRooms: got %v, want [general]", got)
 		}
-		if len(h.rooms.joinCalls) != 1 || h.rooms.joinCalls[0] != (joinCall{RoomID: "general", UserID: "alice", UserName: "alice"}) {
-			t.Errorf("joinCalls: got %+v, want [{general alice alice}]", h.rooms.joinCalls)
+		if len(h.rooms.joinCalls) != 1 || h.rooms.joinCalls[0] != (joinCall{RoomID: "general", User: userRef{ID: "alice", Name: "alice"}}) {
+			t.Errorf("joinCalls: got %+v, want [{general {alice alice}}]", h.rooms.joinCalls)
 		}
 	})
 
@@ -462,8 +468,8 @@ func TestGrain_SendMessage(t *testing.T) {
 		if resp.GetError() != nil || !resp.GetTimestamp().AsTime().Equal(want) {
 			t.Fatalf("got %+v, want error=nil ts=%v", resp, want)
 		}
-		if len(h.rooms.postCalls) != 1 || h.rooms.postCalls[0] != (postCall{RoomID: "general", UserID: "alice", UserName: "alice", Text: "hi"}) {
-			t.Errorf("postCalls: got %+v, want one call with alice/alice/hi", h.rooms.postCalls)
+		if len(h.rooms.postCalls) != 1 || h.rooms.postCalls[0] != (postCall{RoomID: "general", User: userRef{ID: "alice", Name: "alice"}, Text: "hi"}) {
+			t.Errorf("postCalls: got %+v, want one call with user={alice alice} text=hi", h.rooms.postCalls)
 		}
 		if got := h.sender.Calls(); len(got) != 0 {
 			t.Errorf("sender.Calls: got %d, want 0 (SendMessage must not echo locally)", len(got))

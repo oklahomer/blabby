@@ -52,11 +52,11 @@ func (m Model) appendChatMessage(cm api.ChatMessageReceived) Model {
 	// server sent no name (older frames or a directory miss). The user's own
 	// messages are flagged Self so mainview can mute them — the name is still
 	// shown, just dimmed, so other members stand out.
-	sender := cm.SenderName
+	sender := cm.Sender.Name
 	if sender == "" {
-		sender = cm.SenderID
+		sender = cm.Sender.ID
 	}
-	msg := mainview.Message{Sender: sender, Text: cm.Text, At: cm.At, Self: cm.SenderID == m.userID}
+	msg := mainview.Message{Sender: sender, Text: cm.Text, At: cm.At, Self: cm.Sender.ID == m.userID}
 	m.messages[cm.RoomID] = insertOrdered(m.messages[cm.RoomID], msg, messageBucketCap)
 	return m
 }

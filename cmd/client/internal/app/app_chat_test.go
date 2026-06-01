@@ -142,7 +142,7 @@ func (s *chatStubServer) pushMessage(t *testing.T, room, sender, text string, ms
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	frame := map[string]any{
-		"type": "message", "room_id": room, "sender_id": sender, "text": text, "timestamp": ms,
+		"type": "message", "room_id": room, "sender": map[string]any{"id": sender}, "text": text, "timestamp": ms,
 	}
 	if err := conn.WriteJSON(frame); err != nil {
 		t.Errorf("push message frame: %v", err)

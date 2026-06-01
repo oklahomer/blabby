@@ -113,8 +113,12 @@ func TestIntegration_AuthAndForwardThroughRealUserGrain(t *testing.T) {
 	if got["type"] != "message" || got["text"] != "hello-cluster" {
 		t.Errorf("expected message frame with text=hello-cluster, got %v", got)
 	}
-	if got["sender_id"] != "bob" || got["sender_name"] != "Bob Builder" {
-		t.Errorf("expected sender_id=bob sender_name=Bob Builder, got %v", got)
+	sender, ok := got["sender"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested sender object, got %v (%T)", got["sender"], got["sender"])
+	}
+	if sender["id"] != "bob" || sender["name"] != "Bob Builder" {
+		t.Errorf("expected sender {id:bob name:Bob Builder}, got %v", sender)
 	}
 }
 

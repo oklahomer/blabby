@@ -109,15 +109,23 @@ type SendMessageResponse struct {
 	Timestamp int64 `json:"timestamp"`
 }
 
+// UserRef mirrors the server's connection.UserRef — the nested
+// {"id","name"} object the message and room-event frames carry. It is a
+// plain wire value; the server already validated the identity it holds.
+type UserRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // MessageFrame mirrors internal/actor/connection/encoder.go
 // encodeMessage — the inbound {"type":"message"} chat frame the Room
-// grain fans out to every member (the sender included). Timestamp is
-// Unix milliseconds; the server emits 0 for a zero-value time.
+// grain fans out to every member (the sender included). The sender is a
+// nested {"id","name"} object. Timestamp is Unix milliseconds; the server
+// emits 0 for a zero-value time.
 type MessageFrame struct {
-	Type       string `json:"type"`
-	RoomID     string `json:"room_id"`
-	SenderID   string `json:"sender_id"`
-	SenderName string `json:"sender_name"`
-	Text       string `json:"text"`
-	Timestamp  int64  `json:"timestamp"`
+	Type      string  `json:"type"`
+	RoomID    string  `json:"room_id"`
+	Sender    UserRef `json:"sender"`
+	Text      string  `json:"text"`
+	Timestamp int64   `json:"timestamp"`
 }

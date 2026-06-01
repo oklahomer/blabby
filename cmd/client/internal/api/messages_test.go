@@ -266,12 +266,12 @@ func TestSendMessageCmdTransportError(t *testing.T) {
 
 func TestDecodeChatMessageValid(t *testing.T) {
 	const ms int64 = 1_700_000_000_000
-	raw := []byte(`{"type":"message","room_id":"general","sender_id":"alice","text":"hello","timestamp":1700000000000}`)
+	raw := []byte(`{"type":"message","room_id":"general","sender":{"id":"alice","name":"Alice Liddell"},"text":"hello","timestamp":1700000000000}`)
 	got, ok := DecodeChatMessage(raw)
 	if !ok {
 		t.Fatal("expected ok for a valid message frame")
 	}
-	if got.RoomID != "general" || got.SenderID != "alice" || got.Text != "hello" {
+	if got.RoomID != "general" || got.Sender.ID != "alice" || got.Sender.Name != "Alice Liddell" || got.Text != "hello" {
 		t.Fatalf("decoded fields wrong: %#v", got)
 	}
 	if !got.At.Equal(time.UnixMilli(ms)) {
@@ -280,7 +280,7 @@ func TestDecodeChatMessageValid(t *testing.T) {
 }
 
 func TestDecodeChatMessageZeroTimestamp(t *testing.T) {
-	raw := []byte(`{"type":"message","room_id":"general","sender_id":"alice","text":"hi","timestamp":0}`)
+	raw := []byte(`{"type":"message","room_id":"general","sender":{"id":"alice"},"text":"hi","timestamp":0}`)
 	got, ok := DecodeChatMessage(raw)
 	if !ok {
 		t.Fatal("expected ok")
@@ -291,7 +291,7 @@ func TestDecodeChatMessageZeroTimestamp(t *testing.T) {
 }
 
 func TestDecodeChatMessageWrongType(t *testing.T) {
-	if _, ok := DecodeChatMessage([]byte(`{"type":"joined","room_id":"general","user_id":"alice"}`)); ok {
+	if _, ok := DecodeChatMessage([]byte(`{"type":"joined","room_id":"general","user":{"id":"alice"}}`)); ok {
 		t.Fatal("expected ok=false for a non-message frame")
 	}
 }

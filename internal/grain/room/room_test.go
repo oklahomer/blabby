@@ -46,30 +46,35 @@ type fakeNotifier struct {
 	forwardErrFn func(userID string) error
 }
 
+// userRef groups a user's id and display name the way the production proto
+// (commonpb.UserRef) carries them, so the recorders assert the pair travels
+// together through fan-out rather than as two loose strings.
+type userRef struct {
+	ID   string
+	Name string
+}
+
 type notifyCall struct {
-	UserID      string
-	RoomID      string
-	Subject     string
-	SubjectName string
-	EventType   userpb.RoomEventType
+	UserID    string
+	RoomID    string
+	Subject   userRef
+	EventType userpb.RoomEventType
 }
 
 type forwardCall struct {
-	UserID     string
-	RoomID     string
-	SenderID   string
-	SenderName string
-	Text       string
-	Timestamp  time.Time
+	UserID    string
+	RoomID    string
+	Sender    userRef
+	Text      string
+	Timestamp time.Time
 }
 
 func (f *fakeNotifier) NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomEventRequest) error {
 	f.notifyCalls = append(f.notifyCalls, notifyCall{
-		UserID:      userID.String(),
-		RoomID:      req.GetRoomId(),
-		Subject:     req.GetUser().GetId(),
-		SubjectName: req.GetUser().GetName(),
-		EventType:   req.GetEventType(),
+		UserID:    userID.String(),
+		RoomID:    req.GetRoomId(),
+		Subject:   userRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()},
+		EventType: req.GetEventType(),
 	})
 	if f.notifyErrFn != nil {
 		return f.notifyErrFn(userID.String())
@@ -79,12 +84,11 @@ func (f *fakeNotifier) NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomE
 
 func (f *fakeNotifier) ForwardMessage(userID id.UserID, req *userpb.ForwardMessageRequest) error {
 	f.forwardCalls = append(f.forwardCalls, forwardCall{
-		UserID:     userID.String(),
-		RoomID:     req.GetRoomId(),
-		SenderID:   req.GetSender().GetId(),
-		SenderName: req.GetSender().GetName(),
-		Text:       req.GetText(),
-		Timestamp:  req.GetTimestamp().AsTime(),
+		UserID:    userID.String(),
+		RoomID:    req.GetRoomId(),
+		Sender:    userRef{ID: req.GetSender().GetId(), Name: req.GetSender().GetName()},
+		Text:      req.GetText(),
+		Timestamp: req.GetTimestamp().AsTime(),
 	})
 	if f.forwardErrFn != nil {
 		return f.forwardErrFn(userID.String())
@@ -130,7 +134,7 @@ func TestGrain_Join(t *testing.T) {
 			t.Fatalf("notifyCalls: got %d, want 1", len(notifier.notifyCalls))
 		}
 		c := notifier.notifyCalls[0]
-		want := notifyCall{UserID: "alice", RoomID: "general", Subject: "alice", SubjectName: "Alice", EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED}
+		want := notifyCall{UserID: "alice", RoomID: "general", Subject: userRef{ID: "alice", Name: "Alice"}, EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED}
 		if c != want {
 			t.Errorf("notifyCalls[0]: got %+v, want %+v", c, want)
 		}
@@ -164,13 +168,10 @@ func TestGrain_Join(t *testing.T) {
 			t.Errorf("recipients: got %v, want %v", gotRecipients, want)
 		}
 		for i, c := range notifier.notifyCalls {
-			if c.Subject != "carol" {
-				t.Errorf("notifyCalls[%d].Subject: got %q, want carol", i, c.Subject)
-			}
-			// The default-name helper sets name = id, so the subject's name
-			// is carried through fan-out as "carol".
-			if c.SubjectName != "carol" {
-				t.Errorf("notifyCalls[%d].SubjectName: got %q, want carol", i, c.SubjectName)
+			// The default-name helper sets name = id, so the subject is
+			// carried through fan-out as {ID: carol, Name: carol}.
+			if want := (userRef{ID: "carol", Name: "carol"}); c.Subject != want {
+				t.Errorf("notifyCalls[%d].Subject: got %+v, want %+v", i, c.Subject, want)
 			}
 			if c.EventType != userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED {
 				t.Errorf("notifyCalls[%d].EventType: got %v, want JOINED", i, c.EventType)
@@ -236,8 +237,8 @@ func TestGrain_Leave(t *testing.T) {
 			t.Errorf("recipients: got %v, want [alice bob]", gotRecipients)
 		}
 		for i, c := range notifier.notifyCalls {
-			if c.Subject != "alice" || c.EventType != userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT {
-				t.Errorf("notifyCalls[%d]: got %+v, want subject=alice eventType=LEFT", i, c)
+			if c.Subject != (userRef{ID: "alice", Name: "alice"}) || c.EventType != userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT {
+				t.Errorf("notifyCalls[%d]: got %+v, want subject={alice alice} eventType=LEFT", i, c)
 			}
 		}
 	})
@@ -298,8 +299,8 @@ func TestGrain_PostMessage(t *testing.T) {
 		}
 		respTime := resp.GetTimestamp().AsTime()
 		for i, c := range notifier.forwardCalls {
-			if c.SenderID != "alice" || c.SenderName != "Alice" || c.Text != "hello" || !c.Timestamp.Equal(respTime) {
-				t.Errorf("forwardCalls[%d]: got %+v, want sender=alice senderName=Alice text=hello ts=%v", i, c, respTime)
+			if c.Sender != (userRef{ID: "alice", Name: "Alice"}) || c.Text != "hello" || !c.Timestamp.Equal(respTime) {
+				t.Errorf("forwardCalls[%d]: got %+v, want sender={alice Alice} text=hello ts=%v", i, c, respTime)
 			}
 		}
 		if got := g.RecentMessageCount(); got != 1 {

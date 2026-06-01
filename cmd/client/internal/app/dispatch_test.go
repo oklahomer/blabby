@@ -442,13 +442,13 @@ func chatReadyModel(t *testing.T) Model {
 // tests without threading json.Marshal through every call site.
 func messageFrameJSON(room, sender, text string, ms int64) []byte {
 	return []byte(fmt.Sprintf(
-		`{"type":"message","room_id":%q,"sender_id":%q,"text":%q,"timestamp":%d}`,
+		`{"type":"message","room_id":%q,"sender":{"id":%q},"text":%q,"timestamp":%d}`,
 		room, sender, text, ms))
 }
 
 func messageFrameJSONNamed(room, senderID, senderName, text string, ms int64) []byte {
 	return []byte(fmt.Sprintf(
-		`{"type":"message","room_id":%q,"sender_id":%q,"sender_name":%q,"text":%q,"timestamp":%d}`,
+		`{"type":"message","room_id":%q,"sender":{"id":%q,"name":%q},"text":%q,"timestamp":%d}`,
 		room, senderID, senderName, text, ms))
 }
 
