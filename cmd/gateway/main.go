@@ -1,19 +1,18 @@
-// Command server runs the blabby chat backend: a proto.actor cluster hosting
-// the User and Room grains, fronted by the HTTP + WebSocket gateway. Run with
+// Command gateway runs the blabby API tier: an HTTP + WebSocket front end that
+// joins the proto.actor cluster as a client and routes requests to the User and
+// Room grains hosted by the backend (cmd/backend). It hosts the per-connection
+// UserConnection actors locally but never hosts grains itself.
 //
-//	go run ./cmd/server
+// Run with
 //
-// and it listens on :8080 as a self-contained single node with zero external
-// dependencies. Override the listen address with --listen and the JWT signing
-// secret with --jwt-secret; when no secret is supplied a built-in development
-// key is used (and a warning is logged) so a fresh clone runs without
-// configuration.
+//	go run ./cmd/gateway --seeds <backend-host:discoveryPort> \
+//	    --advertised-host <host:cluster-port> --cluster-port <port>
 //
-// Supplying one or more discovery --seeds opts into multi-node mode, in which
-// several instances discover each other through the automanaged provider and
-// distribute grains across the cluster. Multi-node mode additionally requires
-// an explicit, peer-reachable --advertised-host and a fixed --cluster-port; see
-// docs/multi-node-cluster.md for a runnable two-node walk-through.
+// It serves HTTP on :8080 by default. Override the listen address with --listen
+// and the JWT signing secret with --jwt-secret; when no secret is supplied a
+// built-in development key is used (and a warning is logged). Every gateway in a
+// real deployment MUST share the same signing secret. See
+// docs/multi-node-cluster.md.
 package main
 
 import (
@@ -39,24 +38,23 @@ import (
 const (
 	defaultListenAddr = ":8080"
 
-	// devJWTSecret is the fallback signing key used when --jwt-secret is
-	// not provided, so a fresh clone runs with zero configuration. It is
+	// devJWTSecret is the fallback signing key used when --jwt-secret is not
+	// provided, so a fresh clone runs with zero configuration. It is
 	// intentionally well-known and MUST NOT be used in any real deployment.
 	devJWTSecret = "blabby-dev-insecure-signing-key"
 
 	// readHeaderTimeout bounds how long a client may take to send request
-	// headers — a Slowloris guard. It does not apply to the request body or
-	// to the long-lived WebSocket connection, so /ws is unaffected.
+	// headers — a Slowloris guard. It does not apply to the request body or to
+	// the long-lived WebSocket connection, so /ws is unaffected.
 	readHeaderTimeout = 5 * time.Second
 
 	// shutdownTimeout bounds graceful HTTP drain on SIGINT/SIGTERM.
 	shutdownTimeout = 10 * time.Second
 )
 
-// config is the parsed, validated HTTP/auth server configuration. Constructing
-// it via newConfig is the single boundary where raw flag strings are checked,
-// so the rest of the program can trust these values. The cluster settings live
-// separately in clusterboot.Config.
+// config is the parsed, validated HTTP/auth configuration. Constructing it via
+// newConfig is the single boundary where raw flag strings are checked. The
+// cluster settings live separately in clusterboot.Config.
 type config struct {
 	listenAddr     string
 	jwtSecret      string
@@ -79,12 +77,12 @@ func main() {
 	}
 }
 
-// parseConfig parses the server's command-line flags into validated HTTP/auth
-// and cluster configuration. It uses a dedicated FlagSet (not the global
-// flag.CommandLine) so it can be driven directly from tests; the cluster flags
-// are registered by clusterboot on the same FlagSet.
+// parseConfig parses the gateway's command-line flags into validated HTTP/auth
+// and cluster configuration. It uses a dedicated FlagSet so it can be driven
+// directly from tests; the cluster flags are registered by clusterboot on the
+// same FlagSet.
 func parseConfig(args []string) (config, clusterboot.Config, error) {
-	fs := flag.NewFlagSet("blabby-server", flag.ContinueOnError)
+	fs := flag.NewFlagSet("blabby-gateway", flag.ContinueOnError)
 	listen := fs.String("listen", defaultListenAddr, "HTTP listen address (host:port)")
 	secret := fs.String("jwt-secret", "", "JWT signing secret; a development default is used when empty")
 	clusterCfg := clusterboot.BindFlags(fs)
@@ -125,10 +123,10 @@ func newConfig(listen, secret string) (config, error) {
 	return cfg, nil
 }
 
-// run starts the cluster member and HTTP gateway, then blocks until a
-// shutdown signal arrives. On shutdown it drains HTTP first (serve) and then
-// stops the cluster (deferred), so in-flight requests finish before the grains
-// they depend on go away.
+// run joins the cluster as a client and serves the HTTP gateway, then blocks
+// until a shutdown signal arrives. On shutdown it drains HTTP first (serve) and
+// then leaves the cluster (deferred), so in-flight requests finish before the
+// client's transport goes away.
 func run(cfg config, cc clusterboot.Config) error {
 	if cfg.usingDevSecret {
 		slog.Warn("server.jwt_secret.dev_default",
@@ -138,24 +136,24 @@ func run(cfg config, cc clusterboot.Config) error {
 		slog.Warn("server.cluster.config_warning", "detail", w)
 	}
 
-	// One store instance backs both credential lookup (authenticator) and
-	// display-name resolution (the User grain's directory).
+	// The in-memory store backs credential lookup for login and token issue.
+	// The gateway never resolves display names — that is the User grain's job —
+	// so it consumes the store only as an auth.UserStore.
 	store := auth.NewInMemoryUserStore()
 
-	c := clusterboot.Build(cc, clusterboot.Kinds(store)...)
+	// Kinds are registered for grain-call routing; the gateway is a client and
+	// never activates a grain, so it passes a nil directory.
+	c := clusterboot.Build(cc, clusterboot.Kinds(nil)...)
 	defer c.Shutdown(true)
 
-	// Log cluster membership changes (joins/leaves) for operational visibility.
-	// Subscribe before StartMember so the initial join topology is not missed.
+	// Subscribe before StartClient so the initial cluster topology is not missed.
 	sub := clusterboot.SubscribeTopologyLogging(c)
 	defer c.ActorSystem.EventStream.Unsubscribe(sub)
 
-	c.StartMember()
+	c.StartClient()
 
-	// Address is the peer-reachable address protoactor advertises; logging it
-	// after StartMember (the remote layer is up by then) lets an operator
-	// confirm what peers would see. Before StartMember it is the placeholder
-	// "nonhost".
+	// Address is what backends use to reach this gateway's UserConnection PIDs
+	// for fan-out; logging it after StartClient lets an operator confirm it.
 	slog.Info("server.cluster.started", "advertised_address", c.ActorSystem.Address())
 
 	authenticator := auth.NewJWTAuthenticator([]byte(cfg.jwtSecret), store)

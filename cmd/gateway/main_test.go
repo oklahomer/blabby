@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// TestParseConfig covers the HTTP/auth flags this command owns and confirms the
+// TestParseConfig covers the HTTP/auth flags the gateway owns and confirms the
 // cluster flags registered by clusterboot.BindFlags flow through parseConfig —
-// both the success path (mode selection) and surfaced validation errors. The
-// exhaustive cluster-flag/validation cases live in the clusterboot package.
+// both mode selection and surfaced validation errors. The exhaustive
+// cluster-flag cases live in the clusterboot package.
 func TestParseConfig(t *testing.T) {
 	tests := []struct {
 		name     string
