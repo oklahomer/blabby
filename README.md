@@ -53,12 +53,10 @@ go run ./cmd/backend
 **2. In another terminal, start the gateway** (HTTP + WebSocket on `:8080`, joins as a cluster client):
 
 ```bash
-go run ./cmd/gateway \
-  --seeds 127.0.0.1:6330 \
-  --advertised-host 127.0.0.1:8091 \
-  --cluster-port 8091 \
-  --discovery-port 6331
+go run ./cmd/gateway
 ```
+
+It defaults to joining a local backend on `127.0.0.1:6330` and logs a one-time loopback advertised-host warning — expected for a same-host run. Override `--seeds`, `--advertised-host`, and `--cluster-port` for a real cluster ([details](docs/multi-node-cluster.md)).
 
 **3. In a third terminal, start the client:**
 

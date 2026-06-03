@@ -22,32 +22,38 @@ func TestParseConfig(t *testing.T) {
 		wantMultiNode bool
 	}{
 		{
-			name:         "defaults",
-			args:         nil,
-			wantListen:   defaultListenAddr,
-			wantSecret:   devJWTSecret,
-			wantUsingDev: true,
+			// Flagless gateway runs the local demo: its cluster defaults include
+			// a seed, so it is a multi-node client (and a valid one).
+			name:          "defaults",
+			args:          nil,
+			wantListen:    defaultListenAddr,
+			wantSecret:    devJWTSecret,
+			wantUsingDev:  true,
+			wantMultiNode: true,
 		},
 		{
-			name:         "custom listen",
-			args:         []string{"--listen", "127.0.0.1:9000"},
-			wantListen:   "127.0.0.1:9000",
-			wantSecret:   devJWTSecret,
-			wantUsingDev: true,
+			name:          "custom listen",
+			args:          []string{"--listen", "127.0.0.1:9000"},
+			wantListen:    "127.0.0.1:9000",
+			wantSecret:    devJWTSecret,
+			wantUsingDev:  true,
+			wantMultiNode: true,
 		},
 		{
-			name:         "explicit secret disables dev default",
-			args:         []string{"--jwt-secret", "s3cret"},
-			wantListen:   defaultListenAddr,
-			wantSecret:   "s3cret",
-			wantUsingDev: false,
+			name:          "explicit secret disables dev default",
+			args:          []string{"--jwt-secret", "s3cret"},
+			wantListen:    defaultListenAddr,
+			wantSecret:    "s3cret",
+			wantUsingDev:  false,
+			wantMultiNode: true,
 		},
 		{
-			name:         "blank secret falls back to dev default",
-			args:         []string{"--jwt-secret", "   "},
-			wantListen:   defaultListenAddr,
-			wantSecret:   devJWTSecret,
-			wantUsingDev: true,
+			name:          "blank secret falls back to dev default",
+			args:          []string{"--jwt-secret", "   "},
+			wantListen:    defaultListenAddr,
+			wantSecret:    devJWTSecret,
+			wantUsingDev:  true,
+			wantMultiNode: true,
 		},
 		{
 			name:     "empty listen rejected",
@@ -68,22 +74,13 @@ func TestParseConfig(t *testing.T) {
 			errMatch: "nope",
 		},
 		{
-			name: "cluster flags flow through: multi-node selected",
-			args: []string{
-				"--seeds", "127.0.0.1:6330",
-				"--advertised-host", "127.0.0.1:8091",
-				"--cluster-port", "8091",
-			},
-			wantListen:    defaultListenAddr,
-			wantSecret:    devJWTSecret,
-			wantUsingDev:  true,
-			wantMultiNode: true,
-		},
-		{
+			// Overriding the bind port to 0 makes the (seed-defaulted) multi-node
+			// config invalid, confirming clusterboot validation surfaces through
+			// parseConfig.
 			name:     "cluster validation error surfaces through parseConfig",
-			args:     []string{"--seeds", "127.0.0.1:6330", "--cluster-port", "8091"},
+			args:     []string{"--cluster-port", "0"},
 			wantErr:  true,
-			errMatch: "advertised-host",
+			errMatch: "cluster-port",
 		},
 	}
 

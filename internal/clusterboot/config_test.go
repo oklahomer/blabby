@@ -13,11 +13,45 @@ import (
 func parseClusterFlags(args []string) (Config, error) {
 	fs := flag.NewFlagSet("clusterboot-test", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	build := BindFlags(fs)
+	build := BindFlags(fs, MemberDefaults())
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
 	return build()
+}
+
+// TestBindFlagsHonorsDefaults verifies BindFlags registers the provided
+// Defaults, so a binary that defaults to a multi-node client (e.g. the gateway)
+// parses cleanly with no flags.
+func TestBindFlagsHonorsDefaults(t *testing.T) {
+	fs := flag.NewFlagSet("clusterboot-test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	build := BindFlags(fs, Defaults{
+		ClusterHost:    "127.0.0.1",
+		ClusterPort:    8091,
+		AdvertisedHost: "127.0.0.1:8091",
+		DiscoveryPort:  6331,
+		Seeds:          "127.0.0.1:6330",
+	})
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("parse with no args: %v", err)
+	}
+	cc, err := build()
+	if err != nil {
+		t.Fatalf("build with multi-node defaults: %v", err)
+	}
+	if !cc.MultiNode() {
+		t.Errorf("MultiNode() = false, want true (seeds defaulted)")
+	}
+	if !slices.Equal(cc.seeds, []string{"127.0.0.1:6330"}) {
+		t.Errorf("seeds = %v, want [127.0.0.1:6330]", cc.seeds)
+	}
+	if cc.advertisedHost != "127.0.0.1:8091" {
+		t.Errorf("advertisedHost = %q, want 127.0.0.1:8091", cc.advertisedHost)
+	}
+	if cc.bindPort != 8091 {
+		t.Errorf("bindPort = %d, want 8091", cc.bindPort)
+	}
 }
 
 func TestBindFlags(t *testing.T) {

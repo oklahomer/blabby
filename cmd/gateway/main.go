@@ -50,7 +50,30 @@ const (
 
 	// shutdownTimeout bounds graceful HTTP drain on SIGINT/SIGTERM.
 	shutdownTimeout = 10 * time.Second
+
+	// Gateway cluster demo defaults make `go run ./cmd/gateway` join a local
+	// single-node backend (on its default discovery port) as a client, so the
+	// Quick Start needs no flags. A real deployment overrides --seeds,
+	// --advertised-host, and --cluster-port. The advertised host is loopback, so
+	// the gateway logs the expected reachability warning at startup.
+	defaultGatewayClusterHost   = "127.0.0.1"
+	defaultGatewayClusterPort   = 8091
+	defaultGatewayDiscoveryPort = 6331
+	defaultGatewaySeeds         = "127.0.0.1:6330"
 )
+
+// gatewayClusterDefaults are the cluster-flag defaults for a flagless local
+// demo: the gateway joins a loopback backend as a client. The advertised host
+// matches the bind port so peers reach the gateway where it actually listens.
+func gatewayClusterDefaults() clusterboot.Defaults {
+	return clusterboot.Defaults{
+		ClusterHost:    defaultGatewayClusterHost,
+		ClusterPort:    defaultGatewayClusterPort,
+		AdvertisedHost: fmt.Sprintf("%s:%d", defaultGatewayClusterHost, defaultGatewayClusterPort),
+		DiscoveryPort:  defaultGatewayDiscoveryPort,
+		Seeds:          defaultGatewaySeeds,
+	}
+}
 
 // config is the parsed, validated HTTP/auth configuration. Constructing it via
 // newConfig is the single boundary where raw flag strings are checked. The
@@ -85,7 +108,7 @@ func parseConfig(args []string) (config, clusterboot.Config, error) {
 	fs := flag.NewFlagSet("blabby-gateway", flag.ContinueOnError)
 	listen := fs.String("listen", defaultListenAddr, "HTTP listen address (host:port)")
 	secret := fs.String("jwt-secret", "", "JWT signing secret; a development default is used when empty")
-	clusterCfg := clusterboot.BindFlags(fs)
+	clusterCfg := clusterboot.BindFlags(fs, gatewayClusterDefaults())
 	if err := fs.Parse(args); err != nil {
 		return config{}, clusterboot.Config{}, err
 	}

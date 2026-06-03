@@ -73,16 +73,41 @@ func (cc Config) Warnings() []string {
 	return warns
 }
 
-// BindFlags registers the cluster flags on fs and returns a closure that builds
-// and validates a Config from the parsed values. Call the closure after
-// fs.Parse. Splitting registration from building lets a caller add its own
-// flags to the same FlagSet (parse, don't validate at one boundary).
-func BindFlags(fs *flag.FlagSet) func() (Config, error) {
-	bindHost := fs.String("cluster-host", defaultClusterHost, "cluster remote transport bind host")
-	bindPort := fs.Int("cluster-port", 0, "cluster remote transport bind port; 0 binds an ephemeral port (single-node only)")
-	advertisedHost := fs.String("advertised-host", "", "host:port that peers use to reach this node; required in multi-node mode")
-	discoveryPort := fs.Int("discovery-port", defaultDiscoveryPort, "automanaged discovery (gossip) port")
-	seeds := fs.String("seeds", "", "comma-separated host:discoveryPort discovery seeds; any value selects multi-node mode")
+// Defaults are the default values BindFlags registers for the cluster flags.
+// The binaries differ: a backend defaults to a single-node member (no seeds,
+// ephemeral remote port), while a gateway defaults to a local demo against a
+// loopback backend. Each binary supplies its own Defaults so the shared flag
+// registration stays in one place without baking either role's policy into the
+// package.
+type Defaults struct {
+	ClusterHost    string
+	ClusterPort    int
+	AdvertisedHost string
+	DiscoveryPort  int
+	Seeds          string
+}
+
+// MemberDefaults are a backend's zero-config defaults: a single-node member on a
+// loopback ephemeral remote port with no discovery seeds.
+func MemberDefaults() Defaults {
+	return Defaults{
+		ClusterHost:   defaultClusterHost,
+		DiscoveryPort: defaultDiscoveryPort,
+	}
+}
+
+// BindFlags registers the cluster flags on fs with d as their defaults, and
+// returns a closure that builds and validates a Config from the parsed values.
+// Call the closure after fs.Parse. Splitting registration from building lets a
+// caller add its own flags to the same FlagSet (parse, don't validate at one
+// boundary); the Defaults parameter lets each binary choose role-appropriate
+// defaults without the package hardcoding either role.
+func BindFlags(fs *flag.FlagSet, d Defaults) func() (Config, error) {
+	bindHost := fs.String("cluster-host", d.ClusterHost, "cluster remote transport bind host")
+	bindPort := fs.Int("cluster-port", d.ClusterPort, "cluster remote transport bind port; 0 binds an ephemeral port (single-node only)")
+	advertisedHost := fs.String("advertised-host", d.AdvertisedHost, "host:port that peers use to reach this node; required in multi-node mode")
+	discoveryPort := fs.Int("discovery-port", d.DiscoveryPort, "automanaged discovery (gossip) port")
+	seeds := fs.String("seeds", d.Seeds, "comma-separated host:discoveryPort discovery seeds; any value selects multi-node mode")
 	return func() (Config, error) {
 		return newClusterConfig(*bindHost, *bindPort, *advertisedHost, *discoveryPort, *seeds)
 	}

@@ -61,6 +61,11 @@ same explicit `--jwt-secret` to all gateways.
 
 ## One backend, two gateways on one machine
 
+A *single* local gateway needs no flags — `go run ./cmd/gateway` defaults to a
+loopback backend on `127.0.0.1:6330` (see the [Quick Start](../README.md#quick-start)).
+The explicit flags below are only needed to run **multiple** gateways on one
+host, where each needs a distinct listen/cluster/discovery port.
+
 Run each command in its own terminal. The gateways both seed the backend's
 discovery endpoint (`127.0.0.1:6330`); each process advertises its own
 `host:port` on a port matching its `--cluster-port`, with a discovery port unique

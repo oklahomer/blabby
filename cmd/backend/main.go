@@ -47,7 +47,7 @@ func main() {
 // global flag.CommandLine) so it can be driven directly from tests.
 func parseConfig(args []string) (clusterboot.Config, error) {
 	fs := flag.NewFlagSet("blabby-backend", flag.ContinueOnError)
-	clusterCfg := clusterboot.BindFlags(fs)
+	clusterCfg := clusterboot.BindFlags(fs, clusterboot.MemberDefaults())
 	if err := fs.Parse(args); err != nil {
 		return clusterboot.Config{}, err
 	}
