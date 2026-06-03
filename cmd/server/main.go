@@ -1,13 +1,19 @@
-// Command server runs the blabby chat backend: a single-node proto.actor
-// cluster hosting the User and Room grains, fronted by the HTTP + WebSocket
-// gateway. Run with
+// Command server runs the blabby chat backend: a proto.actor cluster hosting
+// the User and Room grains, fronted by the HTTP + WebSocket gateway. Run with
 //
 //	go run ./cmd/server
 //
-// and it listens on :8080 with zero external dependencies. Override the
-// listen address with --listen and the JWT signing secret with --jwt-secret;
-// when no secret is supplied a built-in development key is used (and a warning
-// is logged) so a fresh clone runs without configuration.
+// and it listens on :8080 as a self-contained single node with zero external
+// dependencies. Override the listen address with --listen and the JWT signing
+// secret with --jwt-secret; when no secret is supplied a built-in development
+// key is used (and a warning is logged) so a fresh clone runs without
+// configuration.
+//
+// Supplying one or more discovery --seeds opts into multi-node mode, in which
+// several instances discover each other through the automanaged provider and
+// distribute grains across the cluster. Multi-node mode additionally requires
+// an explicit, peer-reachable --advertised-host and a fixed --cluster-port; see
+// docs/multi-node-cluster.md for a runnable two-node walk-through.
 package main
 
 import (
@@ -24,22 +30,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/asynkron/protoactor-go/actor"
-	"github.com/asynkron/protoactor-go/cluster"
-	"github.com/asynkron/protoactor-go/cluster/clusterproviders/automanaged"
-	"github.com/asynkron/protoactor-go/cluster/identitylookup/disthash"
-	"github.com/asynkron/protoactor-go/remote"
-
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/clusterboot"
 	"github.com/oklahomer/blabby/internal/gateway"
-	"github.com/oklahomer/blabby/internal/grain/room"
-	"github.com/oklahomer/blabby/internal/grain/user"
 	"github.com/oklahomer/blabby/internal/logging"
 )
 
 const (
 	defaultListenAddr = ":8080"
-	clusterName       = "blabby"
 
 	// devJWTSecret is the fallback signing key used when --jwt-secret is
 	// not provided, so a fresh clone runs with zero configuration. It is
@@ -55,9 +53,10 @@ const (
 	shutdownTimeout = 10 * time.Second
 )
 
-// config is the parsed, validated server configuration. Constructing it via
-// newConfig is the single boundary where raw flag strings are checked, so the
-// rest of the program can trust these values.
+// config is the parsed, validated HTTP/auth server configuration. Constructing
+// it via newConfig is the single boundary where raw flag strings are checked,
+// so the rest of the program can trust these values. The cluster settings live
+// separately in clusterboot.Config.
 type config struct {
 	listenAddr     string
 	jwtSecret      string
@@ -68,29 +67,40 @@ func main() {
 	level := logging.SetupDefault()
 	slog.Info("server.startup", "log_level", level.String())
 
-	cfg, err := parseConfig(os.Args[1:])
+	cfg, cc, err := parseConfig(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 
-	if err := run(cfg); err != nil {
+	if err := run(cfg, cc); err != nil {
 		slog.Error("server.fatal", "error", err)
 		os.Exit(1)
 	}
 }
 
-// parseConfig parses the server's command-line flags into a validated config.
-// It uses a dedicated FlagSet (not the global flag.CommandLine) so it can be
-// driven directly from tests.
-func parseConfig(args []string) (config, error) {
+// parseConfig parses the server's command-line flags into validated HTTP/auth
+// and cluster configuration. It uses a dedicated FlagSet (not the global
+// flag.CommandLine) so it can be driven directly from tests; the cluster flags
+// are registered by clusterboot on the same FlagSet.
+func parseConfig(args []string) (config, clusterboot.Config, error) {
 	fs := flag.NewFlagSet("blabby-server", flag.ContinueOnError)
 	listen := fs.String("listen", defaultListenAddr, "HTTP listen address (host:port)")
 	secret := fs.String("jwt-secret", "", "JWT signing secret; a development default is used when empty")
+	clusterCfg := clusterboot.BindFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return config{}, err
+		return config{}, clusterboot.Config{}, err
 	}
-	return newConfig(*listen, *secret)
+
+	cfg, err := newConfig(*listen, *secret)
+	if err != nil {
+		return config{}, clusterboot.Config{}, err
+	}
+	cc, err := clusterCfg()
+	if err != nil {
+		return config{}, clusterboot.Config{}, err
+	}
+	return cfg, cc, nil
 }
 
 // newConfig validates raw flag values into a config (parse, don't validate).
@@ -115,55 +125,32 @@ func newConfig(listen, secret string) (config, error) {
 	return cfg, nil
 }
 
-// clusterKinds returns the grain kinds the server hosts. The User grain seeds
-// each activation's display name from dir. Separated from bootstrapCluster so
-// a test can assert the registered kinds without standing up an actor system.
-func clusterKinds(dir user.Directory) []*cluster.Kind {
-	return []*cluster.Kind{user.NewKind(dir), room.NewKind()}
-}
-
-// bootstrapCluster builds (but does not start) a single-node proto.actor
-// cluster hosting the User and Room grains. The remote transport binds an
-// OS-assigned ephemeral port on loopback: a single node never accepts inbound
-// peer connections, so the port is not load-bearing. automanaged.New supplies
-// the discovery provider with its defaults (2s refresh, port 6330).
-//
-// cluster.Config.RequestLog is intentionally left at its false default: the
-// built-in RequestLog formatter logs whole proto request bodies via slog.Any,
-// which would leak message text and bearer tokens into the log stream.
-func bootstrapCluster(dir user.Directory) *cluster.Cluster {
-	system := actor.NewActorSystem()
-	remoteCfg := remote.Configure("127.0.0.1", 0)
-	provider := automanaged.New()
-	lookup := disthash.New()
-
-	cfg := cluster.Configure(
-		clusterName,
-		provider,
-		lookup,
-		remoteCfg,
-		cluster.WithKinds(clusterKinds(dir)...),
-	)
-	return cluster.New(system, cfg)
-}
-
 // run starts the cluster member and HTTP gateway, then blocks until a
 // shutdown signal arrives. On shutdown it drains HTTP first (serve) and then
 // stops the cluster (deferred), so in-flight requests finish before the grains
 // they depend on go away.
-func run(cfg config) error {
+func run(cfg config, cc clusterboot.Config) error {
 	if cfg.usingDevSecret {
 		slog.Warn("server.jwt_secret.dev_default",
 			"detail", "using built-in development JWT secret; set --jwt-secret for any real deployment")
+	}
+	for _, w := range cc.Warnings() {
+		slog.Warn("server.cluster.config_warning", "detail", w)
 	}
 
 	// One store instance backs both credential lookup (authenticator) and
 	// display-name resolution (the User grain's directory).
 	store := auth.NewInMemoryUserStore()
 
-	c := bootstrapCluster(store)
-	c.StartMember()
+	c := clusterboot.Build(cc, clusterboot.Kinds(store)...)
 	defer c.Shutdown(true)
+
+	// Log cluster membership changes (joins/leaves) for operational visibility.
+	// Subscribe before StartMember so the initial join topology is not missed.
+	sub := clusterboot.SubscribeTopologyLogging(c)
+	defer c.ActorSystem.EventStream.Unsubscribe(sub)
+
+	c.StartMember()
 
 	// Address is the peer-reachable address protoactor advertises; logging it
 	// after StartMember (the remote layer is up by then) lets an operator

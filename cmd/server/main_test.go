@@ -5,15 +5,21 @@ import (
 	"testing"
 )
 
+// TestParseConfig covers the HTTP/auth flags this command owns and confirms the
+// cluster flags registered by clusterboot.BindFlags flow through parseConfig —
+// both the success path (mode selection) and surfaced validation errors. The
+// exhaustive cluster-flag/validation cases live in the clusterboot package.
 func TestParseConfig(t *testing.T) {
 	tests := []struct {
-		name         string
-		args         []string
-		wantErr      bool
-		errMatch     string
-		wantListen   string
-		wantSecret   string
-		wantUsingDev bool
+		name     string
+		args     []string
+		wantErr  bool
+		errMatch string
+
+		wantListen    string
+		wantSecret    string
+		wantUsingDev  bool
+		wantMultiNode bool
 	}{
 		{
 			name:         "defaults",
@@ -61,14 +67,32 @@ func TestParseConfig(t *testing.T) {
 			wantErr:  true,
 			errMatch: "nope",
 		},
+		{
+			name: "cluster flags flow through: multi-node selected",
+			args: []string{
+				"--seeds", "127.0.0.1:6330",
+				"--advertised-host", "127.0.0.1:8091",
+				"--cluster-port", "8091",
+			},
+			wantListen:    defaultListenAddr,
+			wantSecret:    devJWTSecret,
+			wantUsingDev:  true,
+			wantMultiNode: true,
+		},
+		{
+			name:     "cluster validation error surfaces through parseConfig",
+			args:     []string{"--seeds", "127.0.0.1:6330", "--cluster-port", "8091"},
+			wantErr:  true,
+			errMatch: "advertised-host",
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseConfig(tc.args)
+			gotCfg, gotCluster, err := parseConfig(tc.args)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("expected error, got config %+v", got)
+					t.Fatalf("expected error, got config %+v / cluster %+v", gotCfg, gotCluster)
 				}
 				if tc.errMatch != "" && !strings.Contains(err.Error(), tc.errMatch) {
 					t.Fatalf("error %q does not contain %q", err, tc.errMatch)
@@ -78,36 +102,18 @@ func TestParseConfig(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got.listenAddr != tc.wantListen {
-				t.Errorf("listenAddr = %q, want %q", got.listenAddr, tc.wantListen)
+			if gotCfg.listenAddr != tc.wantListen {
+				t.Errorf("listenAddr = %q, want %q", gotCfg.listenAddr, tc.wantListen)
 			}
-			if got.jwtSecret != tc.wantSecret {
-				t.Errorf("jwtSecret = %q, want %q", got.jwtSecret, tc.wantSecret)
+			if gotCfg.jwtSecret != tc.wantSecret {
+				t.Errorf("jwtSecret = %q, want %q", gotCfg.jwtSecret, tc.wantSecret)
 			}
-			if got.usingDevSecret != tc.wantUsingDev {
-				t.Errorf("usingDevSecret = %v, want %v", got.usingDevSecret, tc.wantUsingDev)
+			if gotCfg.usingDevSecret != tc.wantUsingDev {
+				t.Errorf("usingDevSecret = %v, want %v", gotCfg.usingDevSecret, tc.wantUsingDev)
+			}
+			if gotCluster.MultiNode() != tc.wantMultiNode {
+				t.Errorf("cluster.MultiNode() = %v, want %v", gotCluster.MultiNode(), tc.wantMultiNode)
 			}
 		})
-	}
-}
-
-func TestClusterKindsRegistersUserAndRoom(t *testing.T) {
-	kinds := clusterKinds(nil)
-
-	got := make(map[string]bool, len(kinds))
-	for _, k := range kinds {
-		if k == nil {
-			t.Fatal("clusterKinds returned a nil kind")
-		}
-		got[k.Kind] = true
-	}
-
-	for _, want := range []string{"UserGrain", "RoomGrain"} {
-		if !got[want] {
-			t.Errorf("clusterKinds missing %q kind; got %v", want, got)
-		}
-	}
-	if len(kinds) != 2 {
-		t.Errorf("clusterKinds returned %d kinds, want 2", len(kinds))
 	}
 }

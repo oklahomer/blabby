@@ -73,12 +73,14 @@ That's the whole loop — from a fresh clone to exchanging messages in well unde
 
 > The default JWT signing secret is a built-in development value (the server logs a warning). Pass `--jwt-secret` (and `--listen` to change the address) for anything beyond local experimentation.
 
+Want to run several server instances that discover each other and route messages across nodes? See [`docs/multi-node-cluster.md`](docs/multi-node-cluster.md) for a runnable two-node walk-through.
+
 ## Project Structure
 
 ```
 blabby/
 ├── cmd/
-│   ├── server/         # Chat server: gateway + single-node grain cluster
+│   ├── server/         # Chat server: gateway + single- or multi-node grain cluster
 │   └── client/         # Terminal (TUI) chat client
 ├── internal/
 │   ├── grain/
