@@ -1,6 +1,10 @@
 package clusterboot
 
-import "testing"
+import (
+	"net"
+	"strconv"
+	"testing"
+)
 
 // TestBuildConstructsCluster exercises both provider branches of Build. Build
 // only constructs the cluster (StartMember/StartClient bind ports later), so it
@@ -69,4 +73,39 @@ func TestKindsRegistersUserAndRoom(t *testing.T) {
 	if len(kinds) != 2 {
 		t.Errorf("Kinds returned %d kinds, want 2", len(kinds))
 	}
+}
+
+// TestShutdownClientDoesNotPanic starts a real cluster client and tears it down
+// via ShutdownClient. cluster.Cluster.Shutdown would nil-panic here (a client
+// never starts the gossiper); ShutdownClient must not. The test reaching the
+// end without a panic is the assertion.
+func TestShutdownClientDoesNotPanic(t *testing.T) {
+	clusterPort := freeTCPPort(t)
+	discoveryPort := freeTCPPort(t)
+	cc, err := newClusterConfig(
+		"127.0.0.1",
+		clusterPort,
+		net.JoinHostPort("127.0.0.1", strconv.Itoa(clusterPort)),
+		discoveryPort,
+		net.JoinHostPort("127.0.0.1", strconv.Itoa(discoveryPort)),
+	)
+	if err != nil {
+		t.Fatalf("newClusterConfig: %v", err)
+	}
+
+	c := Build(cc) // a client registers no kinds
+	c.StartClient()
+	ShutdownClient(c)
+}
+
+// freeTCPPort asks the kernel for an unused loopback TCP port. There is a small
+// TOCTOU window before the cluster binds it, which is acceptable for a test.
+func freeTCPPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = l.Close() }()
+	return l.Addr().(*net.TCPAddr).Port
 }

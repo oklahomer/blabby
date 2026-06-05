@@ -142,7 +142,7 @@ buf generate && git diff --exit-code gen/
 Common tasks are wrapped in the `Makefile`:
 
 ```bash
-make build      # compile ./cmd/server and ./cmd/client
+make build      # compile ./cmd/backend, ./cmd/gateway, and ./cmd/client
 make test       # go test ./...
 make lint       # golangci-lint
 make coverage   # test coverage report

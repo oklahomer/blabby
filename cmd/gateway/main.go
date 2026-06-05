@@ -164,10 +164,11 @@ func run(cfg config, cc clusterboot.Config) error {
 	// so it consumes the store only as an auth.UserStore.
 	store := auth.NewInMemoryUserStore()
 
-	// Kinds are registered for grain-call routing; the gateway is a client and
-	// never activates a grain, so it passes a nil directory.
-	c := clusterboot.Build(cc, clusterboot.Kinds(nil)...)
-	defer c.Shutdown(true)
+	// The gateway joins as a cluster client: it registers no grain kinds (a
+	// client routes to grains via the topology that members advertise) and never
+	// hosts an activation.
+	c := clusterboot.Build(cc)
+	defer clusterboot.ShutdownClient(c)
 
 	// Subscribe before StartClient so the initial cluster topology is not missed.
 	sub := clusterboot.SubscribeTopologyLogging(c)

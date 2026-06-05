@@ -79,3 +79,15 @@ func Build(cc Config, kinds ...*cluster.Kind) *cluster.Cluster {
 	)
 	return cluster.New(system, cfg)
 }
+
+// ShutdownClient stops a cluster the local node joined with StartClient. It is
+// the client-safe counterpart to cluster.Cluster.Shutdown, which assumes a
+// member: that method's first step is Gossip.SetState, and the gossiper is
+// started only by StartMember, so it nil-panics for a client. ShutdownClient
+// stops what a client actually runs — the actor system, which owns the
+// UserConnection actors and the remote endpoint manager, and the remote
+// transport.
+func ShutdownClient(c *cluster.Cluster) {
+	c.ActorSystem.Shutdown()
+	c.Remote.Shutdown(true)
+}

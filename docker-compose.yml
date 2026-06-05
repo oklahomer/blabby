@@ -1,5 +1,30 @@
 services:
-  server:
+  # Grain tier: a cluster member hosting the User and Room grains.
+  backend:
     build: .
+    image: blabby
+    command:
+      - /blabby-backend
+      - "--cluster-host=0.0.0.0"
+      - "--cluster-port=8090"
+      - "--discovery-port=6330"
+      - "--advertised-host=backend:8090"
+      - "--seeds=backend:6330"
+
+  # API tier: a cluster client serving HTTP/WebSocket. Advertised hosts are the
+  # compose service names (reachable on the compose network), not loopback, so
+  # the backend can reach this gateway's UserConnection PIDs for fan-out.
+  gateway:
+    image: blabby
+    depends_on:
+      - backend
+    command:
+      - /blabby-gateway
+      - "--listen=0.0.0.0:8080"
+      - "--cluster-host=0.0.0.0"
+      - "--cluster-port=8091"
+      - "--discovery-port=6331"
+      - "--advertised-host=gateway:8091"
+      - "--seeds=backend:6330"
     ports:
       - "${SERVER_PORT:-8080}:8080"
