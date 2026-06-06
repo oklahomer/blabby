@@ -135,11 +135,19 @@ func newClusterConfig(bindHost string, bindPort int, advertisedHost string, disc
 	if cc.advertisedHost == "" {
 		return Config{}, errors.New("--advertised-host must be set in multi-node mode (one or more --seeds); it must not be auto-derived from the listener")
 	}
-	if cc.bindPort == 0 {
-		return Config{}, errors.New("--cluster-port must be a fixed non-zero port in multi-node mode; an ephemeral port cannot be advertised to peers")
-	}
-	if _, _, err := net.SplitHostPort(cc.advertisedHost); err != nil {
+	if err := validateHostPort(cc.advertisedHost); err != nil {
 		return Config{}, fmt.Errorf("--advertised-host %q is not a valid host:port: %w", cc.advertisedHost, err)
+	}
+	if cc.bindPort < 1 || cc.bindPort > 65535 {
+		return Config{}, fmt.Errorf("--cluster-port must be a fixed port in 1-65535 in multi-node mode (got %d); an ephemeral (0) or invalid port cannot be advertised to peers", cc.bindPort)
+	}
+	if cc.discoveryPort < 1 || cc.discoveryPort > 65535 {
+		return Config{}, fmt.Errorf("--discovery-port must be in 1-65535 in multi-node mode (got %d)", cc.discoveryPort)
+	}
+	for _, s := range cc.seeds {
+		if err := validateHostPort(s); err != nil {
+			return Config{}, fmt.Errorf("--seeds entry %q is not a valid host:port: %w", s, err)
+		}
 	}
 	return cc, nil
 }
@@ -174,4 +182,27 @@ func isLoopbackOrUnspecified(host string) bool {
 		return ip.IsLoopback() || ip.IsUnspecified()
 	}
 	return false
+}
+
+// validateHostPort checks addr is a host:port with a non-empty host and a
+// numeric port in 1-65535. net.SplitHostPort alone accepts an empty host
+// (":8091") and a non-numeric/out-of-range port ("host:abc"), either of which
+// yields an address peers cannot dial — the silent dead-letter failure the
+// multi-node guard exists to prevent (ADR-011).
+func validateHostPort(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	if host == "" {
+		return errors.New("host must not be empty")
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		return fmt.Errorf("port %q must be numeric", port)
+	}
+	if n < 1 || n > 65535 {
+		return fmt.Errorf("port %d out of range 1-65535", n)
+	}
+	return nil
 }

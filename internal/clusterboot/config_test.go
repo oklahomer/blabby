@@ -137,6 +137,42 @@ func TestBindFlags(t *testing.T) {
 			errMatch: "host:port",
 		},
 		{
+			name:     "multi-node rejected: empty advertised host part",
+			args:     []string{"--seeds", "127.0.0.1:6330", "--advertised-host", ":8091", "--cluster-port", "8091"},
+			wantErr:  true,
+			errMatch: "host",
+		},
+		{
+			name:     "multi-node rejected: non-numeric advertised port",
+			args:     []string{"--seeds", "127.0.0.1:6330", "--advertised-host", "127.0.0.1:abc", "--cluster-port", "8091"},
+			wantErr:  true,
+			errMatch: "port",
+		},
+		{
+			name:     "multi-node rejected: out-of-range advertised port",
+			args:     []string{"--seeds", "127.0.0.1:6330", "--advertised-host", "127.0.0.1:99999", "--cluster-port", "8091"},
+			wantErr:  true,
+			errMatch: "range",
+		},
+		{
+			name:     "multi-node rejected: out-of-range cluster-port",
+			args:     []string{"--seeds", "127.0.0.1:6330", "--advertised-host", "127.0.0.1:8091", "--cluster-port", "70000"},
+			wantErr:  true,
+			errMatch: "cluster-port",
+		},
+		{
+			name:     "multi-node rejected: zero discovery-port",
+			args:     []string{"--seeds", "127.0.0.1:6330", "--advertised-host", "127.0.0.1:8091", "--cluster-port", "8091", "--discovery-port", "0"},
+			wantErr:  true,
+			errMatch: "discovery-port",
+		},
+		{
+			name:     "multi-node rejected: malformed seed (no port)",
+			args:     []string{"--seeds", "127.0.0.1", "--advertised-host", "127.0.0.1:8091", "--cluster-port", "8091"},
+			wantErr:  true,
+			errMatch: "seeds",
+		},
+		{
 			name:     "unknown flag rejected",
 			args:     []string{"--nope"},
 			wantErr:  true,
