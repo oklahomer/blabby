@@ -11,14 +11,16 @@ What makes it worth a look:
 
 ## Architecture
 
-A stateless gateway fronts a cluster of grains. Clients speak HTTP + WebSocket; everything behind the gateway is actors.
+A stateless **gateway** (`cmd/gateway`) fronts a cluster of grains hosted by the **backend** (`cmd/backend`). Clients speak HTTP + WebSocket to the gateway; everything behind it is actors. The two are separate binaries: the gateway joins the cluster as a *client* (it calls grains but hosts none), the backend joins as a *member* (it hosts the grains), so the API tier and the grain tier scale independently.
 
 ```mermaid
 flowchart LR
     TUI["TUI client<br/>cmd/client"]
-    subgraph SERVER["blabby server — cmd/server"]
+    subgraph GATEWAY["Gateway tier — cmd/gateway (cluster client)"]
         GW["Gateway<br/>HTTP + WebSocket"]
         UC["UserConnection actor<br/>(one per WebSocket)"]
+    end
+    subgraph BACKEND["Backend tier — cmd/backend (cluster member)"]
         UG["User grain"]
         RG["Room grain"]
     end
@@ -28,13 +30,13 @@ flowchart LR
     UC -- "RegisterConnection (PID in body)" --> UG
     UG -- "route join / leave / send" --> RG
     RG -- "fan-out to members" --> UG
-    UG -- "ForwardMessage / NotifyRoomEvent" --> UC
+    UG -- "ForwardMessage / NotifyRoomEvent (cross-tier)" --> UC
 ```
 
-- **Gateway** — translates client JSON/WebSocket frames to and from grain calls, validates JWTs, and shapes structured error responses.
+- **Gateway** (`cmd/gateway`) — translates client JSON/WebSocket frames to and from grain calls, validates JWTs, and shapes structured error responses. It joins the cluster as a client and hosts the per-connection UserConnection actors.
 - **UserConnection actor** — one per WebSocket connection; it authenticates, registers itself with the user's grain, and writes events back to the socket. It is a regular actor, not a grain.
-- **User grain** — a user's agent inside the cluster: it holds the set of that user's live connections and routes the user's commands to room grains.
-- **Room grain** — owns room membership and the message pipeline; it stamps each message with a server timestamp and fans events out to every member (the sender included, so other devices echo).
+- **User grain** (`cmd/backend`) — a user's agent inside the cluster: it holds the set of that user's live connections and routes the user's commands to room grains.
+- **Room grain** (`cmd/backend`) — owns room membership and the message pipeline; it stamps each message with a server timestamp and fans events out to every member (the sender included, so other devices echo).
 
 For a deeper view, see [`docs/overall.puml`](docs/overall.puml) (component diagram) and [`docs/userconnection_design_en.md`](docs/userconnection_design_en.md) (the connection lifecycle).
 
@@ -42,19 +44,27 @@ For a deeper view, see [`docs/overall.puml`](docs/overall.puml) (component diagr
 
 **Requirements:** Go 1.26 or newer. Nothing else — no database or external services.
 
-**1. Start the server** (listens on `:8080` by default):
+**1. Start the backend** (the grain tier — joins the cluster as a member):
 
 ```bash
-go run ./cmd/server
+go run ./cmd/backend
 ```
 
-**2. In another terminal, start the client:**
+**2. In another terminal, start the gateway** (HTTP + WebSocket on `:8080`, joins as a cluster client):
+
+```bash
+go run ./cmd/gateway
+```
+
+It defaults to joining a local backend on `127.0.0.1:6330` and logs a one-time loopback advertised-host warning — expected for a same-host run. Override `--seeds`, `--advertised-host`, and `--cluster-port` for a real cluster ([details](docs/multi-node-cluster.md)).
+
+**3. In a third terminal, start the client:**
 
 ```bash
 go run ./cmd/client --server http://localhost:8080
 ```
 
-**3. Log in and chat.** The client opens a three-pane workspace with a centered sign-in modal. Sign in with one of the built-in development accounts:
+**4. Log in and chat.** The client opens a three-pane workspace with a centered sign-in modal. Sign in with one of the built-in development accounts:
 
 | Username | Password |
 |----------|-----------|
@@ -69,16 +79,19 @@ Type the username, press `tab`, type the password, press `enter`. Then:
 - Type a message and press `enter` to send. Open a second client as another user (or the same one) to watch messages arrive in real time.
 - Press `ctrl+c` to quit.
 
-That's the whole loop — from a fresh clone to exchanging messages in well under five minutes.
+That's the whole loop — from a fresh clone to exchanging messages in a few minutes across three terminals.
 
-> The default JWT signing secret is a built-in development value (the server logs a warning). Pass `--jwt-secret` (and `--listen` to change the address) for anything beyond local experimentation.
+> The default JWT signing secret is a built-in development value (the gateway logs a warning). Pass `--jwt-secret` to the gateway (and `--listen` to change its address) for anything beyond local experimentation; every gateway in a real deployment must share the same secret.
+
+Want to run several gateways and backends that discover each other and route messages across nodes? See [`docs/multi-node-cluster.md`](docs/multi-node-cluster.md) for a runnable walk-through.
 
 ## Project Structure
 
 ```
 blabby/
 ├── cmd/
-│   ├── server/         # Chat server: gateway + single-node grain cluster
+│   ├── backend/        # Grain tier — cluster member hosting the User and Room grains
+│   ├── gateway/        # API tier — HTTP/WebSocket front end; joins the cluster as a client
 │   └── client/         # Terminal (TUI) chat client
 ├── internal/
 │   ├── grain/
@@ -129,7 +142,7 @@ buf generate && git diff --exit-code gen/
 Common tasks are wrapped in the `Makefile`:
 
 ```bash
-make build      # compile ./cmd/server and ./cmd/client
+make build      # compile ./cmd/backend, ./cmd/gateway, and ./cmd/client
 make test       # go test ./...
 make lint       # golangci-lint
 make coverage   # test coverage report

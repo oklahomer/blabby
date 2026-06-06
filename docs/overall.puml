@@ -1,0 +1,124 @@
+@startuml
+
+'https://plantuml.com/sequence-diagram
+
+' participants
+participant Client as client
+box "gateway"
+    participant "Rest API Server" as restApi
+    participant "WebSocket Server" as websocket
+    participant "UserConnection Actor" as userConnection
+end box
+box "cluster"
+    participant "User Grain" as userGrain
+    participant "Room Grain" as roomGrain
+end box
+database "Database" as db
+
+== Auth ==
+client -> restApi : Call /login
+restApi -> db : Fetch user information
+restApi -> restApi : Verify auth request
+restApi -> client : Return JWT
+
+== WebSocket connect ==
+client -> websocket : Establish WebSocket connection
+websocket -> userConnection : Spawn UserConnection actor
+userConnection -> userConnection : Start auth timeout timer in middleware
+client -> websocket : Send JWT
+websocket -> userConnection : Forward JWT
+userConnection -> userConnection : Verify JWT
+
+alt JWT valid
+    userConnection -> userConnection : Stop auth timeout timer
+
+    == Register connection to User Grain ==
+    userConnection -> userGrain : RegisterConnection(requester_pid)
+    userGrain -> userGrain : Activate grain if needed
+    userGrain -> userGrain : Add connectionPid to active connections
+    userGrain -> userConnection : RegisterConnectionResponse
+
+    == Bidirectional watch ==
+    userConnection -> userGrain : Watch(userGrain)
+    userGrain -> userConnection : Watch(userConnection)
+    userGrain -> userGrain : Keep connection set in memory
+    userConnection -> client : Send auth_ok
+else JWT invalid or expired
+    userConnection -> client : Send auth error
+    userConnection -> websocket : Close WebSocket
+    userConnection -> userConnection : Stop actor
+end
+
+== Join room ==
+client -> restApi : POST /rooms/{roomId}/join + Bearer JWT
+restApi -> restApi : Verify JWT and build command
+restApi -> userGrain : JoinRoom(room_id)
+userGrain -> userGrain : Validate user-level rules
+userGrain -> roomGrain : Join(userId, roomId)
+roomGrain -> roomGrain : Validate room membership rules
+roomGrain -> roomGrain : Persist membership event/state
+roomGrain --> userGrain : JoinResponse
+userGrain -> userGrain : Add roomId to joined rooms
+userGrain --> restApi : JoinRoomResponse
+restApi --> client : 200 OK
+
+== Send message ==
+client -> restApi : POST /rooms/{roomId}/messages + Bearer JWT
+restApi -> restApi : Verify JWT and parse JSON
+restApi -> userGrain : SendMessage(room_id, text)
+userGrain -> userGrain : Validate auth context / rate limit
+userGrain -> roomGrain : PostMessage(userId, roomId, text)
+roomGrain -> roomGrain : Validate membership
+roomGrain -> roomGrain : Persist message event/state
+
+loop for each member userId in room
+    roomGrain -> userGrain : ForwardMessage(roomId, senderId, text, timestamp)
+    userGrain -> userGrain : Resolve active connection PIDs
+    alt user has active connections
+        loop for each active connection
+            userGrain -> userConnection : ForwardMessageRequest
+            userConnection -> client : Write JSON over WebSocket
+        end
+    else user has no active connections
+        userGrain -> userGrain : Drop realtime delivery\n(user remains logical recipient)
+    end
+    deactivate userGrain
+end
+
+roomGrain --> userGrain : PostMessageResponse
+userGrain --> restApi : SendMessageResponse
+restApi --> client : 200 OK
+
+== Disconnect (voluntary or otherwise) ==
+... client close, IO error, panic, or node loss ...
+userConnection -> userConnection : Stop actor
+alt User grain still active
+    userGrain -> userGrain : Watch fires Terminated(connectionPid)
+    userGrain -> userGrain : Remove connectionPid from active connections
+else User grain already passivated
+    note right of userGrain : connection set is in-memory only;\npassivation already discarded it
+end
+deactivate userGrain
+
+== Self-healing: User Grain dies / relocates ==
+... node failure or grain reactivation ...
+userConnection -> userGrain : Watch detects Terminated(userGrain)
+userConnection -> userConnection : Resolve grain again via cluster identity
+userConnection -> userGrain : RegisterConnection(requester_pid)
+userGrain -> userGrain : Reactivate grain on surviving node if needed
+userGrain -> userGrain : Re-add connectionPid
+userGrain -> userConnection : RegisterConnectionResponse
+userGrain -> userConnection : Watch(userConnection)
+userConnection -> userGrain : Watch(userGrain)
+
+== Auth timeout ==
+... if auth message never arrives in time ...
+userConnection -> userConnection : AuthTimeout
+
+alt still unauthenticated
+    userConnection -> client : Send auth timeout error
+    userConnection -> websocket : Close WebSocket
+    userConnection -> userConnection : Stop actor
+end
+
+@enduml

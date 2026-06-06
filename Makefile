@@ -4,7 +4,7 @@ generate:
 	buf generate
 
 build:
-	go build ./cmd/server/ ./cmd/client/
+	go build ./cmd/backend/ ./cmd/gateway/ ./cmd/client/
 
 test:
 	go test -race ./...
