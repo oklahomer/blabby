@@ -25,3 +25,15 @@ func TestHandleWS_NonGetReturnsMethodNotAllowed(t *testing.T) {
 		t.Errorf("Allow header: got %q, want GET", got)
 	}
 }
+
+func TestHandleWS_GetWithoutUpgradeHeadersReturnsBadRequest(t *testing.T) {
+	g := NewGateway(&stubAuthenticator{}, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	rec := httptest.NewRecorder()
+
+	g.RegisterRoutes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400", rec.Code)
+	}
+}
