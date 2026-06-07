@@ -45,12 +45,16 @@ type testMember struct {
 }
 
 type connectionProbe struct {
-	messages chan *userpb.ForwardMessageRequest
+	messages      chan *userpb.ForwardMessageRequest
+	notifications chan *userpb.NotifyRoomEventRequest
 }
 
 func (p *connectionProbe) Receive(ctx actor.Context) {
-	if msg, ok := ctx.Message().(*userpb.ForwardMessageRequest); ok {
+	switch msg := ctx.Message().(type) {
+	case *userpb.ForwardMessageRequest:
 		p.messages <- msg
+	case *userpb.NotifyRoomEventRequest:
+		p.notifications <- msg
 	}
 }
 
@@ -116,6 +120,7 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 	requireCall(t, "join routing user to room", func() error {
 		return joinRoom(survivor, routingUserID, roomID)
 	})
+	assertRoomEvent(t, routingConnection, roomID, routingUserID, userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED)
 
 	roomsBefore := getJoinedRoomsEventually(t, survivor, recoveryUserID)
 	if len(roomsBefore) != 1 || roomsBefore[0] != roomID {
@@ -164,6 +169,11 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 	})
 
 	t.Run("Room reactivation and routing", func(t *testing.T) {
+		routingRooms := getJoinedRoomsEventually(t, survivor, routingUserID)
+		if len(routingRooms) != 1 || routingRooms[0] != roomID {
+			t.Fatalf("surviving routing user rooms = %v, want [%s]", routingRooms, roomID)
+		}
+
 		requireEventually(t, "activate Room grain after departure", func() error {
 			return roomKind.activate(survivor, roomID)
 		})
@@ -172,12 +182,14 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 		requireCall(t, "rejoin routing user after room reactivation", func() error {
 			return joinRoom(survivor, routingUserID, roomID)
 		})
+		assertRoomEvent(t, routingConnection, roomID, routingUserID, userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED)
+
 		bodyMarker := "room-recovery-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 		requireCall(t, "send after room reactivation", func() error {
 			return sendMessage(survivor, routingUserID, roomID, bodyMarker)
 		})
 		assertMessage(t, routingConnection, bodyMarker)
-		assertNoMessage(t, routingConnection, "reactivated Room grain replayed an old message")
+		assertNoAdditionalMessage(t, routingConnection, bodyMarker)
 
 		assertTrace(t, trace.lines(t),
 			traceStep{event: "server.cluster.member_left", attrs: map[string]string{"node_address": victimAddress}},
@@ -395,7 +407,10 @@ func assertPlacement(t *testing.T, client *cluster.Cluster, identity, kind, expe
 }
 
 func spawnConnectionProbe(member *cluster.Cluster) (*connectionProbe, *actor.PID) {
-	probe := &connectionProbe{messages: make(chan *userpb.ForwardMessageRequest, 4)}
+	probe := &connectionProbe{
+		messages:      make(chan *userpb.ForwardMessageRequest, 4),
+		notifications: make(chan *userpb.NotifyRoomEventRequest, 4),
+	}
 	pid := member.ActorSystem.Root.Spawn(actor.PropsFromProducer(func() actor.Actor { return probe }))
 	return probe, pid
 }
@@ -476,11 +491,51 @@ func assertMessage(t *testing.T, probe *connectionProbe, wantText string) {
 	}
 }
 
+func assertRoomEvent(
+	t *testing.T,
+	probe *connectionProbe,
+	wantRoomID string,
+	wantUserID string,
+	wantType userpb.RoomEventType,
+) {
+	t.Helper()
+	select {
+	case notification := <-probe.notifications:
+		if notification.GetRoomId() != wantRoomID ||
+			notification.GetUser().GetId() != wantUserID ||
+			notification.GetEventType() != wantType {
+			t.Fatalf(
+				"connection room event = {room_id:%q user_id:%q type:%s}, want {room_id:%q user_id:%q type:%s}",
+				notification.GetRoomId(),
+				notification.GetUser().GetId(),
+				notification.GetEventType(),
+				wantRoomID,
+				wantUserID,
+				wantType,
+			)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for room event {room_id:%q user_id:%q type:%s}", wantRoomID, wantUserID, wantType)
+	}
+}
+
 func assertNoMessage(t *testing.T, probe *connectionProbe, reason string) {
 	t.Helper()
 	select {
 	case msg := <-probe.messages:
 		t.Fatalf("%s: received %q", reason, msg.GetText())
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+func assertNoAdditionalMessage(t *testing.T, probe *connectionProbe, deliveredText string) {
+	t.Helper()
+	select {
+	case msg := <-probe.messages:
+		if msg.GetText() == deliveredText {
+			t.Fatalf("connection received message %q more than once", deliveredText)
+		}
+		t.Fatalf("connection received unexpected additional message %q after %q", msg.GetText(), deliveredText)
 	case <-time.After(300 * time.Millisecond):
 	}
 }
