@@ -189,7 +189,7 @@ func NewProps(conn *websocket.Conn, a auth.Authenticator, c *cluster.Cluster, op
 			return uc
 		},
 		actor.WithReceiverMiddleware(middlewares...),
-		actor.WithSupervisor(stopOnBackpressureSupervisor),
+		actor.WithGuardian(stopOnBackpressureSupervisor),
 	)
 }
 

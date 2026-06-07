@@ -3,15 +3,12 @@ package middleware_test
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/asynkron/protoactor-go/cluster"
 	"github.com/google/uuid"
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
@@ -20,63 +17,6 @@ import (
 	"github.com/oklahomer/blabby/internal/grain/user"
 	clustertest "github.com/oklahomer/blabby/internal/testutil/cluster"
 )
-
-// sharedCluster is brought up once for the middleware integration test
-// package. protoactor-go's remote.Start writes to a process-global grpclog
-// reference, so booting a fresh cluster per-test races against the prior
-// cluster's still-running balancer goroutines; the User grain test
-// package adopts the same TestMain-shared-cluster pattern for the same
-// reason.
-var sharedCluster *cluster.Cluster
-
-func TestMain(m *testing.M) {
-	bootstrap := &mainT{}
-	// The integration test exercises real Room + User grains with
-	// cross-grain fan-out, so the default 2-second clustertest timeout
-	// is too tight for a fresh activator on each new identity. 10s
-	// leaves comfortable headroom under -race on shared CI runners.
-	sharedCluster = clustertest.StartWithTimeout(bootstrap, 10*time.Second, room.NewKind(), user.NewKind(nil))
-
-	exit := func() int {
-		defer bootstrap.runCleanups()
-		return m.Run()
-	}()
-	os.Exit(exit)
-}
-
-// mainT is the minimal *testing.T-shaped value clustertest.Start requires.
-// Mirrors internal/grain/user/main_test.go's helper.
-type mainT struct {
-	mu       sync.Mutex
-	cleanups []func()
-}
-
-func (m *mainT) Helper() {}
-func (m *mainT) Cleanup(fn func()) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.cleanups = append(m.cleanups, fn)
-}
-func (m *mainT) Fatalf(format string, args ...any) {
-	panic(fmt.Sprintf("TestMain setup failed: "+format, args...))
-}
-
-func (m *mainT) runCleanups() {
-	m.mu.Lock()
-	cleanups := m.cleanups
-	m.cleanups = nil
-	m.mu.Unlock()
-	for i := len(cleanups) - 1; i >= 0; i-- {
-		func(fn func()) {
-			defer func() {
-				if r := recover(); r != nil {
-					fmt.Fprintf(os.Stderr, "[middleware-test] cleanup panicked: %v\n", r)
-				}
-			}()
-			fn()
-		}(cleanups[i])
-	}
-}
 
 // syncBuffer is a goroutine-safe *bytes.Buffer wrapper. The slog handler
 // is called from any actor mailbox goroutine, and the integration test
@@ -100,11 +40,8 @@ func (s *syncBuffer) String() string {
 }
 
 // TestLoggingMiddleware_Integration_EndToEndTrace drives Room.Join and
-// Room.PostMessage through the shared cluster, then asserts that the
-// captured JSON log stream reconstructs the cross-grain trace defined by
-// this story's acceptance criteria. NFR1 is enforced by injecting a UUID
-// as the message text and asserting it never appears anywhere in the
-// captured stream.
+// Room.PostMessage through a real cluster, then asserts that the captured JSON
+// log stream reconstructs the cross-grain trace without leaking message text.
 //
 // The test drives the Room grain client directly rather than the User
 // grain client. Calling user.JoinRoom would block the User grain while it
@@ -119,6 +56,9 @@ func (s *syncBuffer) String() string {
 // UserConnection.connection.msg is covered by unit tests and the gateway
 // package's own WebSocket integration tests.
 func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
+	// Cross-grain fan-out can activate several fresh identities, so use a longer
+	// request timeout than the single-grain test default.
+	c := clustertest.StartWithTimeout(t, 10*time.Second, room.NewKind(), user.NewKind(nil))
 	captureBuf := &syncBuffer{}
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(captureBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
@@ -127,7 +67,7 @@ func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 	const alice = "alice-int"
 	const general = "general-int"
 
-	roomClient := roompb.GetRoomGrainGrainClient(sharedCluster, general)
+	roomClient := roompb.GetRoomGrainGrainClient(c, general)
 
 	// 1) Room.Join — Room grain fans out NotifyRoomEvent to alice's
 	//    User grain, which has no registered connections (target_count=0).
@@ -141,8 +81,7 @@ func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 
 	// 2) Room.PostMessage — Room grain assigns the server timestamp and
 	//    fans out ForwardMessage back through alice's User grain. The
-	//    text is a fresh UUID; NFR1 asserts it never appears in the log
-	//    buffer (the body must never be logged).
+	//    text is a fresh UUID and must never appear in the log buffer.
 	bodyMarker := uuid.NewString()
 	postResp, err := roomClient.PostMessage(&roompb.PostMessageRequest{
 		User: &commonpb.UserRef{Id: alice, Name: alice},
@@ -188,7 +127,7 @@ func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 		}
 	}
 
-	// NFR1: the message body must never appear in any captured log line.
+	// The message body must never appear in any captured log line.
 	full := captureBuf.String()
 	if strings.Contains(full, bodyMarker) {
 		t.Errorf("captured log stream leaked message body %q", bodyMarker)

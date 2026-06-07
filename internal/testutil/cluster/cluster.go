@@ -2,8 +2,7 @@
 // proto.actor cluster integration tests.
 //
 // The Start function is for in-process integration tests only; do not use it
-// in production wiring. Production cluster startup happens in cmd/server/main.go
-// (introduced in a later story).
+// in production wiring. Production cluster startup lives in internal/clusterboot.
 package clustertest
 
 import (
@@ -43,7 +42,7 @@ const healthReadyPoll = 50 * time.Millisecond
 const gossipSettleBuffer = 500 * time.Millisecond
 
 // TB is the subset of testing.TB used by Start. *testing.T satisfies it,
-// and a TestMain helper can satisfy it with a tiny shim — letting tests
+// and a TestMain helper can satisfy it with a tiny shim, letting tests
 // share a single cluster across the whole package via TestMain when the
 // alternative (one cluster per test) would race against protoactor's
 // process-global grpclog state.
@@ -99,7 +98,7 @@ func StartWithTimeout(tb TB, requestTimeout time.Duration, kinds ...*cluster.Kin
 	// which would leak message text, bearer tokens, and other payload
 	// fields into the log stream. Protoactor defaults RequestLog to false,
 	// so the invariant is preserved by inaction here — but it is the same
-	// invariant the production wiring at cmd/server/main.go pins, and
+	// invariant the production wiring in internal/clusterboot pins, and
 	// integration tests that assert the no-payload contract rely on it.
 	clusterCfg := cluster.Configure(
 		"blabby-test",
