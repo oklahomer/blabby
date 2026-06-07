@@ -44,6 +44,13 @@ type testMember struct {
 	loggingSub  *eventstream.Subscription
 }
 
+type testClient struct {
+	cluster     *cluster.Cluster
+	topologies  chan *cluster.ClusterTopology
+	topologySub *eventstream.Subscription
+	loggingSub  *eventstream.Subscription
+}
+
 type connectionProbe struct {
 	messages      chan *userpb.ForwardMessageRequest
 	notifications chan *userpb.NotifyRoomEventRequest
@@ -81,7 +88,9 @@ type traceStep struct {
 }
 
 func TestMultiMemberDepartureAndReactivation(t *testing.T) {
-	members := startTestMembers(t, 2)
+	members, rawSeeds := startTestMembers(t, 2)
+	gateway := startTestClient(t, rawSeeds, memberAddresses(members))
+	client := gateway.cluster
 	survivor := members[0].cluster
 
 	userKind := testGrainKind{
@@ -102,33 +111,33 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 	}
 
 	const victim = 1
-	recoveryUserID := findIdentityOn(t, survivor, members, victim, "recovery-user", userKind)
-	routingUserID := findIdentityOn(t, survivor, members, 0, "routing-user", userKind)
-	roomID := findIdentityOn(t, survivor, members, victim, "room", roomKind)
+	recoveryUserID := findIdentityOn(t, client, members, victim, "recovery-user", userKind)
+	routingUserID := findIdentityOn(t, client, members, 0, "routing-user", userKind)
+	roomID := findIdentityOn(t, client, members, victim, "room", roomKind)
 
-	recoveryBefore, recoveryBeforePID := spawnConnectionProbe(survivor)
-	routingConnection, routingConnectionPID := spawnConnectionProbe(survivor)
+	recoveryBefore, recoveryBeforePID := spawnConnectionProbe(client)
+	routingConnection, routingConnectionPID := spawnConnectionProbe(client)
 	requireCall(t, "register recovery connection", func() error {
-		return registerConnection(survivor, recoveryUserID, recoveryBeforePID)
+		return registerConnection(client, recoveryUserID, recoveryBeforePID)
 	})
 	requireCall(t, "register routing connection", func() error {
-		return registerConnection(survivor, routingUserID, routingConnectionPID)
+		return registerConnection(client, routingUserID, routingConnectionPID)
 	})
 	requireCall(t, "join recovery user to room", func() error {
-		return joinRoom(survivor, recoveryUserID, roomID)
+		return joinRoom(client, recoveryUserID, roomID)
 	})
 	requireCall(t, "join routing user to room", func() error {
-		return joinRoom(survivor, routingUserID, roomID)
+		return joinRoom(client, routingUserID, roomID)
 	})
 	assertRoomEvent(t, routingConnection, roomID, routingUserID, userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED)
 
-	roomsBefore := getJoinedRoomsEventually(t, survivor, recoveryUserID)
+	roomsBefore := getJoinedRoomsEventually(t, client, recoveryUserID)
 	if len(roomsBefore) != 1 || roomsBefore[0] != roomID {
 		t.Fatalf("recovery user rooms before departure = %v, want [%s]", roomsBefore, roomID)
 	}
 
 	requireCall(t, "send baseline room message", func() error {
-		return sendMessage(survivor, routingUserID, roomID, "before-departure")
+		return sendMessage(client, routingUserID, roomID, "before-departure")
 	})
 	assertMessage(t, recoveryBefore, "before-departure")
 	assertMessage(t, routingConnection, "before-departure")
@@ -140,21 +149,22 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 	}
 	members[victim].cluster = nil
 	waitForTopology(t, members[0].topologies, []string{survivor.ActorSystem.Address()})
+	waitForTopology(t, gateway.topologies, []string{survivor.ActorSystem.Address()})
 
 	t.Run("User reactivation and reconnect", func(t *testing.T) {
-		roomsAfter := getJoinedRoomsEventually(t, survivor, recoveryUserID)
+		roomsAfter := getJoinedRoomsEventually(t, client, recoveryUserID)
 		if len(roomsAfter) != 0 {
 			t.Fatalf("reactivated recovery user rooms = %v, want empty state", roomsAfter)
 		}
-		assertPlacement(t, survivor, recoveryUserID, userKind.name, survivor.ActorSystem.Address())
+		assertPlacement(t, client, recoveryUserID, userKind.name, survivor.ActorSystem.Address())
 
-		recoveryAfter, recoveryAfterPID := spawnConnectionProbe(survivor)
+		recoveryAfter, recoveryAfterPID := spawnConnectionProbe(client)
 		requireCall(t, "register replacement recovery connection", func() error {
-			return registerConnection(survivor, recoveryUserID, recoveryAfterPID)
+			return registerConnection(client, recoveryUserID, recoveryAfterPID)
 		})
 		bodyMarker := "user-recovery-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 		requireCall(t, "forward after user reactivation", func() error {
-			return forwardMessage(survivor, recoveryUserID, bodyMarker)
+			return forwardMessage(client, recoveryUserID, bodyMarker)
 		})
 		assertMessage(t, recoveryAfter, bodyMarker)
 		assertNoMessage(t, recoveryBefore, "departed User grain retained its old connection")
@@ -169,24 +179,24 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 	})
 
 	t.Run("Room reactivation and routing", func(t *testing.T) {
-		routingRooms := getJoinedRoomsEventually(t, survivor, routingUserID)
+		routingRooms := getJoinedRoomsEventually(t, client, routingUserID)
 		if len(routingRooms) != 1 || routingRooms[0] != roomID {
 			t.Fatalf("surviving routing user rooms = %v, want [%s]", routingRooms, roomID)
 		}
 
 		requireEventually(t, "activate Room grain after departure", func() error {
-			return roomKind.activate(survivor, roomID)
+			return roomKind.activate(client, roomID)
 		})
-		assertPlacement(t, survivor, roomID, roomKind.name, survivor.ActorSystem.Address())
+		assertPlacement(t, client, roomID, roomKind.name, survivor.ActorSystem.Address())
 
 		requireCall(t, "rejoin routing user after room reactivation", func() error {
-			return joinRoom(survivor, routingUserID, roomID)
+			return joinRoom(client, routingUserID, roomID)
 		})
 		assertRoomEvent(t, routingConnection, roomID, routingUserID, userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED)
 
 		bodyMarker := "room-recovery-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 		requireCall(t, "send after room reactivation", func() error {
-			return sendMessage(survivor, routingUserID, roomID, bodyMarker)
+			return sendMessage(client, routingUserID, roomID, bodyMarker)
 		})
 		assertMessage(t, routingConnection, bodyMarker)
 		assertNoAdditionalMessage(t, routingConnection, bodyMarker)
@@ -201,7 +211,7 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 	})
 }
 
-func startTestMembers(t *testing.T, count int) []*testMember {
+func startTestMembers(t *testing.T, count int) ([]*testMember, string) {
 	t.Helper()
 	ports := reserveTestPorts(t, count*2)
 	discoveryPorts := ports[:count]
@@ -256,14 +266,57 @@ func startTestMembers(t *testing.T, count int) []*testMember {
 		waitForDiscovery(t, discoveryPorts[i])
 	}
 
-	expectedAddresses := make([]string, len(members))
-	for i, member := range members {
-		expectedAddresses[i] = member.cluster.ActorSystem.Address()
-	}
+	expectedAddresses := memberAddresses(members)
 	for _, member := range members {
 		waitForTopology(t, member.topologies, expectedAddresses)
 	}
-	return members
+	return members, rawSeeds
+}
+
+func startTestClient(t *testing.T, rawSeeds string, expectedAddresses []string) *testClient {
+	t.Helper()
+	ports := reserveTestPorts(t, 2)
+	remotePort := ports[0]
+	discoveryPort := ports[1]
+	advertisedHost := net.JoinHostPort("127.0.0.1", strconv.Itoa(remotePort))
+	cc, err := newClusterConfig(
+		"127.0.0.1",
+		remotePort,
+		advertisedHost,
+		discoveryPort,
+		rawSeeds,
+	)
+	if err != nil {
+		t.Fatalf("build client config: %v", err)
+	}
+
+	client := &testClient{
+		cluster:    Build(cc),
+		topologies: make(chan *cluster.ClusterTopology, 16),
+	}
+	client.loggingSub = SubscribeTopologyLogging(client.cluster)
+	client.topologySub = client.cluster.ActorSystem.EventStream.Subscribe(func(evt any) {
+		if topology, ok := evt.(*cluster.ClusterTopology); ok {
+			client.topologies <- topology
+		}
+	})
+	t.Cleanup(func() {
+		client.cluster.ActorSystem.EventStream.Unsubscribe(client.topologySub)
+		client.cluster.ActorSystem.EventStream.Unsubscribe(client.loggingSub)
+		ShutdownClient(client.cluster)
+	})
+
+	client.cluster.StartClient()
+	waitForTopology(t, client.topologies, expectedAddresses)
+	return client
+}
+
+func memberAddresses(members []*testMember) []string {
+	addresses := make([]string, len(members))
+	for i, member := range members {
+		addresses[i] = member.cluster.ActorSystem.Address()
+	}
+	return addresses
 }
 
 func reserveTestPorts(t *testing.T, count int) []int {
@@ -406,12 +459,12 @@ func assertPlacement(t *testing.T, client *cluster.Cluster, identity, kind, expe
 	}
 }
 
-func spawnConnectionProbe(member *cluster.Cluster) (*connectionProbe, *actor.PID) {
+func spawnConnectionProbe(client *cluster.Cluster) (*connectionProbe, *actor.PID) {
 	probe := &connectionProbe{
 		messages:      make(chan *userpb.ForwardMessageRequest, 4),
 		notifications: make(chan *userpb.NotifyRoomEventRequest, 4),
 	}
-	pid := member.ActorSystem.Root.Spawn(actor.PropsFromProducer(func() actor.Actor { return probe }))
+	pid := client.ActorSystem.Root.Spawn(actor.PropsFromProducer(func() actor.Actor { return probe }))
 	return probe, pid
 }
 

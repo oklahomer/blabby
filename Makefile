@@ -20,7 +20,7 @@ lint:
 	golangci-lint run
 
 coverage:
-	go test -coverpkg=./internal/... -coverprofile=coverage.out ./...
+	go test -p=1 -timeout=2m -coverpkg=./cmd/...,./internal/... -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 
 docker:
