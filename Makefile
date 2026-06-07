@@ -1,4 +1,4 @@
-.PHONY: generate build test lint coverage docker up setup-hooks
+.PHONY: generate build test test-race test-cluster lint coverage docker up setup-hooks
 
 generate:
 	buf generate
@@ -6,14 +6,21 @@ generate:
 build:
 	go build ./cmd/backend/ ./cmd/gateway/ ./cmd/client/
 
-test:
+# The default gate combines race coverage with the focused multi-member test.
+test: test-race test-cluster
+
+test-race:
 	go test -race ./...
+
+# Proto.Actor cannot run multiple in-process members cleanly under -race.
+test-cluster:
+	go test -count=1 ./internal/clusterboot -run '^TestMultiMemberDepartureAndReactivation$$'
 
 lint:
 	golangci-lint run
 
 coverage:
-	go test -coverprofile=coverage.out ./...
+	go test -coverpkg=./internal/... -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 
 docker:

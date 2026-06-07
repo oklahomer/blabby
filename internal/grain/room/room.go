@@ -5,10 +5,8 @@
 // [room.Grain]; do NOT rename it to RoomGrain (that would stutter with the
 // package name and trip golangci-lint's revive rule).
 //
-// Room grain semantics, error codes, and fan-out shape are specified in
-// architecture.md and the Story 3.1 spec. Phase 1 keeps state in memory
-// and uses best-effort fan-out; persistence and retry policy are deferred
-// to later phases.
+// Phase 1 keeps room state in memory and uses best-effort fan-out; persistence
+// and retry policy are deferred to later phases.
 package room
 
 import (
@@ -61,9 +59,8 @@ const (
 	statusMissingField      = "MISSING_FIELD"
 )
 
-// passivationTimeout is the receive-timeout the Room kind passivates on.
-// Architecture.md RB3 calls for a longer timeout than User grain because
-// Room holds the recent-message buffer.
+// passivationTimeout is the receive-timeout the Room kind passivates on. It is
+// longer than the User grain's because the Room holds the recent-message buffer.
 const passivationTimeout = 5 * time.Minute
 
 // userNotifier abstracts the User grain client surface used for fan-out so
@@ -97,7 +94,7 @@ func (n *clusterUserNotifier) ForwardMessage(userID id.UserID, req *userpb.Forwa
 //
 // Field mutation happens directly under the actor model's single-threaded
 // guarantee; the project's global immutability rule does not apply to grain
-// state (architecture.md "Grain State Management").
+// state.
 //
 // The clock seam (`now`) returns a domain time.Time for readability and
 // type safety; the conversion to google.protobuf.Timestamp happens at the
@@ -114,10 +111,6 @@ type Grain struct {
 // *cluster.Kind that callers pass to cluster.WithKinds(...). The default
 // userNotifier is built lazily during Init from ctx.Cluster(), avoiding a
 // chicken-and-egg with cluster.New requiring kinds in its config.
-//
-// Use this constructor in cmd/server/main.go or in a future cluster bootstrap
-// (Story 3.4 / 3.5 wires the production cluster). It is also fine to call
-// from integration tests via internal/testutil/cluster.
 func NewKind() *cluster.Kind {
 	return roompb.NewRoomGrainKind(func() roompb.RoomGrain {
 		return &Grain{}
@@ -164,7 +157,7 @@ func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
 }
 
 // Join adds the user to the room and fans out a JOINED event to every
-// current member (including the joiner — multi-device echo, FR4).
+// current member (including the joiner — multi-device echo).
 func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb.JoinResponse, error) {
 	joiner, err := parseUserRef(req.GetUser())
 	if err != nil {
@@ -254,7 +247,7 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 }
 
 // PostMessage records the message, assigns the server-side timestamp, and
-// fans the message out unconditionally to every current member (FR4).
+// fans the message out unconditionally to every current member.
 func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainContext) (*roompb.PostMessageResponse, error) {
 	sender, err := parseUserRef(req.GetUser())
 	if err != nil {
