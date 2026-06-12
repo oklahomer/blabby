@@ -33,7 +33,7 @@ var wsUpgrader = websocket.Upgrader{
 // handleWS upgrades the HTTP request to a WebSocket connection and spawns
 // a UserConnection actor to manage the session. Auth happens on the
 // upgraded socket as the first text frame, not via the Authorization
-// header — see ADR-004.
+// header — see ADR-003.
 func (g *Gateway) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
