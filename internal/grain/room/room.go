@@ -39,6 +39,7 @@ const (
 	eventRoomMemberLeaveRejected = "room.member.leave_rejected"
 	eventRoomMessagePosted       = "room.message.posted"
 	eventRoomMessagePostRejected = "room.message.post_rejected"
+	eventRoomFanoutSupervision   = "room.fanout.supervision"
 )
 
 // Error code constants mirror the canonical taxonomy in
@@ -107,15 +108,22 @@ type Grain struct {
 	fanout   fanoutDispatcher
 }
 
+// roomGrainKind is the cluster kind name registered by the generated
+// NewRoomGrainKind. The log envelopes below must agree with it.
+const roomGrainKind = "RoomGrain"
+
 // NewKind registers Room grain with a proto.actor cluster, returning a
 // *cluster.Kind that callers pass to cluster.WithKinds(...). The default
 // userNotifier is built lazily during Init from ctx.Cluster(), avoiding a
 // chicken-and-egg with cluster.New requiring kinds in its config.
 func NewKind() *cluster.Kind {
-	return roompb.NewRoomGrainKind(func() roompb.RoomGrain {
-		return &Grain{}
-	}, passivationTimeout,
-		actor.WithReceiverMiddleware(middleware.GrainLogging("RoomGrain")),
+	return roompb.NewRoomGrainKind(func() roompb.RoomGrain { return &Grain{} }, passivationTimeout,
+		actor.WithReceiverMiddleware(middleware.GrainLogging(roomGrainKind)),
+		// Govern the fan-out worker child: protoactor resolves a child's
+		// supervisor from its parent's props. Unexpected worker panics restart
+		// the stateless actor instance while preserving its PID and remaining
+		// mailbox; see supervision.go.
+		actor.WithSupervisor(newFanoutSupervisor(nil)),
 	)
 }
 
@@ -132,11 +140,10 @@ func (g *Grain) Init(ctx cluster.GrainContext) {
 		g.notifier = &clusterUserNotifier{c: ctx.Cluster()}
 	}
 	if g.fanout == nil {
-		// Spawn a long-lived child actor to perform member fan-out off this
-		// grain's message goroutine, so command handlers return without
-		// blocking on (and re-entering via) the per-member notification RPCs.
-		// The child is part of the grain's actor hierarchy and stops with it.
-		// See ADR-015.
+		// Member fan-out runs on a child actor so command handlers return
+		// without blocking on (and re-entering via) the per-member notification
+		// RPCs (ADR-015). The child stops with the grain and restarts in place
+		// after an unexpected panic.
 		pid := ctx.Spawn(actor.PropsFromProducer(func() actor.Actor {
 			return &fanoutWorker{notifier: g.notifier}
 		}))

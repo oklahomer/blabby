@@ -62,7 +62,7 @@ func TestOutboundBackpressureStopsActor(t *testing.T) {
 		if _, ok := ctx.Message().(*triggerOutboundBackpressure); ok {
 			uc.sendOutbound(ctx, &AppPing{})
 		}
-	}, actor.WithGuardian(stopOnBackpressureSupervisor))
+	}, actor.WithGuardian(connectionSupervisor))
 	pid := system.Root.Spawn(props)
 	t.Cleanup(func() { _ = system.Root.PoisonFuture(pid).Wait() })
 
