@@ -41,8 +41,9 @@ type fanoutDispatcher interface {
 }
 
 // actorDispatcher is the production dispatcher: it enqueues the job on the
-// long-lived fan-out child's mailbox. The child processes its mailbox in
-// order, so notifications are delivered in the order the grain issued them.
+// grain's long-lived fan-out child. Proto.Actor preserves the child PID and
+// remaining mailbox when the supervisor restarts the actor instance, so jobs
+// after a failed one continue in order.
 type actorDispatcher struct {
 	pid *actor.PID
 }

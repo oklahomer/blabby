@@ -24,3 +24,4 @@ Each ADR follows a standard format: Title, Status, Context, Decision, Consequenc
 | [ADR-014](adr-014-domain-identifier-types-and-boundary-parsing.md) | Domain identifier types -- `UserID` / `RoomID` value objects parsed once at four boundaries | Accepted | 2026-05-16 |
 | [ADR-015](adr-015-command-query-vs-notification.md) | Command/query vs. notification -- synchronous request/response or asynchronous best-effort (Room fan-out as the worked example) | Accepted | 2026-05-31 |
 | [ADR-016](adr-016-gateway-backend-tier-separation.md) | Gateway as cluster client, backend as cluster member -- tier separation | Accepted | 2026-06-03 |
+| [ADR-017](adr-017-supervision-strategy.md) | Custom supervision strategy -- Stop external-resource actors and Restart rebuildable workers | Accepted | 2026-06-08 |

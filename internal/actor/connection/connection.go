@@ -52,6 +52,7 @@ const (
 	eventConnectionEventUnknown           = "connection.event.unknown"
 	eventConnectionCloseFrameError        = "connection.close_frame.error"
 	eventConnectionReadPumpPanic          = "connection.read_pump.panic"
+	eventConnectionSupervision            = "connection.supervision"
 )
 
 // errorKind pairs the on-wire numeric code with its on-wire status string.
@@ -189,52 +190,9 @@ func NewProps(conn *websocket.Conn, a auth.Authenticator, c *cluster.Cluster, op
 			return uc
 		},
 		actor.WithReceiverMiddleware(middlewares...),
-		actor.WithGuardian(stopOnBackpressureSupervisor),
+		actor.WithGuardian(connectionSupervisor),
 	)
 }
-
-// stopOnBackpressureSupervisor terminates a UserConnection on
-// *outboundBackpressureError and escalates anything else to the parent.
-//
-// UserConnection cannot be usefully restarted: its identity is the
-// underlying WebSocket, and a fresh actor instance would have no
-// connection to recover. Proto.Actor's default Restart directive is
-// therefore wrong for this actor. We map the one expected fatal panic
-// (backpressure) to Stop so the actor tears down via the normal Stopping
-// flow, and let the gateway decide what to do with anything we did not
-// anticipate.
-//
-// This supervisor only sees panics raised on the actor's message-handling
-// path. Panics inside the read/write pump goroutines are recovered locally
-// by those goroutines and reported back as *ReadPumpPanicked /
-// *WritePumpFailed messages, which Receive's transport tear-down section
-// handles directly.
-var stopOnBackpressureSupervisor = actor.NewOneForOneStrategy(0, 0,
-	func(reason interface{}) actor.Directive {
-		if _, ok := reason.(*outboundBackpressureError); ok {
-			return actor.StopDirective
-		}
-		return actor.EscalateDirective
-	},
-)
-
-// outboundBackpressureError is panicked by sendOutbound when the outbound
-// channel is full. stopOnBackpressureSupervisor maps it to
-// actor.StopDirective so the actor tears down via the normal Stopping path
-// rather than dropping messages silently.
-//
-// Backpressure here means the write pump cannot keep up with the producer,
-// which in our protocol indicates a stuck or hostile peer. Three policies
-// were considered:
-//   - Block the producer — would freeze the actor on any slow client.
-//   - Drop and continue — would corrupt chat ordering and the auth handshake.
-//   - Tear down the connection — chosen; the client reconnects fresh.
-//
-// Restart is meaningless here because the WebSocket lives in this actor
-// instance, so Stop is the only viable directive.
-type outboundBackpressureError struct{}
-
-func (e *outboundBackpressureError) Error() string { return "outbound channel backpressure" }
 
 type userConnectionConfig struct {
 	conn        *websocket.Conn
@@ -585,10 +543,10 @@ func (uc *UserConnection) forwardRoomEvent(ctx actor.Context, req *userpb.Notify
 
 // sendOutbound enqueues msg on the outbound channel for the write pump.
 // It returns normally on success and panics with *outboundBackpressureError
-// when the channel is full. The actor's supervisor
-// (stopOnBackpressureSupervisor) catches that panic and stops the actor,
-// so callers do not need to handle the failure path themselves — control
-// flow simply unwinds out of the current message handler.
+// when the channel is full. The actor's guardian supervisor (see
+// newConnectionSupervisor / classifyConnectionFailure) catches that panic and
+// stops the actor, so callers do not need to handle the failure path
+// themselves — control flow simply unwinds out of the current message handler.
 func (uc *UserConnection) sendOutbound(ctx actor.Context, msg any) {
 	select {
 	case uc.outbound <- msg:
