@@ -5,7 +5,7 @@ A small, real-time group-chat system built on [Proto.Actor](https://proto.actor/
 What makes it worth a look:
 
 - **Grain-per-entity modelling.** Each user and each room is a virtual actor with single-threaded state — no locks, no shared mutable maps. Commands route through a user's own grain to room grains.
-- **A clean client contract.** HTTP POST for commands, a WebSocket for the real-time event stream, JSON on the wire, JWT for identity.
+- **A clean client contract.** HTTP for commands and queries, a WebSocket for the real-time event stream, JSON on the wire, JWT for identity.
 - **Decisions written down.** Non-obvious choices live in [Architecture Decision Records](docs/adr/), each with context and consequences.
 - **Clone-and-run.** Generated protobuf code is committed, there are no external dependencies (no database, broker, or cache), and a terminal client ships in the same module.
 
@@ -24,7 +24,7 @@ flowchart LR
         UG["User grain"]
         RG["Room grain"]
     end
-    TUI -- "HTTP POST: /login, /rooms/{id}/join, /rooms/{id}/messages" --> GW
+    TUI -- "HTTP: POST /login, PUT/DELETE membership, POST messages" --> GW
     TUI <-- "WebSocket events: message, joined, left" --> GW
     GW -- "spawns per socket" --> UC
     UC -- "RegisterConnection (PID in body)" --> UG

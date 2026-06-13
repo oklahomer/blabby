@@ -48,7 +48,8 @@ delivery decision point.**
   `internal/grain/room/fanout.go`), never retried, and never aborts delivery
   to the remaining recipients.
 - The User grain receiving a fan-out forwards it to every connection PID it
-  currently holds. A member with zero connections is still a delivery target
+  currently holds (`internal/grain/user/sender.go`). A member with zero
+  connections is still a delivery target
   at the room level; their User grain simply has nobody to forward to, and the
   event ends there.
 

@@ -1,4 +1,4 @@
-# ADR-002: Client protocol — why HTTP POST for commands, WebSocket for events, both JSON
+# ADR-002: Client protocol — why HTTP for commands and queries, WebSocket for events, both JSON
 
 - **Status:** Accepted
 - **Date:** 2026-06-13
@@ -30,19 +30,26 @@ poke at the system.
 queries, one WebSocket for server-pushed events. Both carry JSON. Protobuf
 never crosses the client boundary.**
 
-- **Commands are HTTP POST** (`POST /login`, `POST /rooms/{id}/join`,
-  `POST /rooms/{id}/leave`, `POST /rooms/{id}/messages`); **queries are HTTP
-  GET** (`GET /rooms`, `GET /rooms/joined`). Handlers live in
-  `internal/gateway/handler_room.go`, `handler_room_query.go`, and
-  `handler_login.go`. Each request gets standard HTTP semantics: bearer-token
-  auth, status codes, and the JSON error envelope of
-  [ADR-009](adr-009-error-response-format.md). The verdict is the response —
-  a send that returns 200 has been accepted by the room.
+- **Commands use HTTP methods matching their client-facing semantics**:
+  `POST /login` and `POST /rooms/{id}/messages`,
+  `PUT /rooms/{id}/membership` to ensure membership, and
+  `DELETE /rooms/{id}/membership` to ensure absence. **Queries are HTTP GET**
+  (`GET /rooms`, which serves the gateway's static Phase 1 room
+  catalogue without touching any grain, and `GET /rooms/joined`, a User-grain
+  query). Handlers live in `internal/gateway/handler_room.go`,
+  `handler_room_query.go`, and `handler.go` (login). Each request gets
+  standard HTTP semantics: status codes, the JSON error envelope of
+  [ADR-009](adr-009-error-response-format.md), and — everywhere except the
+  token-issuing `POST /login`
+  ([ADR-018](adr-018-http-authentication-boundary.md)) — bearer-token auth.
+  The verdict is the response — a send that returns 200 has been accepted by
+  the room.
 - **Events arrive on `GET /ws`** (`internal/gateway/handler_ws.go`), a
   persistent WebSocket carrying JSON frames typed by a `type` field
-  (`message`, `joined`, `left`, plus the auth handshake frames). Outbound
-  frame encoding lives in `internal/actor/connection/encoder.go`, inbound
-  decoding in `decoder.go`.
+  (`message`, `joined`, `left`, `error`, the auth handshake frames, and the
+  `ping`/`pong` heartbeat pair behind the connection actor's
+  `WithAppHeartbeat` option). Outbound frame encoding lives in
+  `internal/actor/connection/encoder.go`, inbound decoding in `decoder.go`.
 - **The gateway is the translation boundary** ([ADR-016](adr-016-gateway-backend-tier-separation.md)):
   JSON is parsed into Protobuf before anything enters the actor system, and
   grain responses are rendered back to JSON. JSON field names are
@@ -54,6 +61,14 @@ result the caller awaits ride request/response HTTP; announcements ride the
 push channel. A client never learns about new messages from a command
 response — even its own send is rendered when the echo arrives on the
 WebSocket.
+
+The membership resource is an adapter at the User-grain routing boundary;
+the Room grain's internal `Join`/`Leave` protocol remains action-oriented.
+The User grain treats `ROOM_ALREADY_MEMBER` from `Join` and
+`ROOM_NOT_MEMBER` from `Leave` as confirmation of the requested state, applies
+the corresponding local set operation, and returns success. Retrying an
+ambiguous PUT or DELETE therefore reconciles the User and Room membership
+views without changing Room-grain behavior.
 
 ## Consequences
 
@@ -81,7 +96,7 @@ WebSocket.
 - **JSON is weaker than the internal contract.** No schema enforcement at the
   wire level; drift between server encoding and client decoding surfaces at
   runtime. Machine-readable specs (OpenAPI for HTTP, AsyncAPI for the socket)
-  are the planned mitigation, kept in `api/`.
+  are the planned mitigation; `api/` is reserved for them.
 - **Double serialization at the gateway** (JSON ↔ Protobuf) costs CPU per
   request. Accepted: the gateway tier scales independently
   ([ADR-016](adr-016-gateway-backend-tier-separation.md)).
@@ -89,8 +104,9 @@ WebSocket.
 ### Neutral
 
 - Events are one-way by design; the only client→server WebSocket traffic is
-  the auth handshake ([ADR-003](adr-003-websocket-authentication.md)).
-  Everything else a client wants to *do* is a command and belongs on HTTP.
+  the auth handshake ([ADR-003](adr-003-websocket-authentication.md)) and
+  heartbeat `pong` replies. Everything else a client wants to *do* is a
+  command and belongs on HTTP.
 
 ## Alternatives considered
 
@@ -115,8 +131,8 @@ SSE instead of WebSocket. Close call: SSE is simpler and proxies well. Rejected
 because the event channel needs *some* client→server traffic — the
 first-frame auth handshake of
 [ADR-003](adr-003-websocket-authentication.md) (SSE would force the token
-into the URL, the exact leak that ADR rejects) and heartbeat pongs when
-keepalive lands. WebSocket keeps those on the same connection.
+into the URL, the exact leak that ADR rejects) and heartbeat pongs.
+WebSocket keeps those on the same connection.
 
 ## References
 

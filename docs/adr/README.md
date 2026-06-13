@@ -2,14 +2,14 @@
 
 This directory contains Architecture Decision Records (ADRs) for the blabby project. ADRs capture the key architectural decisions made during development, including the context, reasoning, and consequences of each decision.
 
-Each ADR follows a standard format: Title, Status, Context, Decision, Consequences.
+Each ADR follows a standard format: title, Status/Date/Related metadata, Context, Decision, Consequences (positive/negative/neutral), alternatives considered, and references.
 
 ## ADR Index
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
 | [ADR-001](adr-001-grain-topology.md) | Grain topology -- why User and Room are grains, UserConnection is a regular actor | Accepted | 2026-06-13 |
-| [ADR-002](adr-002-client-protocol.md) | Client protocol -- why HTTP POST for commands, WebSocket for events, both JSON | Accepted | 2026-06-13 |
+| [ADR-002](adr-002-client-protocol.md) | Client protocol -- why HTTP for commands and queries, WebSocket for events, both JSON | Accepted | 2026-06-13 |
 | [ADR-003](adr-003-websocket-authentication.md) | WebSocket authentication -- why first-message auth over query parameter token | Accepted | 2026-06-13 |
 | [ADR-004](adr-004-message-routing-through-user-grain.md) | Message routing through User grain -- why User grain acts as the user's agent | Accepted | 2026-06-13 |
 | [ADR-005](adr-005-unconditional-fan-out.md) | Unconditional fan-out -- why Room grain sends to all members regardless of connection state | Accepted | 2026-06-13 |

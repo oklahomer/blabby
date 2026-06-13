@@ -88,7 +88,7 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 // requireAuth wraps an http.HandlerFunc with authMiddleware so route
 // registrations can opt a handler into authentication with a single call:
 //
-//	mux.Handle("POST /rooms/{id}/join", g.requireAuth(g.handleRoomJoin))
+//	mux.Handle("PUT /rooms/{id}/membership", g.requireAuth(g.handleRoomMembershipPut))
 //
 // The wrapper returns an http.Handler (not HandlerFunc), which is why callers
 // must use mux.Handle rather than mux.HandleFunc.

@@ -24,11 +24,11 @@ const (
 // the structured-log endpoint field. Defining them once keeps the route
 // table and log lines from drifting apart on rename.
 const (
-	endpointRoomList    = "GET /rooms"
-	endpointRoomJoined  = "GET /rooms/joined"
-	endpointRoomJoin    = "POST /rooms/{id}/join"
-	endpointRoomLeave   = "POST /rooms/{id}/leave"
-	endpointRoomMessage = "POST /rooms/{id}/messages"
+	endpointRoomList             = "GET /rooms"
+	endpointRoomJoined           = "GET /rooms/joined"
+	endpointRoomMembershipPut    = "PUT /rooms/{id}/membership"
+	endpointRoomMembershipDelete = "DELETE /rooms/{id}/membership"
+	endpointRoomMessage          = "POST /rooms/{id}/messages"
 )
 
 // Outcome labels for the structured exit log on every room handler.
@@ -51,59 +51,65 @@ type sendMessageSuccessResponse struct {
 	Timestamp int64 `json:"timestamp"`
 }
 
-// handleRoomJoin dispatches POST /rooms/{id}/join to the user's grain.
+// handleRoomMembershipPut ensures that the authenticated user is a member of
+// the selected room. The User grain adapts Room's action-oriented Join result:
+// ROOM_ALREADY_MEMBER confirms the PUT state and repairs its local projection,
+// while other business errors still reach this handler.
 //
-// Note: Go 1.22+ mux dispatches POST /rooms//join to the catch-all "/"
+// Note: Go 1.22+ mux dispatches PUT /rooms//membership to the catch-all "/"
 // pattern (handleNotFound), so the empty-segment case never reaches this
 // handler. The trim and structural checks inside id.NewRoomID cover
-// URL-encoded whitespace (e.g. POST /rooms/%20/join), which the mux
+// URL-encoded whitespace (e.g. PUT /rooms/%20/membership), which the mux
 // does match.
-func (g *Gateway) handleRoomJoin(w http.ResponseWriter, r *http.Request) {
-	userID, ok := authenticatedUserID(w, r, endpointRoomJoin)
+func (g *Gateway) handleRoomMembershipPut(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authenticatedUserID(w, r, endpointRoomMembershipPut)
 	if !ok {
 		return
 	}
-	roomID, ok := requireRoomID(w, r, endpointRoomJoin, userID)
+	roomID, ok := requireRoomID(w, r, endpointRoomMembershipPut, userID)
 	if !ok {
 		return
 	}
-	logRoomEntry(endpointRoomJoin, r.Method, userID, roomID)
+	logRoomEntry(endpointRoomMembershipPut, r.Method, userID, roomID)
 	resp, err := g.userGrainFor(userID).JoinRoom(&userpb.JoinRoomRequest{RoomId: roomID.String()})
 	if err != nil {
-		logRoomTransportError(endpointRoomJoin, r.Method, userID, roomID)
+		logRoomTransportError(endpointRoomMembershipPut, r.Method, userID, roomID)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
 		return
 	}
 	if pe := resp.GetError(); pe != nil {
-		writeBusinessErrorResponse(w, endpointRoomJoin, r.Method, userID, roomID, pe)
+		writeBusinessErrorResponse(w, endpointRoomMembershipPut, r.Method, userID, roomID, pe)
 		return
 	}
-	logRoomExit(endpointRoomJoin, r.Method, userID, roomID, outcomeOK, 0)
+	logRoomExit(endpointRoomMembershipPut, r.Method, userID, roomID, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, successResponse{Success: true})
 }
 
-// handleRoomLeave dispatches POST /rooms/{id}/leave to the user's grain.
-func (g *Gateway) handleRoomLeave(w http.ResponseWriter, r *http.Request) {
-	userID, ok := authenticatedUserID(w, r, endpointRoomLeave)
+// handleRoomMembershipDelete ensures that the authenticated user is not a
+// member of the selected room. The User grain similarly treats
+// ROOM_NOT_MEMBER as confirmation of the DELETE state and reconciles its local
+// joined-room projection before returning success.
+func (g *Gateway) handleRoomMembershipDelete(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authenticatedUserID(w, r, endpointRoomMembershipDelete)
 	if !ok {
 		return
 	}
-	roomID, ok := requireRoomID(w, r, endpointRoomLeave, userID)
+	roomID, ok := requireRoomID(w, r, endpointRoomMembershipDelete, userID)
 	if !ok {
 		return
 	}
-	logRoomEntry(endpointRoomLeave, r.Method, userID, roomID)
+	logRoomEntry(endpointRoomMembershipDelete, r.Method, userID, roomID)
 	resp, err := g.userGrainFor(userID).LeaveRoom(&userpb.LeaveRoomRequest{RoomId: roomID.String()})
 	if err != nil {
-		logRoomTransportError(endpointRoomLeave, r.Method, userID, roomID)
+		logRoomTransportError(endpointRoomMembershipDelete, r.Method, userID, roomID)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
 		return
 	}
 	if pe := resp.GetError(); pe != nil {
-		writeBusinessErrorResponse(w, endpointRoomLeave, r.Method, userID, roomID, pe)
+		writeBusinessErrorResponse(w, endpointRoomMembershipDelete, r.Method, userID, roomID, pe)
 		return
 	}
-	logRoomExit(endpointRoomLeave, r.Method, userID, roomID, outcomeOK, 0)
+	logRoomExit(endpointRoomMembershipDelete, r.Method, userID, roomID, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, successResponse{Success: true})
 }
 

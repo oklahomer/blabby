@@ -33,7 +33,8 @@ The intended shape:
 - Normalized columns carry what indexing and replay require: the grain's
   identity (kind + id), a per-grain monotonically increasing sequence number,
   the event type name, and the server-assigned timestamp (`BIGINT` Unix
-  milliseconds, the project's canonical wire form).
+  milliseconds, matching the client protocol's timestamp form; grain protos
+  internally carry `google.protobuf.Timestamp`).
 - The event's type-specific fields live in one `JSONB` column, written and
   read by the provider as the serialized event.
 - Replay for one grain is a single indexed range scan: by grain identity,

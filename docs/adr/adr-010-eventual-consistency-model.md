@@ -33,12 +33,14 @@ and reported honestly rather than masked.**
 
 Concretely:
 
-- **No cross-grain atomicity.** A join command updates the Room grain and the
-  User grain in sequence (gateway → User grain → Room grain,
-  [ADR-004](adr-004-message-routing-through-user-grain.md)); each update
-  commits independently in its owner's mailbox. If a response is lost in
-  transit, the two sets can disagree until a later command re-aligns them —
-  the system does not roll back the half that succeeded.
+- **No cross-grain atomicity.** A join command travels gateway → User grain →
+  Room grain ([ADR-004](adr-004-message-routing-through-user-grain.md)); the
+  Room grain commits its member-set update first, and the User grain records
+  the join only after the room's success response arrives
+  (`internal/grain/user/user.go`). Each update commits independently in its
+  owner's mailbox: if that response is lost in transit, the room knows a
+  member whose own joined-rooms set disagrees, until a later command
+  re-aligns them — the system does not roll back the half that succeeded.
 - **Reads ask one owner.** `GET /rooms/joined` reads the User grain's set;
   room membership checks read the Room grain's set. A reader observes that
   grain's state *as of its place in that grain's mailbox*, not a global
@@ -52,13 +54,16 @@ Concretely:
   (no persistence). The system reports that emptiness truthfully: a post into
   a reactivated room by a formerly-joined user is refused as a business
   outcome ([ADR-013](adr-013-business-errors-as-response-values.md),
-  `ROOM_NOT_MEMBER`) rather than served from a pretended continuity. The
-  failover integration test
-  (`internal/clusterboot/departure_integration_test.go`) pins exactly this
-  behavior across a member departure.
+  `ROOM_NOT_MEMBER`, implemented in `internal/grain/room/room.go`) rather
+  than served from a pretended continuity. The failover integration test
+  (`internal/clusterboot/departure_integration_test.go`) pins the empty
+  reactivated state across a member departure: joined-rooms comes back
+  empty, and the user must re-join before sending again.
 - **Idempotent-friendly operations.** Membership mutations are set
   operations (re-join, re-leave, re-register are no-ops by construction in
   both state types), so retries and convergence traffic do not corrupt state.
+  The User grain maps Room's already-member/not-member responses to success
+  and applies the corresponding local set operation.
 
 ## Consequences
 
@@ -82,10 +87,10 @@ Concretely:
   User and Room membership views disagreeing until the user's next command;
   there is no background reconciler in Phase 1. Consumers must treat either
   view as advisory rather than authoritative-globally.
-- **Clients must re-read to heal.** After reconnect or suspected missed
-  events, the burden of catching up is the client's (re-fetch joined rooms;
-  message history requires Phase 2 persistence,
-  [ADR-007](adr-007-single-table-persistence.md)).
+- **Clients must retry ambiguous membership commands to heal.** A subsequent
+  joined-rooms read refreshes client-local state, but cannot repair a
+  Room/User disagreement by itself. Message history requires Phase 2
+  persistence ([ADR-007](adr-007-single-table-persistence.md)).
 - **Phase 1 empty-state honesty is user-visible.** Reactivation forgets
   membership; users re-join. Persistence narrows this window but the
   consistency model — converge, don't coordinate — stays the same.
@@ -93,7 +98,7 @@ Concretely:
 ### Neutral
 
 - This is the standard virtual-actor consistency posture: strong consistency
-  *within* a grain (serialized writes, read-your-own-writes per grain), 
+  *within* a grain (serialized writes, read-your-own-writes per grain),
   eventual consistency *between* grains.
 
 ## Alternatives considered

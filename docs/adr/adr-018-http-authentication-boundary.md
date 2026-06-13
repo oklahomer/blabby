@@ -9,7 +9,7 @@
 Protected HTTP endpoints need three things wired together: token validation
 (is this bearer token good?), an HTTP-shaped rejection (a 401 with the
 project's error envelope), and identity propagation (the handler behind the
-middleware must know *who* is calling). Each pull in a different direction
+middleware must know *who* is calling). Each pulls in a different direction
 when deciding where the code lives:
 
 - Token validation is transport-agnostic — the WebSocket's first-message
@@ -91,8 +91,8 @@ in message payloads ([ADR-016](adr-016-gateway-backend-tier-separation.md)).
   Tests construct an `id.UserID` and pass it — no context scaffolding, no
   middleware simulation.
 - **Context misuse is structurally contained.** Exactly one writer
-  (`ContextWithUserID` in the middlewares) and one sanctioned reader layer
-  (handlers directly behind them); the unexported key prevents foreign
+  (`ContextWithUserID` in the auth middleware) and one sanctioned reader
+  layer (handlers directly behind it); the unexported key prevents foreign
   packages from minting lookalike values.
 
 ### Negative

@@ -88,7 +88,7 @@ func TestSplitMethodPath(t *testing.T) {
 	}{
 		{"POST + path", "POST /login", "POST", "/login"},
 		{"GET + path", "GET /ws", "GET", "/ws"},
-		{"POST + path with capture", "POST /rooms/{id}/join", "POST", "/rooms/{id}/join"},
+		{"PUT + path with capture", "PUT /rooms/{id}/membership", "PUT", "/rooms/{id}/membership"},
 		{"path only", "/login", "", "/login"},
 		{"root", "/", "", "/"},
 	}

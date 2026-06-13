@@ -356,7 +356,7 @@ func TestGrain_JoinRoom(t *testing.T) {
 		}
 	})
 
-	t.Run("Room grain business error is copied through and joined_rooms unchanged", func(t *testing.T) {
+	t.Run("already-member response reconciles joined_rooms and succeeds", func(t *testing.T) {
 		h := newGrain(t)
 		h.rooms.defaultJoin = &roompb.JoinResponse{
 			Error: &commonpb.ErrorDetail{Code: 2002, Status: "ROOM_ALREADY_MEMBER", Message: "already a member"},
@@ -366,9 +366,27 @@ func TestGrain_JoinRoom(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetError(), 2002, "ROOM_ALREADY_MEMBER")
+		if resp.GetError() != nil {
+			t.Fatalf("expected success, got error: %+v", resp.GetError())
+		}
+		if got := h.g.JoinedRooms(); !reflect.DeepEqual(got, []id.RoomID{mustRoomID(t, "general")}) {
+			t.Errorf("JoinedRooms: got %v, want [general]", got)
+		}
+	})
+
+	t.Run("other Room grain business errors are copied through", func(t *testing.T) {
+		h := newGrain(t)
+		h.rooms.defaultJoin = &roompb.JoinResponse{
+			Error: &commonpb.ErrorDetail{Code: 2003, Status: "ROOM_NOT_FOUND", Message: "room not found"},
+		}
+
+		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertErrResponse(t, resp.GetError(), 2003, "ROOM_NOT_FOUND")
 		if got := h.g.JoinedRooms(); len(got) != 0 {
-			t.Errorf("JoinedRooms: got %v, want [] (must not record on failure)", got)
+			t.Errorf("JoinedRooms: got %v, want []", got)
 		}
 	})
 
@@ -425,8 +443,9 @@ func TestGrain_LeaveRoom(t *testing.T) {
 		}
 	})
 
-	t.Run("Room grain returns 2001 propagates inline", func(t *testing.T) {
+	t.Run("not-member response reconciles joined_rooms and succeeds", func(t *testing.T) {
 		h := newGrain(t)
+		_, _ = h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
 		h.rooms.defaultLeave = &roompb.LeaveResponse{
 			Error: &commonpb.ErrorDetail{Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member"},
 		}
@@ -435,7 +454,29 @@ func TestGrain_LeaveRoom(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		assertErrResponse(t, resp.GetError(), 2001, "ROOM_NOT_MEMBER")
+		if resp.GetError() != nil {
+			t.Fatalf("expected success, got error: %+v", resp.GetError())
+		}
+		if got := h.g.JoinedRooms(); len(got) != 0 {
+			t.Errorf("JoinedRooms: got %v, want []", got)
+		}
+	})
+
+	t.Run("other Room grain business errors are copied through", func(t *testing.T) {
+		h := newGrain(t)
+		_, _ = h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
+		h.rooms.defaultLeave = &roompb.LeaveResponse{
+			Error: &commonpb.ErrorDetail{Code: 2003, Status: "ROOM_NOT_FOUND", Message: "room not found"},
+		}
+
+		resp, err := h.g.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertErrResponse(t, resp.GetError(), 2003, "ROOM_NOT_FOUND")
+		if got := h.g.JoinedRooms(); !reflect.DeepEqual(got, []id.RoomID{mustRoomID(t, "general")}) {
+			t.Errorf("JoinedRooms: got %v, want [general]", got)
+		}
 	})
 
 	t.Run("transport error becomes 5001", func(t *testing.T) {

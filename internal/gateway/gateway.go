@@ -50,8 +50,8 @@ func (g *Gateway) RegisterRoutes() http.Handler {
 	mux.HandleFunc(wsPath, g.handleMethodNotAllowed(wsMethod))
 	mux.Handle(endpointRoomList, g.requireAuth(g.handleRoomList))
 	mux.Handle(endpointRoomJoined, g.requireAuth(g.handleRoomJoined))
-	mux.Handle(endpointRoomJoin, g.requireAuth(g.handleRoomJoin))
-	mux.Handle(endpointRoomLeave, g.requireAuth(g.handleRoomLeave))
+	mux.Handle(endpointRoomMembershipPut, g.requireAuth(g.handleRoomMembershipPut))
+	mux.Handle(endpointRoomMembershipDelete, g.requireAuth(g.handleRoomMembershipDelete))
 	mux.Handle(endpointRoomMessage, g.requireAuth(g.handleRoomSendMessage))
 	mux.HandleFunc("/", g.handleNotFound)
 	return mux

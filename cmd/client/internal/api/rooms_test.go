@@ -236,15 +236,15 @@ func TestLoadRoomsCmdEnvelopeWithoutStatus(t *testing.T) {
 
 func TestJoinRoomCmdSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/rooms/general/join" {
+		if r.Method != http.MethodPut || r.URL.Path != "/rooms/general/membership" {
 			http.Error(w, "wrong route", http.StatusNotFound)
 			return
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer "+testBearerToken {
 			t.Errorf("missing/incorrect bearer header: %q", got)
 		}
-		if got := r.Header.Get("Content-Type"); got != "application/json" {
-			t.Errorf("expected application/json content-type, got %q", got)
+		if r.Body != nil && r.ContentLength > 0 {
+			t.Errorf("expected empty membership request body, content length=%d", r.ContentLength)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(JoinSuccessResponse{Success: true})

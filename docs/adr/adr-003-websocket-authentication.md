@@ -54,8 +54,11 @@ closed on a deadline.**
   authentication, the connection is closed with an auth error. The timer is
   never cancelled; the post-auth behavior simply ignores a late timeout
   message, which keeps the middleware a pure scheduler with no shared state.
-- Any non-auth frame arriving pre-auth is rejected and the connection is
-  closed. There is no anonymous traffic on the socket, ever.
+- No other pre-auth frame makes progress. Malformed and unrecognized frames
+  are logged and ignored — the client may still authenticate before the
+  deadline — while an auth frame missing its token is rejected with an auth
+  error and the connection closed. Nothing is ever processed on behalf of an
+  unauthenticated peer.
 
 ## Consequences
 
@@ -76,9 +79,9 @@ closed on a deadline.**
 
 - **Resources are committed before identity is known.** Each upgrade spawns an
   actor and holds a socket for up to the deadline; an abusive peer can open
-  sockets and let them idle. Bounded per-connection by the 5-second deadline,
-  but unauthenticated connection *count* is not limited — rate limiting at
-  the edge is the eventual answer.
+  sockets and let them idle. Bounded per-connection by the auth deadline
+  (5 seconds by default), but unauthenticated connection *count* is not
+  limited — rate limiting at the edge is the eventual answer.
 - **A two-step handshake clients must implement correctly.** Connect-then-auth
   is more protocol than connect-with-header; the client must also handle the
   auth-error and timeout frames distinctly from transport failures.

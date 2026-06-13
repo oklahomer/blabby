@@ -87,9 +87,9 @@ type JoinedRoomsResponse struct {
 }
 
 // JoinSuccessResponse mirrors internal/gateway/handler_room.go
-// successResponse for the join endpoint's 200 outcome. The server
-// emits the same shape from leave and other room-mutation endpoints;
-// the type is named for the join site that consumes it today.
+// successResponse for the membership PUT's 200 outcome. The server emits
+// the same shape from DELETE and other room-mutation endpoints; the type is
+// named for the join site that consumes it today.
 type JoinSuccessResponse struct {
 	Success bool `json:"success"`
 }

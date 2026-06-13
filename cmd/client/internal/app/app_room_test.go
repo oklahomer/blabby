@@ -17,7 +17,7 @@ import (
 )
 
 // roomStubServer mounts the four endpoints the room-browsing flow
-// touches: /login, /ws, /rooms, /rooms/joined, POST /rooms/{id}/join.
+// touches: /login, /ws, /rooms, /rooms/joined, PUT /rooms/{id}/membership.
 // behavior is set through joinPolicy / joinedSequence so tests can
 // dial in 200 / 409 / 503 outcomes without rewriting the handler
 // fixtures every time.
@@ -29,7 +29,7 @@ type roomStubServer struct {
 	// happy-path test simulate "empty before join, populated after".
 	joinedSequence [][]string
 	// joinPolicy decides the join response per room ID. Defaults to
-	// 200 success for unmapped rooms. Set entries to 409, 404, 503
+	// 200 success for unmapped rooms. Set entries to 409, 404, or 503
 	// to surface the matching server outcomes.
 	joinPolicy map[string]int
 	// roomsStatus, when non-zero, overrides the /rooms response with
@@ -119,12 +119,12 @@ func (s *roomStubServer) handleRoomsJoined(w http.ResponseWriter, _ *http.Reques
 }
 
 func (s *roomStubServer) handleRoomCommand(w http.ResponseWriter, r *http.Request) {
-	// Expect /rooms/{id}/join — strip the prefix/suffix.
-	if !strings.HasPrefix(r.URL.Path, "/rooms/") || !strings.HasSuffix(r.URL.Path, "/join") {
+	// Expect PUT /rooms/{id}/membership — strip the prefix/suffix.
+	if r.Method != http.MethodPut || !strings.HasPrefix(r.URL.Path, "/rooms/") || !strings.HasSuffix(r.URL.Path, "/membership") {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	roomID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/rooms/"), "/join")
+	roomID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/rooms/"), "/membership")
 	status, ok := s.joinPolicy[roomID]
 	if !ok {
 		status = http.StatusOK
