@@ -153,19 +153,49 @@ func FromProtoErrorDetail(proto *commonpb.ErrorDetail) (ErrorDetail, error) {
 	}, nil
 }
 
-// Convenience constructors for common errors.
+// Convenience constructors for common errors. Each pairs a fixed ErrorCode with
+// NewErrorDetail so call sites supply only the client-facing message and cannot
+// mismatch a code with the wrong status.
 
-func ErrAuthInvalidToken(msg string) ErrorDetail  { return NewErrorDetail(CodeAuthInvalidToken, msg) }
-func ErrAuthExpiredToken(msg string) ErrorDetail  { return NewErrorDetail(CodeAuthExpiredToken, msg) }
-func ErrAuthMissingToken(msg string) ErrorDetail  { return NewErrorDetail(CodeAuthMissingToken, msg) }
-func ErrRoomNotMember(msg string) ErrorDetail     { return NewErrorDetail(CodeRoomNotMember, msg) }
+// ErrAuthInvalidToken builds an ErrorDetail for a token that failed validation.
+func ErrAuthInvalidToken(msg string) ErrorDetail { return NewErrorDetail(CodeAuthInvalidToken, msg) }
+
+// ErrAuthExpiredToken builds an ErrorDetail for an expired authentication token.
+func ErrAuthExpiredToken(msg string) ErrorDetail { return NewErrorDetail(CodeAuthExpiredToken, msg) }
+
+// ErrAuthMissingToken builds an ErrorDetail for a request carrying no auth token.
+func ErrAuthMissingToken(msg string) ErrorDetail { return NewErrorDetail(CodeAuthMissingToken, msg) }
+
+// ErrRoomNotMember builds an ErrorDetail for an action that requires a room
+// membership the caller does not hold.
+func ErrRoomNotMember(msg string) ErrorDetail { return NewErrorDetail(CodeRoomNotMember, msg) }
+
+// ErrRoomAlreadyMember builds an ErrorDetail for joining a room the caller has
+// already joined.
 func ErrRoomAlreadyMember(msg string) ErrorDetail { return NewErrorDetail(CodeRoomAlreadyMember, msg) }
-func ErrRoomNotFound(msg string) ErrorDetail      { return NewErrorDetail(CodeRoomNotFound, msg) }
+
+// ErrRoomNotFound builds an ErrorDetail for a reference to an unknown room.
+func ErrRoomNotFound(msg string) ErrorDetail { return NewErrorDetail(CodeRoomNotFound, msg) }
+
+// ErrRateLimitExceeded builds an ErrorDetail for a caller that exceeded its
+// rate limit.
 func ErrRateLimitExceeded(msg string) ErrorDetail { return NewErrorDetail(CodeRateLimitExceeded, msg) }
-func ErrInvalidRequest(msg string) ErrorDetail    { return NewErrorDetail(CodeInvalidRequest, msg) }
-func ErrMissingField(msg string) ErrorDetail      { return NewErrorDetail(CodeMissingField, msg) }
-func ErrPayloadTooLarge(msg string) ErrorDetail   { return NewErrorDetail(CodePayloadTooLarge, msg) }
-func ErrInternalError(msg string) ErrorDetail     { return NewErrorDetail(CodeInternalError, msg) }
+
+// ErrInvalidRequest builds an ErrorDetail for a malformed or semantically
+// invalid request.
+func ErrInvalidRequest(msg string) ErrorDetail { return NewErrorDetail(CodeInvalidRequest, msg) }
+
+// ErrMissingField builds an ErrorDetail for a request missing a required field.
+func ErrMissingField(msg string) ErrorDetail { return NewErrorDetail(CodeMissingField, msg) }
+
+// ErrPayloadTooLarge builds an ErrorDetail for a request body over the size limit.
+func ErrPayloadTooLarge(msg string) ErrorDetail { return NewErrorDetail(CodePayloadTooLarge, msg) }
+
+// ErrInternalError builds an ErrorDetail for an unexpected server-side failure.
+func ErrInternalError(msg string) ErrorDetail { return NewErrorDetail(CodeInternalError, msg) }
+
+// ErrServiceUnavailable builds an ErrorDetail for a temporarily unavailable
+// dependency.
 func ErrServiceUnavailable(msg string) ErrorDetail {
 	return NewErrorDetail(CodeServiceUnavailable, msg)
 }
