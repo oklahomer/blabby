@@ -1,0 +1,14 @@
+# Redocly lint configuration for the API specs in api/.
+#
+# We start from the recommended ruleset and turn off two rules that do not
+# apply to this project. Rules are disabled here (rather than grandfathered in
+# the ignore file) only when they reflect a deliberate project-wide stance.
+extends:
+  - recommended
+rules:
+  # blabby does not publish a LICENSE yet, so the OpenAPI info block declares
+  # none. Revisit info.license once the project adopts one.
+  info-license: off
+  # http://localhost:8080 is the real address of the local-only gateway, not a
+  # placeholder to swap out before shipping, so the example-host check is moot.
+  no-server-example.com: off

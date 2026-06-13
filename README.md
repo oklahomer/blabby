@@ -40,6 +40,24 @@ flowchart LR
 
 For a deeper view, see [`docs/overall.puml`](docs/overall.puml) (component diagram) and [`docs/userconnection_design_en.md`](docs/userconnection_design_en.md) (the connection lifecycle).
 
+## API Contracts
+
+The client-facing contracts are defined by [`api/openapi.yaml`](api/openapi.yaml) for HTTP commands and queries and [`api/asyncapi.yaml`](api/asyncapi.yaml) for the WebSocket event stream.
+
+To browse both contracts from one local landing page, run:
+
+```bash
+make docs-preview
+```
+
+Then open [http://localhost:8081](http://localhost:8081). The preview requires Node.js and `npx`; it uses the same Redocly and AsyncAPI CLI packages as `make spec-lint`, downloading them into the npm cache on first use. No generated documentation is written into the repository.
+
+Override the two local ports when needed:
+
+```bash
+DOCS_PORT=9081 ASYNCAPI_PORT=9082 make docs-preview
+```
+
 ## Quick Start
 
 **Requirements:** Go 1.26 or newer. Nothing else — no database or external services.
@@ -92,7 +110,8 @@ blabby/
 ├── cmd/
 │   ├── backend/        # Grain tier — cluster member hosting the User and Room grains
 │   ├── gateway/        # API tier — HTTP/WebSocket front end; joins the cluster as a client
-│   └── client/         # Terminal (TUI) chat client
+│   ├── client/         # Terminal (TUI) chat client
+│   └── docs-preview/   # Local browser preview for the API contracts
 ├── internal/
 │   ├── grain/
 │   │   ├── user/       # User grain — connection set + command routing
@@ -110,7 +129,7 @@ blabby/
 │       └── cluster/    # In-process test cluster bootstrap
 ├── proto/              # Protobuf service + message definitions
 ├── gen/                # Generated Go from proto (committed — clone and build)
-├── api/                # Reserved for API specs (OpenAPI/AsyncAPI); not yet populated
+├── api/                # API specs: openapi.yaml (HTTP) + asyncapi.yaml (WebSocket)
 └── docs/
     └── adr/            # Architecture Decision Records
 ```
@@ -142,14 +161,17 @@ buf generate && git diff --exit-code gen/
 Common tasks are wrapped in the `Makefile`:
 
 ```bash
-make build      # compile ./cmd/backend, ./cmd/gateway, and ./cmd/client
-make test       # go test ./...
-make lint       # golangci-lint
-make coverage   # test coverage report
-make generate   # buf generate
+make build         # compile ./cmd/backend, ./cmd/gateway, and ./cmd/client
+make test          # go test ./...
+make lint          # golangci-lint
+make spec-lint     # validate the OpenAPI and AsyncAPI contracts
+make docs-preview  # browse both API contracts locally
+make coverage      # test coverage report
+make generate      # buf generate
 ```
 
 ## Learn More
 
 - [`docs/adr/`](docs/adr/) — Architecture Decision Records explaining the major design choices and their trade-offs.
-- API details live in the Go docs: `go doc ./...`, or browse a package, e.g. `go doc ./internal/grain/room`.
+- [`api/openapi.yaml`](api/openapi.yaml) and [`api/asyncapi.yaml`](api/asyncapi.yaml) — machine-readable client contracts for HTTP and WebSocket traffic.
+- Implementation details live in the Go docs: `go doc ./...`, or browse a package, e.g. `go doc ./internal/grain/room`.

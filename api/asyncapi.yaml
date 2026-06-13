@@ -1,0 +1,357 @@
+asyncapi: 3.1.0
+info:
+  title: blabby WebSocket API
+  version: 0.1.0
+  description: |
+    The WebSocket message contract for blabby, a real-time chat service.
+
+    A client opens the socket with the `GET /ws` handshake documented in
+    `openapi.yaml`. Operations here are described from the **server's** point of
+    view: a `receive` operation is a frame the server receives from a client, and
+    a `send` operation is a frame the server sends to a client.
+
+    ## Handshake
+
+    Authentication is the first frame on the socket, not an HTTP header. The client
+    sends an `auth` frame; the server replies with `auth_ok` on success or
+    `auth_error` (then closes the connection) on failure. Authentication must
+    complete within the server's auth timeout (5 seconds by default); if it does
+    not, the server sends `auth_error` and closes.
+
+    ## Frame format
+
+    Every frame is a JSON text frame carrying a `type` discriminator. A frame the
+    server cannot decode — malformed JSON or an unrecognised `type` — is logged and
+    ignored, leaving the connection open so the client can retry with a well-formed
+    frame. Inbound frames are limited to 64 KiB; exceeding that limit closes the
+    connection.
+defaultContentType: application/json
+servers:
+  local:
+    host: localhost:8080
+    protocol: ws
+    description: Default local gateway WebSocket endpoint.
+channels:
+  chat:
+    address: /ws
+    title: Chat WebSocket
+    description: The single bidirectional channel carrying every chat frame.
+    messages:
+      auth:
+        $ref: '#/components/messages/Auth'
+      pong:
+        $ref: '#/components/messages/Pong'
+      authOk:
+        $ref: '#/components/messages/AuthOk'
+      authError:
+        $ref: '#/components/messages/AuthError'
+      message:
+        $ref: '#/components/messages/ChatMessage'
+      joined:
+        $ref: '#/components/messages/Joined'
+      left:
+        $ref: '#/components/messages/Left'
+      error:
+        $ref: '#/components/messages/Error'
+      ping:
+        $ref: '#/components/messages/Ping'
+operations:
+  receiveClientFrames:
+    action: receive
+    channel:
+      $ref: '#/channels/chat'
+    summary: Frames the server receives from a client.
+    description: |
+      The client sends `auth` as its first frame to authenticate. After
+      authentication it sends `pong` in reply to a server `ping`. Any other or
+      malformed frame is logged and ignored without closing the connection.
+    messages:
+      - $ref: '#/channels/chat/messages/auth'
+      - $ref: '#/channels/chat/messages/pong'
+  sendServerFrames:
+    action: send
+    channel:
+      $ref: '#/channels/chat'
+    summary: Frames the server sends to a client.
+    description: |
+      The server replies to the handshake with `auth_ok` or `auth_error`, then
+      streams room activity as `message`, `joined`, and `left` frames. `error`
+      and `ping` are part of the contract but are not produced by the shipped
+      server today — see each message's description.
+    messages:
+      - $ref: '#/channels/chat/messages/authOk'
+      - $ref: '#/channels/chat/messages/authError'
+      - $ref: '#/channels/chat/messages/message'
+      - $ref: '#/channels/chat/messages/joined'
+      - $ref: '#/channels/chat/messages/left'
+      - $ref: '#/channels/chat/messages/error'
+      - $ref: '#/channels/chat/messages/ping'
+components:
+  messages:
+    Auth:
+      name: auth
+      title: Authenticate
+      summary: The client's first frame, carrying its bearer token.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AuthPayload'
+      examples:
+        - name: authFrame
+          payload:
+            type: auth
+            token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+    Pong:
+      name: pong
+      title: Pong
+      summary: The client's reply to a server `ping`.
+      description: |
+        Acknowledges a `ping`. The shipped server does not enable the heartbeat by
+        default, so a `pong` is a no-op unless the heartbeat has been turned on;
+        sending one on an idle connection is harmless.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PongPayload'
+    AuthOk:
+      name: auth_ok
+      title: Authentication succeeded
+      summary: Confirms authentication; the connection is now live.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AuthOkPayload'
+    AuthError:
+      name: auth_error
+      title: Authentication failed
+      summary: Reports an authentication failure; the server then closes the connection.
+      description: |
+        Carries the same `code`/`status` taxonomy as the HTTP error envelope —
+        typically `AUTH_INVALID_TOKEN`, `AUTH_EXPIRED_TOKEN`, `AUTH_MISSING_TOKEN`
+        (on auth timeout), or `INTERNAL_ERROR`, or a code/status pair supplied by
+        the backend on a registration failure.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AuthErrorPayload'
+      examples:
+        - name: expiredToken
+          payload:
+            type: auth_error
+            code: 1002
+            status: AUTH_EXPIRED_TOKEN
+            message: token has expired
+    ChatMessage:
+      name: message
+      title: Room message
+      summary: A chat message fanned out to the room's members.
+      description: |
+        Delivered to every member of the room, including the sender's own
+        connection. `timestamp` is the server send time in Unix milliseconds; a
+        zero time is encoded as `0`.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ChatMessagePayload'
+      examples:
+        - name: generalMessage
+          payload:
+            type: message
+            room_id: general
+            sender:
+              id: alice
+              name: Alice
+            text: hello, world
+            timestamp: 1718280000000
+    Joined:
+      name: joined
+      title: Member joined
+      summary: Announces that a user joined a room.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/JoinedPayload'
+      examples:
+        - name: aliceJoined
+          payload:
+            type: joined
+            room_id: general
+            user:
+              id: alice
+              name: Alice
+    Left:
+      name: left
+      title: Member left
+      summary: Announces that a user left a room.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/LeftPayload'
+      examples:
+        - name: aliceLeft
+          payload:
+            type: left
+            room_id: general
+            user:
+              id: alice
+              name: Alice
+    Error:
+      name: error
+      title: Asynchronous error
+      summary: A generic, non-auth error frame.
+      description: |
+        Reserved for asynchronous errors that are not part of the auth handshake.
+        It pins the wire shape for such errors; no behavior in the shipped server
+        constructs one yet.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ErrorPayload'
+    Ping:
+      name: ping
+      title: Ping
+      summary: A server heartbeat probe.
+      description: |
+        Part of the heartbeat protocol. The shipped server does not enable the
+        heartbeat by default, so it does not send `ping` frames unless the
+        heartbeat has been turned on.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PingPayload'
+  schemas:
+    AuthPayload:
+      type: object
+      required:
+        - type
+        - token
+      properties:
+        type:
+          type: string
+          const: auth
+        token:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          description: The bearer token to authenticate the connection. Must be non-blank.
+    PongPayload:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: pong
+    AuthOkPayload:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: auth_ok
+    PingPayload:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: ping
+    ChatMessagePayload:
+      type: object
+      required:
+        - type
+        - room_id
+        - sender
+        - text
+        - timestamp
+      properties:
+        type:
+          type: string
+          const: message
+        room_id:
+          type: string
+          description: The room the message belongs to.
+        sender:
+          $ref: '#/components/schemas/UserRef'
+        text:
+          type: string
+          description: The message body.
+        timestamp:
+          type: integer
+          format: int64
+          description: Server send time in Unix milliseconds; `0` for a zero time.
+    JoinedPayload:
+      type: object
+      required:
+        - type
+        - room_id
+        - user
+      properties:
+        type:
+          type: string
+          const: joined
+        room_id:
+          type: string
+          description: The room the membership change applies to.
+        user:
+          $ref: '#/components/schemas/UserRef'
+    LeftPayload:
+      type: object
+      required:
+        - type
+        - room_id
+        - user
+      properties:
+        type:
+          type: string
+          const: left
+        room_id:
+          type: string
+          description: The room the membership change applies to.
+        user:
+          $ref: '#/components/schemas/UserRef'
+    AuthErrorPayload:
+      type: object
+      required:
+        - type
+        - code
+        - status
+        - message
+      properties:
+        type:
+          type: string
+          const: auth_error
+        code:
+          type: integer
+          description: The numeric error code paired with `status`, from the shared taxonomy.
+        status:
+          type: string
+          description: The canonical status string from the shared error taxonomy.
+        message:
+          type: string
+          description: A human-readable, client-safe explanation. Never leaks internal detail.
+    ErrorPayload:
+      type: object
+      required:
+        - type
+        - code
+        - status
+        - message
+      properties:
+        type:
+          type: string
+          const: error
+        code:
+          type: integer
+          description: The numeric error code paired with `status`, from the shared taxonomy.
+        status:
+          type: string
+          description: The canonical status string from the shared error taxonomy.
+        message:
+          type: string
+          description: A human-readable, client-safe explanation. Never leaks internal detail.
+    UserRef:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          description: The user's identifier.
+        name:
+          type: string
+          description: The user's display name.
