@@ -265,8 +265,14 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 		)
 		return &userpb.JoinRoomResponse{Error: errDetail(codeInternalError, statusInternalError, "failed to reach room")}, nil
 	}
-	if roomResp.GetError() != nil {
-		return &userpb.JoinRoomResponse{Error: roomResp.GetError()}, nil
+	if roomErr := roomResp.GetError(); roomErr != nil {
+		// Room keeps its action-oriented contract and reports an existing
+		// membership as ROOM_ALREADY_MEMBER. For the HTTP PUT resource contract,
+		// that outcome confirms the desired state; recording it here also repairs
+		// this User grain after an earlier Room response was lost.
+		if roomErr.GetCode() != codeRoomAlreadyMember || roomErr.GetStatus() != statusRoomAlreadyMember {
+			return &userpb.JoinRoomResponse{Error: roomErr}, nil
+		}
 	}
 
 	g.state.joinRoom(roomID)
@@ -305,8 +311,13 @@ func (g *Grain) LeaveRoom(req *userpb.LeaveRoomRequest, ctx cluster.GrainContext
 		)
 		return &userpb.LeaveRoomResponse{Error: errDetail(codeInternalError, statusInternalError, "failed to reach room")}, nil
 	}
-	if roomResp.GetError() != nil {
-		return &userpb.LeaveRoomResponse{Error: roomResp.GetError()}, nil
+	if roomErr := roomResp.GetError(); roomErr != nil {
+		// DELETE has the symmetric rule: ROOM_NOT_MEMBER confirms absence. Apply
+		// the local removal even when Room made no change so a retry reconciles
+		// the User grain's joined-room projection.
+		if roomErr.GetCode() != codeRoomNotMember || roomErr.GetStatus() != statusRoomNotMember {
+			return &userpb.LeaveRoomResponse{Error: roomErr}, nil
+		}
 	}
 
 	g.state.leaveRoom(roomID)

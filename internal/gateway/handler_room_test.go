@@ -59,10 +59,10 @@ func servePath(t *testing.T, g *Gateway, method, pattern, path, body, contentTyp
 	t.Helper()
 	mux := http.NewServeMux()
 	switch pattern {
-	case "POST /rooms/{id}/join":
-		mux.HandleFunc(pattern, g.handleRoomJoin)
-	case "POST /rooms/{id}/leave":
-		mux.HandleFunc(pattern, g.handleRoomLeave)
+	case "PUT /rooms/{id}/membership":
+		mux.HandleFunc(pattern, g.handleRoomMembershipPut)
+	case "DELETE /rooms/{id}/membership":
+		mux.HandleFunc(pattern, g.handleRoomMembershipDelete)
 	case "POST /rooms/{id}/messages":
 		mux.HandleFunc(pattern, g.handleRoomSendMessage)
 	default:
@@ -103,9 +103,9 @@ func captureSlog(t *testing.T, fn func()) []byte {
 	return buf.Bytes()
 }
 
-// ---- handleRoomJoin ----------------------------------------------------
+// ---- handleRoomMembershipPut ------------------------------------------
 
-func TestHandleRoomJoin(t *testing.T) {
+func TestHandleRoomMembershipPut(t *testing.T) {
 	const okUser = "alice"
 	const okRoom = "general"
 
@@ -121,7 +121,7 @@ func TestHandleRoomJoin(t *testing.T) {
 	}{
 		{
 			name:       "happy path returns 200 success",
-			path:       "/rooms/" + okRoom + "/join",
+			path:       "/rooms/" + okRoom + "/membership",
 			userID:     okUser,
 			stubResp:   &userpb.JoinRoomResponse{},
 			wantStatus: http.StatusOK,
@@ -133,7 +133,7 @@ func TestHandleRoomJoin(t *testing.T) {
 		},
 		{
 			name:   "business error 2001 → 403",
-			path:   "/rooms/" + okRoom + "/join",
+			path:   "/rooms/" + okRoom + "/membership",
 			userID: okUser,
 			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
 				Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member",
@@ -143,7 +143,7 @@ func TestHandleRoomJoin(t *testing.T) {
 		},
 		{
 			name:   "business error 2002 → 409",
-			path:   "/rooms/" + okRoom + "/join",
+			path:   "/rooms/" + okRoom + "/membership",
 			userID: okUser,
 			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
 				Code: 2002, Status: "ROOM_ALREADY_MEMBER", Message: "already member",
@@ -153,7 +153,7 @@ func TestHandleRoomJoin(t *testing.T) {
 		},
 		{
 			name:   "business error 2003 → 404",
-			path:   "/rooms/" + okRoom + "/join",
+			path:   "/rooms/" + okRoom + "/membership",
 			userID: okUser,
 			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
 				Code: 2003, Status: "ROOM_NOT_FOUND", Message: "no such room",
@@ -163,7 +163,7 @@ func TestHandleRoomJoin(t *testing.T) {
 		},
 		{
 			name:   "business error 4001 → 400",
-			path:   "/rooms/" + okRoom + "/join",
+			path:   "/rooms/" + okRoom + "/membership",
 			userID: okUser,
 			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
 				Code: 4001, Status: "INVALID_REQUEST", Message: "bad",
@@ -173,7 +173,7 @@ func TestHandleRoomJoin(t *testing.T) {
 		},
 		{
 			name:       "transport error → 503 + 5002",
-			path:       "/rooms/" + okRoom + "/join",
+			path:       "/rooms/" + okRoom + "/membership",
 			userID:     okUser,
 			stubErr:    errors.New("cluster down"),
 			wantStatus: http.StatusServiceUnavailable,
@@ -181,7 +181,7 @@ func TestHandleRoomJoin(t *testing.T) {
 		},
 		{
 			name:       "missing user_id in context → 500 + 5001",
-			path:       "/rooms/" + okRoom + "/join",
+			path:       "/rooms/" + okRoom + "/membership",
 			userID:     "",
 			stubResp:   &userpb.JoinRoomResponse{},
 			wantStatus: http.StatusInternalServerError,
@@ -194,7 +194,7 @@ func TestHandleRoomJoin(t *testing.T) {
 		},
 		{
 			name:       "URL-encoded space room_id → 400 + 4001",
-			path:       "/rooms/%20/join",
+			path:       "/rooms/%20/membership",
 			userID:     okUser,
 			stubResp:   &userpb.JoinRoomResponse{},
 			wantStatus: http.StatusBadRequest,
@@ -207,7 +207,7 @@ func TestHandleRoomJoin(t *testing.T) {
 		},
 		{
 			name:       "URL-encoded ideographic space room_id → 400 + 4001",
-			path:       "/rooms/%E3%80%80/join",
+			path:       "/rooms/%E3%80%80/membership",
 			userID:     okUser,
 			stubResp:   &userpb.JoinRoomResponse{},
 			wantStatus: http.StatusBadRequest,
@@ -215,7 +215,7 @@ func TestHandleRoomJoin(t *testing.T) {
 		},
 		{
 			name:       "overlong room_id → 400 + 4001",
-			path:       "/rooms/" + strings.Repeat("a", id.MaxIdentifierBytes+1) + "/join",
+			path:       "/rooms/" + strings.Repeat("a", id.MaxIdentifierBytes+1) + "/membership",
 			userID:     okUser,
 			stubResp:   &userpb.JoinRoomResponse{},
 			wantStatus: http.StatusBadRequest,
@@ -228,7 +228,7 @@ func TestHandleRoomJoin(t *testing.T) {
 			fake := &fakeUserGrainCaller{joinResp: tt.stubResp, joinErr: tt.stubErr}
 			g := gatewayWithFake(fake)
 
-			rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/join", tt.path, "", "", tt.userID)
+			rec := servePath(t, g, http.MethodPut, "PUT /rooms/{id}/membership", tt.path, "", "", tt.userID)
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d (body=%s)", rec.Code, tt.wantStatus, rec.Body.String())
@@ -252,9 +252,9 @@ func TestHandleRoomJoin(t *testing.T) {
 	}
 }
 
-// ---- handleRoomLeave ---------------------------------------------------
+// ---- handleRoomMembershipDelete ---------------------------------------
 
-func TestHandleRoomLeave(t *testing.T) {
+func TestHandleRoomMembershipDelete(t *testing.T) {
 	const okUser = "alice"
 	const okRoom = "general"
 
@@ -290,8 +290,8 @@ func TestHandleRoomLeave(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := &fakeUserGrainCaller{leaveResp: tt.stubResp, leaveErr: tt.stubErr}
 			g := gatewayWithFake(fake)
-			rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/leave",
-				"/rooms/"+okRoom+"/leave", "", "", okUser)
+			rec := servePath(t, g, http.MethodDelete, "DELETE /rooms/{id}/membership",
+				"/rooms/"+okRoom+"/membership", "", "", okUser)
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
@@ -558,8 +558,9 @@ func TestRoomMux_EmptyIDSegmentNeverReachesHandler(t *testing.T) {
 	g := gatewayWithFake(fake)
 	handler := g.RegisterRoutes()
 
-	for _, path := range []string{"/rooms//join", "/rooms//leave"} {
-		req := httptest.NewRequest(http.MethodPost, path, nil)
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		path := "/rooms//membership"
+		req := httptest.NewRequest(method, path, nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -567,10 +568,10 @@ func TestRoomMux_EmptyIDSegmentNeverReachesHandler(t *testing.T) {
 		// The forbidden case is a 200, which would mean the handler
 		// dispatched with an empty {id} capture.
 		if rec.Code != http.StatusTemporaryRedirect && rec.Code != http.StatusMovedPermanently && rec.Code != http.StatusNotFound {
-			t.Errorf("path %q: unexpected status %d (body=%s)", path, rec.Code, rec.Body.String())
+			t.Errorf("%s %q: unexpected status %d (body=%s)", method, path, rec.Code, rec.Body.String())
 		}
 		if fake.calls != 0 {
-			t.Errorf("path %q: handler invoked despite empty {id} segment (calls=%d)", path, fake.calls)
+			t.Errorf("%s %q: handler invoked despite empty {id} segment (calls=%d)", method, path, fake.calls)
 		}
 	}
 }

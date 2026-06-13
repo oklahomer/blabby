@@ -127,17 +127,15 @@ func LoadRoomsCmd(client *http.Client, server, token string, timeout time.Durati
 	}
 }
 
-// JoinRoomCmd performs POST {server}/rooms/{roomID}/join with the
+// JoinRoomCmd performs PUT {server}/rooms/{roomID}/membership with the
 // bearer header and emits exactly one outbound tea.Msg describing the
 // outcome. roomName is echoed back inside RoomJoined so the modal can
 // render the friendly name without re-deriving it from the server's
-// catalogue. The body is the empty JSON object `{}` because the server
-// requires application/json content-type on POST but does not read the
-// body.
+// catalogue. The membership resource needs no request body.
 func JoinRoomCmd(client *http.Client, server, token, roomID, roomName string, timeout time.Duration) tea.Cmd {
 	return func() tea.Msg {
-		path := "/rooms/" + url.PathEscape(roomID) + "/join"
-		raw, httpStatus, err := doRoomRequest(client, http.MethodPost, server, path, token, []byte("{}"), timeout)
+		path := "/rooms/" + url.PathEscape(roomID) + "/membership"
+		raw, httpStatus, err := doRoomRequest(client, http.MethodPut, server, path, token, nil, timeout)
 		if err != nil {
 			return RoomJoinFailed{RoomID: roomID, Message: err.Error()}
 		}

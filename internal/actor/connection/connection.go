@@ -3,7 +3,7 @@
 // 1:1 with the WebSocket connection it serves.
 //
 // Auth happens after WebSocket upgrade as the first text frame, not via
-// HTTP headers (see ADR-004). On successful auth the actor registers with
+// HTTP headers (see ADR-003). On successful auth the actor registers with
 // the user's grain so that Room-grain fan-outs reach the WebSocket. On
 // disconnect the actor stops; the User grain learns via a death-watch and
 // evicts the entry on its own (ADR-012). There is no Deregister RPC.

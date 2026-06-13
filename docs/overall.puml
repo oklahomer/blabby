@@ -50,15 +50,15 @@ else JWT invalid or expired
 end
 
 == Join room ==
-client -> restApi : POST /rooms/{roomId}/join + Bearer JWT
+client -> restApi : PUT /rooms/{roomId}/membership + Bearer JWT
 restApi -> restApi : Verify JWT and build command
 restApi -> userGrain : JoinRoom(room_id)
 userGrain -> userGrain : Validate user-level rules
 userGrain -> roomGrain : Join(userId, roomId)
 roomGrain -> roomGrain : Validate room membership rules
 roomGrain -> roomGrain : Persist membership event/state
-roomGrain --> userGrain : JoinResponse
-userGrain -> userGrain : Add roomId to joined rooms
+roomGrain --> userGrain : JoinResponse / ROOM_ALREADY_MEMBER
+userGrain -> userGrain : Treat existing membership as success\nand add roomId to joined rooms
 userGrain --> restApi : JoinRoomResponse
 restApi --> client : 200 OK
 

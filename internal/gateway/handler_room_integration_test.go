@@ -99,9 +99,12 @@ func TestGateway_RoomEndpoints_Integration(t *testing.T) {
 
 	authHeader := "Bearer " + bearer
 
-	// 1. Join "general"
-	if rec := doPOST(t, srv.URL+"/rooms/"+roomID+"/join", "", "", authHeader); rec.status != http.StatusOK {
+	// 1. Ensure membership in "general" twice; both requests are successful.
+	if rec := doMembership(t, http.MethodPut, srv.URL+"/rooms/"+roomID+"/membership", authHeader); rec.status != http.StatusOK {
 		t.Fatalf("join: status = %d (body=%s)", rec.status, rec.body)
+	}
+	if rec := doMembership(t, http.MethodPut, srv.URL+"/rooms/"+roomID+"/membership", authHeader); rec.status != http.StatusOK {
+		t.Fatalf("repeated join: status = %d (body=%s)", rec.status, rec.body)
 	}
 
 	// 2. Confirm via /rooms/joined that membership landed.
@@ -140,9 +143,12 @@ func TestGateway_RoomEndpoints_Integration(t *testing.T) {
 		t.Errorf("stub Room.PostMessage calls: got %d, want 1", got)
 	}
 
-	// 4. Leave the room and confirm membership is empty afterwards.
-	if rec := doPOST(t, srv.URL+"/rooms/"+roomID+"/leave", "", "", authHeader); rec.status != http.StatusOK {
+	// 4. Ensure membership is absent twice and confirm the list stays empty.
+	if rec := doMembership(t, http.MethodDelete, srv.URL+"/rooms/"+roomID+"/membership", authHeader); rec.status != http.StatusOK {
 		t.Fatalf("leave: status = %d (body=%s)", rec.status, rec.body)
+	}
+	if rec := doMembership(t, http.MethodDelete, srv.URL+"/rooms/"+roomID+"/membership", authHeader); rec.status != http.StatusOK {
+		t.Fatalf("repeated leave: status = %d (body=%s)", rec.status, rec.body)
 	}
 	rec = doGET(t, srv.URL+"/rooms/joined", authHeader)
 	if rec.status != http.StatusOK {
@@ -192,6 +198,16 @@ func doPOST(t *testing.T, url, body, contentType, authz string) httpRec {
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
+	}
+	req.Header.Set("Authorization", authz)
+	return doRequest(t, req)
+}
+
+func doMembership(t *testing.T, method, url, authz string) httpRec {
+	t.Helper()
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		t.Fatalf("build %s %s: %v", method, url, err)
 	}
 	req.Header.Set("Authorization", authz)
 	return doRequest(t, req)
