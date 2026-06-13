@@ -1,4 +1,7 @@
-.PHONY: generate build test test-race test-cluster lint coverage docker up setup-hooks
+.PHONY: generate build test test-race test-cluster lint spec-lint docs-preview coverage docker up setup-hooks
+
+DOCS_PORT ?= 8081
+ASYNCAPI_PORT ?= 8082
 
 generate:
 	buf generate
@@ -18,6 +21,25 @@ test-cluster:
 
 lint:
 	golangci-lint run
+
+# Validate the API specs against their OpenAPI / AsyncAPI schema versions.
+# CLIs are fetched on demand via npx, so no Node dependency is committed to
+# the repo; running this target requires Node and npx on PATH. Redocly reads
+# redocly.yaml + .redocly.lint-ignore.yaml automatically.
+#
+# The AsyncAPI CLI forces NODE_ENV=production internally, which makes its
+# bundled node-config print two strict-mode warnings unrelated to the spec.
+# SUPPRESS_NO_CONFIG_WARNING silences the no-config-dir notice; the grep drops
+# the two residual node-config lines while preserving the validator's own
+# output and exit code.
+spec-lint:
+	npx --yes @redocly/cli@2 lint api/openapi.yaml
+	@out=$$(SUPPRESS_NO_CONFIG_WARNING=true npx --yes @asyncapi/cli@6 validate api/asyncapi.yaml 2>&1); status=$$?; \
+		printf '%s\n' "$$out" | grep -vE "WARNING: NODE_ENV value of .* did not match|node-config/wiki/Strict-Mode"; \
+		exit $$status
+
+docs-preview:
+	go run ./cmd/docs-preview --port $(DOCS_PORT) --asyncapi-port $(ASYNCAPI_PORT)
 
 coverage:
 	go test -p=1 -timeout=2m -coverpkg=./cmd/...,./internal/... -coverprofile=coverage.out ./...

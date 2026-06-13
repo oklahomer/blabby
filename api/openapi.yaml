@@ -1,0 +1,501 @@
+openapi: 3.1.0
+info:
+  title: blabby HTTP API
+  version: 0.1.0
+  description: |
+    The HTTP API for blabby, a real-time chat service.
+
+    Clients use HTTP for commands and queries (login, room discovery, membership,
+    and sending messages) and a WebSocket for the live event stream. The WebSocket
+    message contract is documented separately in `asyncapi.yaml`.
+
+    ## Authentication
+
+    Every endpoint requires an `Authorization: Bearer <jwt>` header **except**:
+
+    - `POST /login`, which mints the token and is therefore public, and
+    - `GET /ws`, where authentication is the first WebSocket frame after the
+      upgrade rather than an HTTP header.
+
+    A missing or malformed bearer header is rejected with `401 AUTH_MISSING_TOKEN`,
+    an expired token with `401 AUTH_EXPIRED_TOKEN`, and any other invalid token
+    with `401 AUTH_INVALID_TOKEN`.
+
+    ## Error envelope
+
+    Every application-generated JSON error response shares one envelope: a top-level
+    `error` object holding a numeric `code`, a canonical `status` string, and a
+    human-readable, client-safe `message`. A failed WebSocket upgrade is emitted by
+    the WebSocket library as plain text instead. The `status` enum on `ErrorDetail`
+    lists the full error taxonomy; each operation's `responses` section is the
+    authoritative list of what that operation can actually return.
+servers:
+  - url: http://localhost:8080
+    description: Default local gateway address.
+security:
+  - bearerAuth: []
+tags:
+  - name: Authentication
+    description: Token issuance.
+  - name: WebSocket
+    description: The live event-stream upgrade handshake.
+  - name: Rooms
+    description: Room discovery, membership, and messaging.
+paths:
+  /login:
+    post:
+      operationId: login
+      tags:
+        - Authentication
+      summary: Exchange credentials for a bearer token.
+      description: |
+        Authenticates a username/password pair and returns a JWT bearer token to
+        be sent on every other endpoint. This endpoint is public.
+
+        All authentication failures return the same `401 AUTH_INVALID_TOKEN`
+        response regardless of whether the username or the password was wrong, so
+        the response cannot be used to enumerate valid usernames.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: alice
+              password: alice123
+      responses:
+        '200':
+          description: Authentication succeeded; the body carries the bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        '400':
+          description: |
+            The request body was malformed, empty, carried trailing data, or the
+            username/password exceeded the size limits (username 64 bytes,
+            password 256 bytes, body 1 MB).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4001
+                  status: INVALID_REQUEST
+                  message: username and password are required
+        '401':
+          description: Invalid credentials. Returned for every authentication failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 1001
+                  status: AUTH_INVALID_TOKEN
+                  message: invalid credentials
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /ws:
+    get:
+      operationId: connectWebSocket
+      tags:
+        - WebSocket
+      summary: Upgrade the connection to the chat WebSocket.
+      description: |
+        Performs the WebSocket upgrade handshake. This endpoint is **not** guarded
+        by the bearer middleware: after the upgrade the client authenticates by
+        sending an `auth` frame as its first message.
+
+        The frame-level message contract — inbound `auth`/`pong` and outbound
+        `auth_ok`/`auth_error`/`message`/`joined`/`left`/`error`/`ping` — is
+        documented in `asyncapi.yaml`.
+      security: []
+      responses:
+        '101':
+          description: |
+            Switching Protocols. The connection is now a WebSocket; all further
+            communication follows the frame contract in `asyncapi.yaml`.
+        '400':
+          description: The request was not a valid WebSocket upgrade handshake.
+          content:
+            text/plain:
+              schema:
+                type: string
+  /rooms:
+    get:
+      operationId: listRooms
+      tags:
+        - Rooms
+      summary: List the available rooms.
+      description: Returns the catalogue of rooms a client can join.
+      responses:
+        '200':
+          description: The room catalogue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomListResponse'
+              example:
+                rooms:
+                  - id: general
+                    name: General
+                  - id: random
+                    name: Random
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /rooms/joined:
+    get:
+      operationId: listJoinedRooms
+      tags:
+        - Rooms
+      summary: List the rooms the caller has joined.
+      description: |
+        Returns the identifiers of the rooms the authenticated user is currently a
+        member of. An empty result is the JSON array `[]`, never `null`.
+      responses:
+        '200':
+          description: The caller's joined-room identifiers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JoinedRoomsResponse'
+              example:
+                room_ids:
+                  - general
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /rooms/{id}/membership:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    put:
+      operationId: ensureRoomMembership
+      tags:
+        - Rooms
+      summary: Ensure the caller is a member of the room.
+      description: |
+        Idempotently makes the authenticated user a member of the room. Membership
+        is modelled as a REST resource, so this operation is safe to repeat: if the
+        caller is already a member the call still returns `200`, never a conflict.
+      responses:
+        '200':
+          description: The caller is a member of the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              example:
+                success: true
+        '400':
+          $ref: '#/components/responses/InvalidRoomId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: removeRoomMembership
+      tags:
+        - Rooms
+      summary: Ensure the caller is not a member of the room.
+      description: |
+        Idempotently removes the authenticated user from the room. Like the PUT,
+        this is safe to repeat: if the caller is not a member the call still
+        returns `200`, never an error.
+      responses:
+        '200':
+          description: The caller is not a member of the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              example:
+                success: true
+        '400':
+          $ref: '#/components/responses/InvalidRoomId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /rooms/{id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    post:
+      operationId: sendRoomMessage
+      tags:
+        - Rooms
+      summary: Send a message to a room.
+      description: |
+        Posts a chat message to the room. The caller must already be a member.
+        The message is fanned out to every member's WebSocket as a `message`
+        frame (see `asyncapi.yaml`), including the sender's own connection.
+
+        The request must use `Content-Type: application/json` (charset variants are
+        accepted); the body is capped at 8 KiB and `text` at 4 KiB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+            example:
+              text: hello, world
+      responses:
+        '200':
+          description: The message was accepted for fan-out.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMessageSuccessResponse'
+              example:
+                success: true
+                timestamp: 1718280000000
+        '400':
+          description: |
+            The room identifier was invalid, the `Content-Type` was not JSON, or
+            the body was malformed, empty, or carried trailing data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4001
+                  status: INVALID_REQUEST
+                  message: text is required
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The caller is not a member of the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 2001
+                  status: ROOM_NOT_MEMBER
+                  message: not a member of this room
+        '413':
+          description: The request body exceeded the 8 KiB limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4003
+                  status: PAYLOAD_TOO_LARGE
+                  message: request body exceeds maximum size
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "A JWT issued by `POST /login`, sent as `Authorization: Bearer <jwt>`."
+  parameters:
+    RoomId:
+      name: id
+      in: path
+      required: true
+      description: |
+        Room identifier. The value is trimmed of surrounding whitespace and then
+        required to be non-empty, at most 256 bytes, and free of ASCII control
+        characters, Unicode whitespace, and `/`. A value that violates these rules
+        is rejected with `400 INVALID_REQUEST`.
+      schema:
+        type: string
+        x-max-utf8-bytes: 256
+      example: general
+  schemas:
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          x-max-utf8-bytes: 64
+          description: The account username. At most 64 bytes.
+        password:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          x-max-utf8-bytes: 256
+          description: The account password. At most 256 bytes.
+    LoginResponse:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          description: The JWT bearer token to send on every authenticated endpoint.
+    RoomListResponse:
+      type: object
+      required:
+        - rooms
+      properties:
+        rooms:
+          type: array
+          description: The available rooms.
+          items:
+            $ref: '#/components/schemas/RoomDescriptor'
+    RoomDescriptor:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          description: The room identifier used in path parameters and event frames.
+        name:
+          type: string
+          description: The room's human-readable display name.
+    JoinedRoomsResponse:
+      type: object
+      required:
+        - room_ids
+      properties:
+        room_ids:
+          type: array
+          description: Identifiers of the rooms the caller has joined; `[]` when none.
+          items:
+            type: string
+    SendMessageRequest:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          x-max-utf8-bytes: 4096
+          description: The message body. Required, non-blank, at most 4 KiB.
+    SuccessResponse:
+      type: object
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+          description: Always `true` on a 200 response.
+    SendMessageSuccessResponse:
+      type: object
+      required:
+        - success
+        - timestamp
+      properties:
+        success:
+          type: boolean
+          description: Always `true` on a 200 response.
+        timestamp:
+          type: integer
+          format: int64
+          description: The server-assigned send time, in Unix milliseconds.
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+    ErrorDetail:
+      type: object
+      required:
+        - code
+        - status
+        - message
+      properties:
+        code:
+          type: integer
+          description: The numeric error code paired with `status`.
+        status:
+          type: string
+          description: |
+            The canonical status string. This enum is the complete error
+            taxonomy, not the subset any single endpoint returns; consult each
+            operation's `responses` for the codes it can actually produce.
+          enum:
+            - AUTH_INVALID_TOKEN
+            - AUTH_EXPIRED_TOKEN
+            - AUTH_MISSING_TOKEN
+            - ROOM_NOT_MEMBER
+            - ROOM_ALREADY_MEMBER
+            - ROOM_NOT_FOUND
+            - RATE_LIMIT_EXCEEDED
+            - INVALID_REQUEST
+            - MISSING_FIELD
+            - PAYLOAD_TOO_LARGE
+            - INTERNAL_ERROR
+            - SERVICE_UNAVAILABLE
+        message:
+          type: string
+          description: A human-readable, client-safe explanation. Never leaks internal detail.
+  responses:
+    Unauthorized:
+      description: |
+        The bearer token is missing, malformed, expired, or otherwise invalid
+        (`AUTH_MISSING_TOKEN`, `AUTH_EXPIRED_TOKEN`, or `AUTH_INVALID_TOKEN`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: 1003
+              status: AUTH_MISSING_TOKEN
+              message: missing authorization header
+    InvalidRoomId:
+      description: The room identifier in the path was missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: 4001
+              status: INVALID_REQUEST
+              message: room_id is required
+    ServiceUnavailable:
+      description: A backend dependency was temporarily unreachable. The request may be retried.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: 5002
+              status: SERVICE_UNAVAILABLE
+              message: failed to reach user grain
+    InternalError:
+      description: An unexpected server-side failure.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: 5001
+              status: INTERNAL_ERROR
+              message: authentication unavailable

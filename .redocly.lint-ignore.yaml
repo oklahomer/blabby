@@ -1,0 +1,10 @@
+# This file instructs Redocly's linter to ignore the rules contained for specific parts of your API.
+# See https://redocly.com/docs/cli/ for more information.
+#
+# GET /ws is the WebSocket upgrade handshake: it answers 101 Switching Protocols
+# on success and never returns a 2xx, so the generic operation-2xx-response rule
+# cannot apply. It is grandfathered here for this one operation only; the rule
+# stays active for every other HTTP endpoint.
+api/openapi.yaml:
+  operation-2xx-response:
+    - '#/paths/~1ws/get/responses'
