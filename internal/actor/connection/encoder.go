@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/oklahomer/blabby/internal/errcode"
 )
 
 type encodedFrame struct {
@@ -18,7 +20,7 @@ func encodeOutboundMessage(msg any) (encodedFrame, bool) {
 	case *AuthSucceeded:
 		return encodedFrame{messageType: websocket.TextMessage, data: encodeAuthOk(), eventKind: "auth_ok"}, true
 	case *AuthFailed:
-		return encodedFrame{messageType: websocket.TextMessage, data: encodeAuthError(m.Code, m.Status, m.Message), eventKind: "auth_error"}, true
+		return encodedFrame{messageType: websocket.TextMessage, data: encodeAuthError(m.Code, m.Message), eventKind: "auth_error"}, true
 	case *ChatDelivered:
 		return encodedFrame{
 			messageType: websocket.TextMessage,
@@ -30,16 +32,7 @@ func encodeOutboundMessage(msg any) (encodedFrame, bool) {
 	case *RoomLeft:
 		return encodedFrame{messageType: websocket.TextMessage, data: encodeLeft(m.RoomID, m.User), eventKind: "event"}, true
 	case *ErrorResponse:
-		return encodedFrame{
-			messageType: websocket.TextMessage,
-			data: mustMarshal(map[string]any{
-				"type":    "error",
-				"code":    m.Code,
-				"status":  m.Status,
-				"message": m.Message,
-			}),
-			eventKind: "error",
-		}, true
+		return encodedFrame{messageType: websocket.TextMessage, data: encodeError(m.Code, m.Message), eventKind: "error"}, true
 	case *AppPing:
 		return encodedFrame{messageType: websocket.TextMessage, data: mustMarshal(map[string]any{"type": "ping"}), eventKind: "ping"}, true
 	default:
@@ -61,11 +54,20 @@ func encodeAuthOk() []byte {
 	})
 }
 
-func encodeAuthError(code int32, status, message string) []byte {
+func encodeAuthError(code errcode.Code, message string) []byte {
 	return mustMarshal(map[string]any{
 		"type":    "auth_error",
-		"code":    code,
-		"status":  status,
+		"code":    code.Int32(),
+		"status":  code.Status(),
+		"message": message,
+	})
+}
+
+func encodeError(code errcode.Code, message string) []byte {
+	return mustMarshal(map[string]any{
+		"type":    "error",
+		"code":    code.Int32(),
+		"status":  code.Status(),
 		"message": message,
 	})
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -131,13 +132,16 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 		t.Errorf("stub RoomGrain.Leave calls: got %d, want 1", got)
 	}
 
-	// Connection registration round-trip — uses synthetic PID values; the
-	// per-connection delivery path and Watch-driven eviction are exercised
-	// end-to-end in sender_pid_test.go with real receiver actors.
+	// Connection registration round-trip. Use a local no-op actor so the shared
+	// cluster does not retain a retrying endpoint writer for a synthetic remote
+	// address during TestMain shutdown. Delivery and Watch-driven eviction are
+	// exercised end-to-end in sender_pid_test.go.
+	connectionPID := sharedCluster.ActorSystem.Root.Spawn(actor.PropsFromFunc(func(actor.Context) {}))
+	t.Cleanup(func() { _ = sharedCluster.ActorSystem.Root.PoisonFuture(connectionPID).Wait() })
 	regResp, err := uc.RegisterConnection(&userpb.RegisterConnectionRequest{
 		RequesterPid: &userpb.PID{
-			Address: "test-addr",
-			Id:      "test-pid",
+			Address: connectionPID.GetAddress(),
+			Id:      connectionPID.GetId(),
 		},
 	})
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/errcode"
 )
 
 func decodeErrorResponse(t *testing.T, body io.Reader) ErrorResponse {
@@ -35,7 +36,7 @@ func TestHandleLogin(t *testing.T) {
 		body          string
 		authFn        func(ctx context.Context, params auth.AuthParams) (*auth.Result, error)
 		wantStatus    int
-		wantErrorCode int // 0 if no error expected
+		wantErrorCode errcode.Code // 0 if no error expected
 	}{
 		{
 			name:       "valid credentials returns 200 with token",
@@ -48,84 +49,84 @@ func TestHandleLogin(t *testing.T) {
 			body:          `{"username":"alice","password":"wrong"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusUnauthorized,
-			wantErrorCode: int(CodeAuthInvalidToken),
+			wantErrorCode: errcode.AuthInvalidToken,
 		},
 		{
 			name:          "empty body returns 400 with code 4001",
 			body:          ``,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: int(CodeInvalidRequest),
+			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "malformed JSON returns 400 with code 4001",
 			body:          `{"username":"alice"`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: int(CodeInvalidRequest),
+			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "missing username returns 400 with code 4001",
 			body:          `{"password":"secret"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: int(CodeInvalidRequest),
+			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "missing password returns 400 with code 4001",
 			body:          `{"username":"alice"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: int(CodeInvalidRequest),
+			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "empty username and password returns 400",
 			body:          `{"username":"","password":""}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: int(CodeInvalidRequest),
+			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "whitespace-only username returns 400",
 			body:          `{"username":"   ","password":"secret"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: int(CodeInvalidRequest),
+			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "whitespace-only password returns 400",
 			body:          `{"username":"alice","password":"\t\n"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: int(CodeInvalidRequest),
+			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "trailing JSON object returns 400",
 			body:          `{"username":"alice","password":"secret"}{"x":1}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: int(CodeInvalidRequest),
+			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "trailing junk after JSON returns 400",
 			body:          `{"username":"alice","password":"secret"} garbage`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: int(CodeInvalidRequest),
+			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "username over length cap returns 400",
 			body:          `{"username":"` + strings.Repeat("a", maxUsernameBytes+1) + `","password":"secret"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: int(CodeInvalidRequest),
+			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "password over length cap returns 400",
 			body:          `{"username":"alice","password":"` + strings.Repeat("p", maxPasswordBytes+1) + `"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: int(CodeInvalidRequest),
+			wantErrorCode: errcode.InvalidRequest,
 		},
 	}
 
@@ -188,8 +189,8 @@ func TestHandleLogin_AuthErrorMessageDoesNotLeakDetails(t *testing.T) {
 	if strings.Contains(resp.Error.Message, "database") || strings.Contains(resp.Error.Message, "alice") {
 		t.Errorf("error message leaks internal details: %q", resp.Error.Message)
 	}
-	if resp.Error.Code != int(CodeAuthInvalidToken) {
-		t.Errorf("code: got %d, want %d", resp.Error.Code, CodeAuthInvalidToken)
+	if resp.Error.Code != errcode.AuthInvalidToken {
+		t.Errorf("code: got %d, want %d", resp.Error.Code, errcode.AuthInvalidToken)
 	}
 }
 
@@ -208,8 +209,8 @@ func TestHandleLogin_NilResultFromAuthenticatorReturns500(t *testing.T) {
 		t.Fatalf("status: got %d, want 500", rec.Code)
 	}
 	resp := decodeErrorResponse(t, rec.Body)
-	if resp.Error.Code != int(CodeInternalError) {
-		t.Errorf("code: got %d, want %d", resp.Error.Code, CodeInternalError)
+	if resp.Error.Code != errcode.InternalError {
+		t.Errorf("code: got %d, want %d", resp.Error.Code, errcode.InternalError)
 	}
 }
 
@@ -228,8 +229,8 @@ func TestHandleLogin_EmptyTokenFromAuthenticatorReturns500(t *testing.T) {
 		t.Fatalf("status: got %d, want 500 (body=%s)", rec.Code, rec.Body.String())
 	}
 	resp := decodeErrorResponse(t, rec.Body)
-	if resp.Error.Code != int(CodeInternalError) {
-		t.Errorf("code: got %d, want %d", resp.Error.Code, CodeInternalError)
+	if resp.Error.Code != errcode.InternalError {
+		t.Errorf("code: got %d, want %d", resp.Error.Code, errcode.InternalError)
 	}
 }
 
@@ -252,7 +253,7 @@ func TestHandleLogin_BodyTooLargeReturns400(t *testing.T) {
 		t.Fatalf("status: got %d, want 400", rec.Code)
 	}
 	resp := decodeErrorResponse(t, rec.Body)
-	if resp.Error.Code != int(CodeInvalidRequest) {
-		t.Errorf("code: got %d, want %d", resp.Error.Code, CodeInvalidRequest)
+	if resp.Error.Code != errcode.InvalidRequest {
+		t.Errorf("code: got %d, want %d", resp.Error.Code, errcode.InvalidRequest)
 	}
 }

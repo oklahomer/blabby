@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/oklahomer/blabby/internal/errcode"
 )
 
 var errEmptyAuthToken = errors.New("auth token must not be empty")
@@ -54,11 +56,11 @@ type AppPongReceived struct{}
 type AuthSucceeded struct{}
 
 // AuthFailed carries the rejection sent before a pre-auth connection closes.
-// Code and Status mirror the canonical error taxonomy; Message is a fixed,
-// client-safe string. The write pump encodes it as the "auth_error" frame.
+// Code is a parsed shared error code; Message is a fixed, client-safe string.
+// The write pump derives the numeric code and status for the "auth_error"
+// frame.
 type AuthFailed struct {
-	Code    int32
-	Status  string
+	Code    errcode.Code
 	Message string
 }
 
@@ -98,13 +100,13 @@ type RoomLeft struct {
 	User   UserRef
 }
 
-// ErrorResponse is the typed form of the generic "error" event frame, distinct
-// from [AuthFailed], which the auth handshake uses. encodeOutboundMessage maps
-// it to the "error" frame. No connection behavior constructs one yet; it pins
-// the wire shape for asynchronous, non-auth error events.
+// ErrorResponse is the typed form of the generic "error" frame: an
+// asynchronous, non-authentication error. Code is a parsed shared error code;
+// the write pump derives the frame's canonical numeric and status fields from
+// it. No connection behavior constructs one yet — it pins the wire shape for
+// future async, non-auth errors (see the AsyncAPI contract).
 type ErrorResponse struct {
-	Code    int32
-	Status  string
+	Code    errcode.Code
 	Message string
 }
 

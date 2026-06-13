@@ -3,12 +3,158 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/oklahomer/blabby/internal/auth"
 )
+
+// stubUserStore is a single-user [auth.UserStore] for exercising
+// Authenticate paths that the in-memory store cannot reach — chiefly a
+// stored user whose ID is structurally invalid.
+type stubUserStore struct {
+	user auth.StoredUser
+}
+
+func (s stubUserStore) Lookup(username string) (*auth.StoredUser, error) {
+	if username != s.user.Username {
+		return nil, fmt.Errorf("user not found: %s", username)
+	}
+	u := s.user
+	return &u, nil
+}
+
+func TestWithExpiration_PanicsOnNonPositive(t *testing.T) {
+	for _, d := range []time.Duration{0, -time.Second} {
+		t.Run(d.String(), func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("WithExpiration(%v) did not panic", d)
+				}
+			}()
+			auth.WithExpiration(d)
+		})
+	}
+}
+
+func TestNewJWTAuthenticator_Panics(t *testing.T) {
+	store := auth.NewInMemoryUserStore()
+	tests := []struct {
+		name       string
+		signingKey []byte
+		store      auth.UserStore
+	}{
+		{name: "empty signing key", signingKey: nil, store: store},
+		{name: "nil store", signingKey: []byte("secret"), store: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("NewJWTAuthenticator did not panic")
+				}
+			}()
+			auth.NewJWTAuthenticator(tt.signingKey, tt.store)
+		})
+	}
+}
+
+// TestJWTAuthenticator_Authenticate_InvalidStoredUserID covers the
+// data-integrity path: credentials match, but the stored user ID does not
+// satisfy id.NewUserID. The client must see a generic credential failure, not
+// a distinct error, and no token is issued.
+func TestJWTAuthenticator_Authenticate_InvalidStoredUserID(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("setup: hash password: %v", err)
+	}
+	store := stubUserStore{user: auth.StoredUser{
+		ID:           "bad/id", // '/' is rejected by id.NewUserID
+		Username:     "mallory",
+		PasswordHash: hash,
+	}}
+	authenticator := auth.NewJWTAuthenticator([]byte("secret"), store)
+
+	result, err := authenticator.Authenticate(context.Background(), auth.AuthParams{
+		Username: "mallory",
+		Password: "pw",
+	})
+	if err == nil {
+		t.Fatalf("expected error for invalid stored user ID, got result %+v", result)
+	}
+	if result != nil {
+		t.Errorf("expected nil result, got %+v", result)
+	}
+	if got, want := err.Error(), "failed to authenticate: invalid credentials"; got != want {
+		t.Errorf("error = %q, want %q", got, want)
+	}
+	for _, leaked := range []string{"bad/id", "identifier"} {
+		if strings.Contains(err.Error(), leaked) {
+			t.Errorf("error %q leaked store-integrity detail %q", err, leaked)
+		}
+	}
+}
+
+// TestJWTAuthenticator_ConcurrentUse drives Authenticate and ValidateToken
+// from many goroutines against one authenticator. The Authenticator contract
+// promises concurrency safety; this is the regression guard that fails under
+// -race if a future dependency or key-rotation change introduces shared
+// mutable state.
+func TestJWTAuthenticator_ConcurrentUse(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("setup: hash password: %v", err)
+	}
+	store := stubUserStore{user: auth.StoredUser{
+		ID:           auth.UserIDBob.String(),
+		Username:     "bob",
+		PasswordHash: hash,
+	}}
+	authenticator := auth.NewJWTAuthenticator([]byte("test-secret"), store)
+	ctx := context.Background()
+
+	seed, err := authenticator.Authenticate(ctx, auth.AuthParams{Username: "bob", Password: "pw"})
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	const (
+		goroutines = 8
+		iterations = 4
+	)
+	start := make(chan struct{})
+	errs := make(chan error, goroutines)
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			for j := 0; j < iterations; j++ {
+				if _, err := authenticator.Authenticate(ctx, auth.AuthParams{Username: "bob", Password: "pw"}); err != nil {
+					errs <- fmt.Errorf("worker %d concurrent Authenticate: %w", worker, err)
+					return
+				}
+				if _, err := authenticator.ValidateToken(ctx, seed.Token); err != nil {
+					errs <- fmt.Errorf("worker %d concurrent ValidateToken: %w", worker, err)
+					return
+				}
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
 
 func TestJWTAuthenticator_Authenticate(t *testing.T) {
 	store := auth.NewInMemoryUserStore()
@@ -220,6 +366,32 @@ func TestJWTAuthenticator_ValidateToken_MissingIssuedAt(t *testing.T) {
 	}
 	if got.UserID.String() != auth.UserIDAlice.String() {
 		t.Errorf("UserID: got %q, want %q", got.UserID.String(), auth.UserIDAlice.String())
+	}
+}
+
+// TestJWTAuthenticator_ValidateToken_AlgConfusion exercises the signing-method
+// guard: a token presented with the "none" algorithm (the classic JWT
+// alg-confusion attack) must be rejected as invalid, never accepted as
+// unsigned. This locks the defense in place against a future refactor.
+func TestJWTAuthenticator_ValidateToken_AlgConfusion(t *testing.T) {
+	store := auth.NewInMemoryUserStore()
+	authenticator := auth.NewJWTAuthenticator([]byte("test-secret"), store)
+
+	claims := &jwt.RegisteredClaims{
+		Subject:   auth.UserIDAlice.String(),
+		Issuer:    auth.Issuer,
+		Audience:  jwt.ClaimStrings{auth.Audience},
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodNone, claims)
+	signed, err := token.SignedString(jwt.UnsafeAllowNoneSignatureType)
+	if err != nil {
+		t.Fatalf("setup: sign none-alg token: %v", err)
+	}
+
+	if _, err := authenticator.ValidateToken(context.Background(), signed); !errors.Is(err, auth.ErrTokenInvalid) {
+		t.Errorf("expected ErrTokenInvalid for none-alg token, got %v", err)
 	}
 }
 

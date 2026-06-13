@@ -24,6 +24,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/middleware"
 )
@@ -45,28 +46,7 @@ const (
 	eventUserMessageSendRejected        = "user.message.send_rejected"
 	eventUserRoomsQueried               = "user.rooms.queried"
 	eventUserProfileSeedFailed          = "user.profile.seed_failed"
-)
-
-// Error code constants mirror the canonical taxonomy in
-// internal/gateway/errors.go. They are duplicated as raw values here to
-// avoid a dependency from internal/grain → internal/gateway, which would
-// invert the architectural direction.
-const (
-	codeRoomNotMember     int32 = 2001
-	codeRoomAlreadyMember int32 = 2002
-	codeRoomNotFound      int32 = 2003
-	codeInvalidRequest    int32 = 4001
-	codeMissingField      int32 = 4002
-	codeInternalError     int32 = 5001
-)
-
-const (
-	statusRoomNotMember     = "ROOM_NOT_MEMBER"
-	statusRoomAlreadyMember = "ROOM_ALREADY_MEMBER"
-	statusRoomNotFound      = "ROOM_NOT_FOUND"
-	statusInvalidRequest    = "INVALID_REQUEST"
-	statusMissingField      = "MISSING_FIELD"
-	statusInternalError     = "INTERNAL_ERROR"
+	eventUserRoomResponseInvalid        = "user.room.response_invalid"
 )
 
 // passivationTimeout is the receive-timeout the User kind passivates on.
@@ -208,9 +188,9 @@ func (g *Grain) RegisterConnection(req *userpb.RegisterConnectionRequest, ctx cl
 		slog.Warn(eventUserConnectionRegisterRejected,
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
-			"reason", statusInvalidRequest,
+			"reason", errcode.InvalidRequest.Status(),
 		)
-		return &userpb.RegisterConnectionResponse{Error: errDetail(codeInvalidRequest, statusInvalidRequest, "requester_pid is required")}, nil
+		return &userpb.RegisterConnectionResponse{Error: errDetail(errcode.InvalidRequest, "requester_pid is required")}, nil
 	}
 	if requesterPid.GetAddress() == "" || requesterPid.GetId() == "" {
 		slog.Warn(eventUserConnectionRegisterRejected,
@@ -218,9 +198,9 @@ func (g *Grain) RegisterConnection(req *userpb.RegisterConnectionRequest, ctx cl
 			"grain_id", ctx.Identity(),
 			"pid_address", requesterPid.GetAddress(),
 			"pid_id", requesterPid.GetId(),
-			"reason", statusInvalidRequest,
+			"reason", errcode.InvalidRequest.Status(),
 		)
-		return &userpb.RegisterConnectionResponse{Error: errDetail(codeInvalidRequest, statusInvalidRequest, "requester_pid.address and requester_pid.id are required")}, nil
+		return &userpb.RegisterConnectionResponse{Error: errDetail(errcode.InvalidRequest, "requester_pid.address and requester_pid.id are required")}, nil
 	}
 
 	pid := &actor.PID{Address: requesterPid.GetAddress(), Id: requesterPid.GetId()}
@@ -237,7 +217,7 @@ func (g *Grain) RegisterConnection(req *userpb.RegisterConnectionRequest, ctx cl
 
 // JoinRoom routes a join command to the Room grain identified by req.RoomId
 // and, on success, records the room in the user's joined set. Business
-// errors from the Room grain are copied through into inline error fields.
+// errors from the Room grain are parsed and canonicalized before forwarding.
 func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) (*userpb.JoinRoomResponse, error) {
 	roomID, err := id.NewRoomID(req.GetRoomId())
 	if err != nil {
@@ -246,9 +226,9 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 			"grain_id", ctx.Identity(),
 			"user_id", ctx.Identity(),
 			"room_id", req.GetRoomId(),
-			"reason", statusInvalidRequest,
+			"reason", errcode.InvalidRequest.Status(),
 		)
-		return &userpb.JoinRoomResponse{Error: errDetail(codeInvalidRequest, statusInvalidRequest, "room_id is required")}, nil
+		return &userpb.JoinRoomResponse{Error: errDetail(errcode.InvalidRequest, "room_id is required")}, nil
 	}
 
 	roomResp, err := g.rooms.Join(roomID, &roompb.JoinRequest{User: g.self})
@@ -263,15 +243,16 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 			"room_id", roomID,
 			"error", err,
 		)
-		return &userpb.JoinRoomResponse{Error: errDetail(codeInternalError, statusInternalError, "failed to reach room")}, nil
+		return &userpb.JoinRoomResponse{Error: errDetail(errcode.InternalError, "failed to reach room")}, nil
 	}
 	if roomErr := roomResp.GetError(); roomErr != nil {
+		code, detail := parseRoomError(ctx, "JoinRoom", roomID, roomErr)
 		// Room keeps its action-oriented contract and reports an existing
 		// membership as ROOM_ALREADY_MEMBER. For the HTTP PUT resource contract,
 		// that outcome confirms the desired state; recording it here also repairs
 		// this User grain after an earlier Room response was lost.
-		if roomErr.GetCode() != codeRoomAlreadyMember || roomErr.GetStatus() != statusRoomAlreadyMember {
-			return &userpb.JoinRoomResponse{Error: roomErr}, nil
+		if code != errcode.RoomAlreadyMember {
+			return &userpb.JoinRoomResponse{Error: detail}, nil
 		}
 	}
 
@@ -295,9 +276,9 @@ func (g *Grain) LeaveRoom(req *userpb.LeaveRoomRequest, ctx cluster.GrainContext
 			"grain_id", ctx.Identity(),
 			"user_id", ctx.Identity(),
 			"room_id", req.GetRoomId(),
-			"reason", statusInvalidRequest,
+			"reason", errcode.InvalidRequest.Status(),
 		)
-		return &userpb.LeaveRoomResponse{Error: errDetail(codeInvalidRequest, statusInvalidRequest, "room_id is required")}, nil
+		return &userpb.LeaveRoomResponse{Error: errDetail(errcode.InvalidRequest, "room_id is required")}, nil
 	}
 
 	roomResp, err := g.rooms.Leave(roomID, &roompb.LeaveRequest{UserId: ctx.Identity()})
@@ -309,14 +290,15 @@ func (g *Grain) LeaveRoom(req *userpb.LeaveRoomRequest, ctx cluster.GrainContext
 			"room_id", roomID,
 			"error", err,
 		)
-		return &userpb.LeaveRoomResponse{Error: errDetail(codeInternalError, statusInternalError, "failed to reach room")}, nil
+		return &userpb.LeaveRoomResponse{Error: errDetail(errcode.InternalError, "failed to reach room")}, nil
 	}
 	if roomErr := roomResp.GetError(); roomErr != nil {
+		code, detail := parseRoomError(ctx, "LeaveRoom", roomID, roomErr)
 		// DELETE has the symmetric rule: ROOM_NOT_MEMBER confirms absence. Apply
 		// the local removal even when Room made no change so a retry reconciles
 		// the User grain's joined-room projection.
-		if roomErr.GetCode() != codeRoomNotMember || roomErr.GetStatus() != statusRoomNotMember {
-			return &userpb.LeaveRoomResponse{Error: roomErr}, nil
+		if code != errcode.RoomNotMember {
+			return &userpb.LeaveRoomResponse{Error: detail}, nil
 		}
 	}
 
@@ -341,9 +323,9 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 			"grain_id", ctx.Identity(),
 			"user_id", ctx.Identity(),
 			"room_id", req.GetRoomId(),
-			"reason", statusInvalidRequest,
+			"reason", errcode.InvalidRequest.Status(),
 		)
-		return &userpb.SendMessageResponse{Error: errDetail(codeInvalidRequest, statusInvalidRequest, "room_id is required")}, nil
+		return &userpb.SendMessageResponse{Error: errDetail(errcode.InvalidRequest, "room_id is required")}, nil
 	}
 	if strings.TrimSpace(req.GetText()) == "" {
 		slog.Warn(eventUserMessageSendRejected,
@@ -352,9 +334,9 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 			"user_id", ctx.Identity(),
 			"room_id", roomID,
 			"text_len", len(req.GetText()),
-			"reason", statusMissingField,
+			"reason", errcode.MissingField.Status(),
 		)
-		return &userpb.SendMessageResponse{Error: errDetail(codeMissingField, statusMissingField, "text is required")}, nil
+		return &userpb.SendMessageResponse{Error: errDetail(errcode.MissingField, "text is required")}, nil
 	}
 
 	roomResp, err := g.rooms.PostMessage(roomID, &roompb.PostMessageRequest{
@@ -369,10 +351,11 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 			"room_id", roomID,
 			"error", err,
 		)
-		return &userpb.SendMessageResponse{Error: errDetail(codeInternalError, statusInternalError, "failed to reach room")}, nil
+		return &userpb.SendMessageResponse{Error: errDetail(errcode.InternalError, "failed to reach room")}, nil
 	}
-	if roomResp.GetError() != nil {
-		return &userpb.SendMessageResponse{Error: roomResp.GetError()}, nil
+	if roomErr := roomResp.GetError(); roomErr != nil {
+		_, detail := parseRoomError(ctx, "SendMessage", roomID, roomErr)
+		return &userpb.SendMessageResponse{Error: detail}, nil
 	}
 
 	slog.Info(eventUserMessageSent,
@@ -463,8 +446,28 @@ func (g *Grain) fanOut(ctx cluster.GrainContext, pids []*actor.PID, msg proto.Me
 	}
 }
 
+// parseRoomError converts a raw Room-grain error into the shared taxonomy and
+// rebuilds its wire representation from the parsed code. Invalid pairs fail
+// closed as a client-safe internal error.
+func parseRoomError(ctx cluster.GrainContext, operation string, roomID id.RoomID, detail *commonpb.ErrorDetail) (errcode.Code, *commonpb.ErrorDetail) {
+	code, err := errcode.Parse(detail.GetCode(), detail.GetStatus())
+	if err != nil {
+		slog.Error(eventUserRoomResponseInvalid,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"operation", operation,
+			"room_id", roomID,
+			"code", detail.GetCode(),
+			"status", detail.GetStatus(),
+			"error", err,
+		)
+		return errcode.InternalError, errDetail(errcode.InternalError, "room operation failed")
+	}
+	return code, errDetail(code, detail.GetMessage())
+}
+
 // errDetail builds the canonical business-error carrier shared by every
 // grain response in this package. See ADR-013.
-func errDetail(code int32, status, msg string) *commonpb.ErrorDetail {
-	return &commonpb.ErrorDetail{Code: code, Status: status, Message: msg}
+func errDetail(code errcode.Code, msg string) *commonpb.ErrorDetail {
+	return &commonpb.ErrorDetail{Code: code.Int32(), Status: code.Status(), Message: msg}
 }

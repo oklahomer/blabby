@@ -22,6 +22,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/middleware"
 )
@@ -40,24 +41,6 @@ const (
 	eventRoomMessagePosted       = "room.message.posted"
 	eventRoomMessagePostRejected = "room.message.post_rejected"
 	eventRoomFanoutSupervision   = "room.fanout.supervision"
-)
-
-// Error code constants mirror the canonical taxonomy in
-// internal/gateway/errors.go. They are duplicated as raw values here to
-// avoid a dependency from internal/grain → internal/gateway, which would
-// invert the architectural direction.
-const (
-	codeRoomNotMember     int32 = 2001
-	codeRoomAlreadyMember int32 = 2002
-	codeInvalidRequest    int32 = 4001
-	codeMissingField      int32 = 4002
-)
-
-const (
-	statusRoomNotMember     = "ROOM_NOT_MEMBER"
-	statusRoomAlreadyMember = "ROOM_ALREADY_MEMBER"
-	statusInvalidRequest    = "INVALID_REQUEST"
-	statusMissingField      = "MISSING_FIELD"
 )
 
 // passivationTimeout is the receive-timeout the Room kind passivates on. It is
@@ -172,10 +155,10 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"user_id", req.GetUser().GetId(),
-			"reason", statusInvalidRequest,
+			"reason", errcode.InvalidRequest.Status(),
 			"error", err,
 		)
-		return joinErr(codeInvalidRequest, statusInvalidRequest, "user id and display name are required"), nil
+		return joinErr(errcode.InvalidRequest, "user id and display name are required"), nil
 	}
 	userID := joiner.ID()
 	if g.state.isMember(userID) {
@@ -183,9 +166,9 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"user_id", userID,
-			"reason", statusRoomAlreadyMember,
+			"reason", errcode.RoomAlreadyMember.Status(),
 		)
-		return joinErr(codeRoomAlreadyMember, statusRoomAlreadyMember, "already a member of this room"), nil
+		return joinErr(errcode.RoomAlreadyMember, "already a member of this room"), nil
 	}
 
 	g.state.addMember(joiner)
@@ -217,9 +200,9 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"user_id", req.GetUserId(),
-			"reason", statusInvalidRequest,
+			"reason", errcode.InvalidRequest.Status(),
 		)
-		return leaveErr(codeInvalidRequest, statusInvalidRequest, "user_id is required"), nil
+		return leaveErr(errcode.InvalidRequest, "user_id is required"), nil
 	}
 	leaver, ok := g.state.memberRef(userID)
 	if !ok {
@@ -227,9 +210,9 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"user_id", userID,
-			"reason", statusRoomNotMember,
+			"reason", errcode.RoomNotMember.Status(),
 		)
-		return leaveErr(codeRoomNotMember, statusRoomNotMember, "not a member of this room"), nil
+		return leaveErr(errcode.RoomNotMember, "not a member of this room"), nil
 	}
 
 	// Snapshot before removal so the leaver also receives the LEFT event;
@@ -262,10 +245,10 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"user_id", req.GetUser().GetId(),
-			"reason", statusInvalidRequest,
+			"reason", errcode.InvalidRequest.Status(),
 			"error", err,
 		)
-		return postErr(codeInvalidRequest, statusInvalidRequest, "user id and display name are required"), nil
+		return postErr(errcode.InvalidRequest, "user id and display name are required"), nil
 	}
 	userID := sender.ID()
 	if strings.TrimSpace(req.GetText()) == "" {
@@ -274,18 +257,18 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 			"grain_id", ctx.Identity(),
 			"user_id", userID,
 			"text_len", len(req.GetText()),
-			"reason", statusMissingField,
+			"reason", errcode.MissingField.Status(),
 		)
-		return postErr(codeMissingField, statusMissingField, "text is required"), nil
+		return postErr(errcode.MissingField, "text is required"), nil
 	}
 	if !g.state.isMember(userID) {
 		slog.Warn(eventRoomMessagePostRejected,
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"user_id", userID,
-			"reason", statusRoomNotMember,
+			"reason", errcode.RoomNotMember.Status(),
 		)
-		return postErr(codeRoomNotMember, statusRoomNotMember, "not a member of this room"), nil
+		return postErr(errcode.RoomNotMember, "not a member of this room"), nil
 	}
 
 	// Refresh the cached name from the value carried on this message, so the
@@ -360,20 +343,20 @@ func parseUserRef(p *commonpb.UserRef) (id.UserRef, error) {
 	return id.NewUserRef(userID, p.GetName())
 }
 
-func joinErr(code int32, status, msg string) *roompb.JoinResponse {
+func joinErr(code errcode.Code, msg string) *roompb.JoinResponse {
 	return &roompb.JoinResponse{
-		Error: &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
+		Error: &commonpb.ErrorDetail{Code: code.Int32(), Status: code.Status(), Message: msg},
 	}
 }
 
-func leaveErr(code int32, status, msg string) *roompb.LeaveResponse {
+func leaveErr(code errcode.Code, msg string) *roompb.LeaveResponse {
 	return &roompb.LeaveResponse{
-		Error: &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
+		Error: &commonpb.ErrorDetail{Code: code.Int32(), Status: code.Status(), Message: msg},
 	}
 }
 
-func postErr(code int32, status, msg string) *roompb.PostMessageResponse {
+func postErr(code errcode.Code, msg string) *roompb.PostMessageResponse {
 	return &roompb.PostMessageResponse{
-		Error: &commonpb.ErrorDetail{Code: code, Status: status, Message: msg},
+		Error: &commonpb.ErrorDetail{Code: code.Int32(), Status: code.Status(), Message: msg},
 	}
 }

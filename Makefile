@@ -41,8 +41,19 @@ spec-lint:
 docs-preview:
 	go run ./cmd/docs-preview --port $(DOCS_PORT) --asyncapi-port $(ASYNCAPI_PORT)
 
+# Coverage measures the product/server core under internal/: domain types,
+# grains, gateway, auth, supervision, and test-cluster wiring. The repository's
+# headline coverage target for this scope is at least 80%.
+#
+# The cmd/* packages are intentionally excluded from this number. The four main
+# packages (backend, gateway, client, docs-preview) are bootstrap, signal
+# handling, and program.Run() orchestration that runs only in a real process and
+# is inherently hard to unit-test; including them makes the headline primarily
+# measure bootstrap paths and obscures product-code coverage. The cmd/* trees
+# (including the well-tested cmd/client/internal/* TUI packages) are still
+# compiled and exercised by `make test`; they are simply out of this headline.
 coverage:
-	go test -p=1 -timeout=2m -coverpkg=./cmd/...,./internal/... -coverprofile=coverage.out ./...
+	go test -p=1 -timeout=2m -coverpkg=./internal/... -coverprofile=coverage.out ./internal/...
 	go tool cover -html=coverage.out -o coverage.html
 
 docker:

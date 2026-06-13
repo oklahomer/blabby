@@ -379,6 +379,31 @@ func TestAuth_RegisterInlineErrorPropagates(t *testing.T) {
 	expectActorStops(t, sess.system, sess.pid, time.Second)
 }
 
+func TestAuth_RegisterInlineErrorInvalidTaxonomyFailsClosed(t *testing.T) {
+	authStub := &stubAuthenticator{validateFn: func(_ context.Context, _ string) (*auth.Claims, error) {
+		return aliceClaims(), nil
+	}}
+	grain := &recordingGrainCaller{
+		resp: &userpb.RegisterConnectionResponse{
+			Error: &commonpb.ErrorDetail{Code: 2001, Status: "ROOM_NOT_FOUND", Message: "bad pair"},
+		},
+	}
+	sess := startSession(t, authStub, grain)
+	writeAuthFrame(t, sess.client, "tok")
+
+	got := readJSON(t, sess.client)
+	if got["code"].(float64) != 5001 {
+		t.Errorf("code: got %v, want 5001", got["code"])
+	}
+	if got["status"] != "INTERNAL_ERROR" {
+		t.Errorf("status: got %v, want INTERNAL_ERROR", got["status"])
+	}
+	if got["message"] != "service unavailable" {
+		t.Errorf("message: got %v, want service unavailable", got["message"])
+	}
+	expectActorStops(t, sess.system, sess.pid, time.Second)
+}
+
 // --- Server-push scenarios ---------------------------------------------------
 
 func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {

@@ -20,6 +20,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/id"
 )
 
@@ -116,7 +117,7 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 		stubResp    *userpb.JoinRoomResponse
 		stubErr     error
 		wantStatus  int
-		wantCode    int
+		wantCode    errcode.Code
 		assertCalls func(t *testing.T, fake *fakeUserGrainCaller)
 	}{
 		{
@@ -170,6 +171,16 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 			}},
 			wantStatus: http.StatusBadRequest,
 			wantCode:   4001,
+		},
+		{
+			name:   "mismatched business error fails closed",
+			path:   "/rooms/" + okRoom + "/membership",
+			userID: okUser,
+			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
+				Code: 2001, Status: "ROOM_NOT_FOUND", Message: "bad pair",
+			}},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   5001,
 		},
 		{
 			name:       "transport error → 503 + 5002",
@@ -263,7 +274,7 @@ func TestHandleRoomMembershipDelete(t *testing.T) {
 		stubResp   *userpb.LeaveRoomResponse
 		stubErr    error
 		wantStatus int
-		wantCode   int
+		wantCode   errcode.Code
 	}{
 		{
 			name:       "happy path",
@@ -277,6 +288,14 @@ func TestHandleRoomMembershipDelete(t *testing.T) {
 			}},
 			wantStatus: http.StatusForbidden,
 			wantCode:   2001,
+		},
+		{
+			name: "unknown business error fails closed",
+			stubResp: &userpb.LeaveRoomResponse{Error: &commonpb.ErrorDetail{
+				Code: 9999, Status: "UNKNOWN_ERROR", Message: "bad code",
+			}},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   5001,
 		},
 		{
 			name:       "transport error → 503",
@@ -368,7 +387,7 @@ func TestHandleRoomSendMessage_BusinessAndTransportErrors(t *testing.T) {
 		stubResp   *userpb.SendMessageResponse
 		stubErr    error
 		wantStatus int
-		wantCode   int
+		wantCode   errcode.Code
 	}{
 		{
 			name: "business 2001 → 403",
@@ -385,6 +404,14 @@ func TestHandleRoomSendMessage_BusinessAndTransportErrors(t *testing.T) {
 			}},
 			wantStatus: http.StatusBadRequest,
 			wantCode:   4001,
+		},
+		{
+			name: "mismatched business error fails closed",
+			stubResp: &userpb.SendMessageResponse{Error: &commonpb.ErrorDetail{
+				Code: 4001, Status: "MISSING_FIELD", Message: "bad pair",
+			}},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   5001,
 		},
 		{
 			name:       "transport → 503 + 5002",
@@ -418,7 +445,7 @@ func TestHandleRoomSendMessage_BodyValidation(t *testing.T) {
 		body        string
 		contentType string
 		wantStatus  int
-		wantCode    int
+		wantCode    errcode.Code
 		wantMessage string // substring match
 	}{
 		{

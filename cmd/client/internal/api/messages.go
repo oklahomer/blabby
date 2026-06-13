@@ -44,9 +44,9 @@ type ChatMessageReceived struct {
 }
 
 // ErrorFrameReceived is the decoded form of an inbound {"type":"error"}
-// frame pushed asynchronously over the WebSocket (encoder.go's
-// ErrorResponse path). The root Model humanises Status/Message into the
-// inline Main-pane error.
+// frame — the generic async, non-auth error in the WebSocket contract
+// (server type connection.ErrorResponse). The root Model humanises
+// Status/Message into the inline Main-pane error.
 type ErrorFrameReceived struct {
 	Status  string
 	Message string
