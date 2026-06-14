@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/errcode"
 )
 
 func serveQuery(t *testing.T, g *Gateway, pattern, path, userID string) *httptest.ResponseRecorder {
@@ -94,10 +95,10 @@ func TestHandleRoomJoined_TransportErrorReturns503(t *testing.T) {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 	resp := decodeErrorResponse(t, rec.Body)
-	if resp.Error.Code != int(CodeServiceUnavailable) {
-		t.Errorf("error.code = %d, want %d", resp.Error.Code, CodeServiceUnavailable)
+	if resp.Error.Code != errcode.ServiceUnavailable {
+		t.Errorf("error.code = %d, want %d", resp.Error.Code, errcode.ServiceUnavailable)
 	}
-	// NFR3: underlying error must not appear in the gateway-facing message.
+	// The underlying error must not appear in the gateway-facing message.
 	if strings.Contains(resp.Error.Message, "cluster down") {
 		t.Errorf("error.message leaks underlying error: %q", resp.Error.Message)
 	}

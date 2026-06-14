@@ -26,9 +26,9 @@ type LoginResponse struct {
 	Token string `json:"token"`
 }
 
-// ErrorDetail mirrors internal/gateway/errors.go ErrorDetail. Code is
-// modelled as int (not int32) to match the server's emitted JSON shape
-// exactly — the server's ErrorCode underlies int.
+// ErrorDetail mirrors internal/gateway/errors.go ErrorDetail. JSON numbers are
+// decoded into int here because the client does not need the server's internal
+// errcode.Code type.
 type ErrorDetail struct {
 	Code    int    `json:"code"`
 	Status  string `json:"status"`

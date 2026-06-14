@@ -132,7 +132,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 		slog.Warn("room handler rejected request",
 			"endpoint", endpointRoomMessage, "method", r.Method,
 			"user_id", userID, "room_id", roomID, "reason", derr.reason)
-		WriteErrorResponse(w, ErrorCode(derr.detail.Code).HTTPStatus(), derr.detail)
+		WriteErrorResponse(w, httpStatus(derr.detail.Code), derr.detail)
 		return
 	}
 
@@ -152,16 +152,21 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if pe := resp.GetError(); pe != nil {
-		ed := ErrorDetail{
-			Code:    int(pe.GetCode()),
-			Status:  pe.GetStatus(),
-			Message: pe.GetMessage(),
+		ed, parseErr := FromProtoErrorDetail(pe)
+		if parseErr != nil {
+			slog.Error("room handler received invalid business error",
+				"endpoint", endpointRoomMessage, "method", r.Method,
+				"user_id", userID, "room_id", roomID,
+				"code", pe.GetCode(), "status", pe.GetStatus(),
+				"error", parseErr, "text_len", len(req.Text))
+			WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("internal server error"))
+			return
 		}
 		slog.Info("room handler exit",
 			"endpoint", endpointRoomMessage, "method", r.Method,
 			"user_id", userID, "room_id", roomID,
 			"outcome", outcomeBusinessError, "code", ed.Code, "text_len", len(req.Text))
-		WriteErrorResponse(w, ErrorCode(ed.Code).HTTPStatus(), ed)
+		WriteErrorResponse(w, httpStatus(ed.Code), ed)
 		return
 	}
 
@@ -305,16 +310,20 @@ func writeJSON(w http.ResponseWriter, httpStatus int, v any) {
 // Callers MUST pass a non-nil pe; every call site already checks
 // `resp.GetError() != nil` before invoking this helper.
 func writeBusinessErrorResponse(w http.ResponseWriter, endpoint, method string, userID id.UserID, roomID id.RoomID, pe *commonpb.ErrorDetail) {
-	ed := ErrorDetail{
-		Code:    int(pe.GetCode()),
-		Status:  pe.GetStatus(),
-		Message: pe.GetMessage(),
+	ed, err := FromProtoErrorDetail(pe)
+	if err != nil {
+		slog.Error("room handler received invalid business error",
+			"endpoint", endpoint, "method", method,
+			"user_id", userID, "room_id", roomID,
+			"code", pe.GetCode(), "status", pe.GetStatus(), "error", err)
+		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("internal server error"))
+		return
 	}
 	slog.Info("room handler exit",
 		"endpoint", endpoint, "method", method,
 		"user_id", userID, "room_id", roomID,
 		"outcome", outcomeBusinessError, "code", ed.Code)
-	WriteErrorResponse(w, ErrorCode(ed.Code).HTTPStatus(), ed)
+	WriteErrorResponse(w, httpStatus(ed.Code), ed)
 }
 
 func logRoomEntry(endpoint, method string, userID id.UserID, roomID id.RoomID) {

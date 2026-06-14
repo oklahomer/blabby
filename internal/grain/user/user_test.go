@@ -390,6 +390,22 @@ func TestGrain_JoinRoom(t *testing.T) {
 		}
 	})
 
+	t.Run("malformed Room grain error fails closed", func(t *testing.T) {
+		h := newGrain(t)
+		h.rooms.defaultJoin = &roompb.JoinResponse{
+			Error: &commonpb.ErrorDetail{Code: 2003, Status: "ROOM_NOT_MEMBER", Message: "bad pair"},
+		}
+
+		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertErrResponse(t, resp.GetError(), 5001, "INTERNAL_ERROR")
+		if got := h.g.JoinedRooms(); len(got) != 0 {
+			t.Errorf("JoinedRooms: got %v, want []", got)
+		}
+	})
+
 	t.Run("transport error becomes 5001", func(t *testing.T) {
 		h := newGrain(t)
 		h.rooms.joinFn = func(id.RoomID, *roompb.JoinRequest) (*roompb.JoinResponse, error) {
@@ -479,6 +495,23 @@ func TestGrain_LeaveRoom(t *testing.T) {
 		}
 	})
 
+	t.Run("malformed Room grain error fails closed", func(t *testing.T) {
+		h := newGrain(t)
+		_, _ = h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
+		h.rooms.defaultLeave = &roompb.LeaveResponse{
+			Error: &commonpb.ErrorDetail{Code: 2001, Status: "ROOM_NOT_FOUND", Message: "bad pair"},
+		}
+
+		resp, err := h.g.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: "general"}, fakeUserCtx("alice"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertErrResponse(t, resp.GetError(), 5001, "INTERNAL_ERROR")
+		if got := h.g.JoinedRooms(); !reflect.DeepEqual(got, []id.RoomID{mustRoomID(t, "general")}) {
+			t.Errorf("JoinedRooms: got %v, want [general]", got)
+		}
+	})
+
 	t.Run("transport error becomes 5001", func(t *testing.T) {
 		h := newGrain(t)
 		h.rooms.leaveFn = func(id.RoomID, *roompb.LeaveRequest) (*roompb.LeaveResponse, error) {
@@ -551,6 +584,22 @@ func TestGrain_SendMessage(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		assertErrResponse(t, resp.GetError(), 2001, "ROOM_NOT_MEMBER")
+		if resp.GetTimestamp() != nil {
+			t.Errorf("Timestamp: got %v, want nil on failure", resp.GetTimestamp())
+		}
+	})
+
+	t.Run("malformed Room grain error fails closed", func(t *testing.T) {
+		h := newGrain(t)
+		h.rooms.defaultPost = &roompb.PostMessageResponse{
+			Error: &commonpb.ErrorDetail{Code: 2001, Status: "ROOM_NOT_FOUND", Message: "bad pair"},
+		}
+
+		resp, err := h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "hi"}, fakeUserCtx("alice"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertErrResponse(t, resp.GetError(), 5001, "INTERNAL_ERROR")
 		if resp.GetTimestamp() != nil {
 			t.Errorf("Timestamp: got %v, want nil on failure", resp.GetTimestamp())
 		}

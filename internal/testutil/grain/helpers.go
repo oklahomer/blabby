@@ -1,11 +1,43 @@
 // Package graintest provides minimal helpers for unit-testing grain message
 // handlers without standing up a full proto.actor cluster.
 //
-// The helpers in this package are deliberately small — they grow on
-// demand as new grain tests need richer test seams.
+// The helpers are deliberately small and grow on demand. They split across two
+// files: helpers.go holds the fake [cluster.GrainContext] and its options;
+// fixtures.go holds shared Room request factories.
 //
 // These helpers are for in-process unit tests only; do not import them from
-// production wiring.
+// production wiring. When a test needs cross-grain routing or real fan-out,
+// use a cluster from internal/testutil/cluster instead.
+//
+// # The grain-test pattern: arrange, act, assert
+//
+// A grain handler is an ordinary method taking a request proto and a
+// [cluster.GrainContext]. Test it directly — no cluster, no mailbox — by
+// handing it a fake context and a fixture request, then asserting on both the
+// response and the resulting grain state:
+//
+//	func TestRoomGrain_Join(t *testing.T) {
+//		// Arrange: build the grain, inject collaborators, and initialise it
+//		// with a fake context whose Kind matches production.
+//		g := &room.Grain{}
+//		g.SetNotifier(notifier) // a fan-out recorder
+//		g.Init(graintest.NewFakeGrainContext("general", graintest.WithKind("RoomGrain")))
+//
+//		// Act: invoke the handler with a fixture request.
+//		resp, err := g.Join(
+//			graintest.NewJoinRequestNamed("alice", "Alice"),
+//			graintest.NewFakeGrainContext("general", graintest.WithKind("RoomGrain")),
+//		)
+//
+//		// Assert: first the response, then the state change it caused.
+//		if err != nil || resp.GetError() != nil {
+//			t.Fatalf("Join: err=%v resp_error=%+v", err, resp.GetError())
+//		}
+//		// ... assert membership now contains alice and one JOINED event fanned out.
+//	}
+//
+// internal/grain/room/room_test.go is the worked reference for this shape,
+// including a fakeRoomCtx wrapper that pins WithKind and a fan-out recorder.
 package graintest
 
 import (
@@ -13,9 +45,6 @@ import (
 
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
-
-	commonpb "github.com/oklahomer/blabby/gen/common"
-	roompb "github.com/oklahomer/blabby/gen/room"
 )
 
 // fakeGrainContext is a no-cluster stand-in for [cluster.GrainContext].
@@ -137,34 +166,4 @@ func NewFakeGrainContext(identity string, opts ...FakeGrainContextOption) cluste
 // existing call sites; equivalent to NewFakeGrainContext with WithMessage.
 func NewFakeGrainContextWithMessage(identity string, message any) cluster.GrainContext {
 	return NewFakeGrainContext(identity, WithMessage(message))
-}
-
-// NewJoinRequest returns a roompb.JoinRequest for the given user, defaulting
-// the display name to the id so callers that don't care about names stay
-// terse. Use NewJoinRequestNamed to set a distinct name.
-func NewJoinRequest(userID string) *roompb.JoinRequest {
-	return NewJoinRequestNamed(userID, userID)
-}
-
-// NewJoinRequestNamed returns a roompb.JoinRequest carrying a distinct id and
-// display name.
-func NewJoinRequestNamed(userID, name string) *roompb.JoinRequest {
-	return &roompb.JoinRequest{User: &commonpb.UserRef{Id: userID, Name: name}}
-}
-
-// NewLeaveRequest returns a roompb.LeaveRequest with the given user_id.
-func NewLeaveRequest(userID string) *roompb.LeaveRequest {
-	return &roompb.LeaveRequest{UserId: userID}
-}
-
-// NewPostMessageRequest returns a roompb.PostMessageRequest for the given
-// sender (name defaults to the id) and message text.
-func NewPostMessageRequest(userID, text string) *roompb.PostMessageRequest {
-	return NewPostMessageRequestNamed(userID, userID, text)
-}
-
-// NewPostMessageRequestNamed returns a roompb.PostMessageRequest carrying a
-// distinct sender id and display name.
-func NewPostMessageRequestNamed(userID, name, text string) *roompb.PostMessageRequest {
-	return &roompb.PostMessageRequest{User: &commonpb.UserRef{Id: userID, Name: name}, Text: text}
 }

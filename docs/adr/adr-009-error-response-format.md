@@ -45,14 +45,15 @@ human-readable `message`.**
 - **`message`** is display/debug copy only. Clients must never branch on it,
   and it must never carry internal detail (actor paths, grain IDs, stack
   traces).
-- The gateway's taxonomy lives in `internal/gateway/errors.go`: typed
-  `ErrorCode` constants with `ErrorCode.Status()` deriving the string from
-  the code, so gateway-constructed errors cannot pair a code with the wrong
-  status. Grains that emit business errors declare their own paired
-  code/status constants sharing the same numbers by convention
-  (`internal/grain/room/room.go`, `internal/grain/user/user.go`); the
-  gateway forwards their triples unchanged.
-- `ErrorCode.HTTPStatus()` is the single source of the code→HTTP mapping
+- The shared taxonomy lives in `internal/errcode`: typed `Code` constants pair
+  each numeric value with its canonical status. Grains and connection actors
+  carry that type internally and derive wire fields from it. Raw code/status
+  pairs received from Protobuf are parsed at the boundary and rejected when
+  the code is unknown or the status does not match.
+- The gateway carries the shared `errcode.Code` directly and adds only the HTTP
+  projection. Gateway-constructed errors derive status from the code, so they
+  cannot pair a code with the wrong status.
+- `httpStatus` is the single source of the code→HTTP mapping
   (2001→403, 2002→409, 2003→404, 1xxx→401, …); every handler routes through
   it so the mapping cannot drift across endpoints. The HTTP status is thus
   *derived from* the taxonomy, never chosen ad hoc.
@@ -77,9 +78,9 @@ human-readable `message`.**
 - **The grain → HTTP translation is mechanical.** Because grains emit the
   same triple, the gateway adds only the HTTP status (derived), so business
   errors defined once in a grain surface consistently on every endpoint.
-- **Gateway-side mismatches are structurally prevented** — status derives
-  from code, HTTP derives from code, and there is one write path. Grain-side
-  triples ride the shared convention and pass through as-is.
+- **Code/status mismatches are structurally prevented internally** — status
+  derives from code, HTTP derives from code, and raw boundary pairs must parse
+  before use. There is one gateway write path.
 
 ### Negative
 
@@ -87,8 +88,7 @@ human-readable `message`.**
   twice; every response carries both. Accepted as the cost of serving both
   programmatic and human consumers without a lookup table.
 - **Ranges are a convention, not a constraint.** Nothing stops a future
-  constant from landing in the wrong block except review, and the grain-side
-  copies must track the gateway's numbers by the same discipline.
+  constant from landing in the wrong block except review and taxonomy tests.
 - **Not a standard format.** Tooling that understands RFC 9457
   (`application/problem+json`) won't recognize this envelope; consumers of
   this API learn a project-specific (if simple) shape.
@@ -131,7 +131,9 @@ languages instead of zero.
 - [ADR-013](adr-013-business-errors-as-response-values.md) — the same triple
   at the grain boundary; this ADR is its client-facing projection.
 - [ADR-002](adr-002-client-protocol.md) — the protocol the envelope rides on.
-- `internal/gateway/errors.go` — taxonomy, `Status()`/`HTTPStatus()`
-  derivations, envelope types, and the single write path.
+- `internal/errcode/errcode.go` — shared code/status taxonomy and boundary
+  parser.
+- `internal/gateway/errors.go` — HTTP-status derivation, envelope types, and
+  the single write path.
 - `proto/common/common.proto` — the shared `ErrorDetail` carrying the triple
   between grains and gateway.

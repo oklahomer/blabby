@@ -130,7 +130,8 @@ func (a *JWTAuthenticator) ValidateToken(_ context.Context, tokenString string) 
 		return nil, fmt.Errorf("%w: empty token", ErrTokenInvalid)
 	}
 
-	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
+	claims := new(jwt.RegisteredClaims)
+	_, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -141,11 +142,6 @@ func (a *JWTAuthenticator) ValidateToken(_ context.Context, tokenString string) 
 			return nil, fmt.Errorf("%w: %w", ErrTokenExpired, err)
 		}
 		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
-	}
-
-	claims, ok := token.Claims.(*jwt.RegisteredClaims)
-	if !ok || !token.Valid {
-		return nil, fmt.Errorf("%w: invalid claims", ErrTokenInvalid)
 	}
 
 	userID, err := id.NewUserID(claims.Subject)

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/id"
 )
 
@@ -37,7 +38,7 @@ func TestAuthMiddleware(t *testing.T) {
 		setHeader        bool
 		validateTokenFn  func(ctx context.Context, token string) (*auth.Claims, error)
 		wantStatus       int
-		wantErrorCode    int // 0 means downstream invoked
+		wantErrorCode    errcode.Code // 0 means downstream invoked
 		wantDownstream   bool
 		wantContextUser  string // empty unless wantDownstream is true and we want to verify
 		wantContextCheck bool
@@ -46,7 +47,7 @@ func TestAuthMiddleware(t *testing.T) {
 			name:           "missing Authorization header returns 401 with code 1003",
 			setHeader:      false,
 			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthMissingToken),
+			wantErrorCode:  errcode.AuthMissingToken,
 			wantDownstream: false,
 		},
 		{
@@ -54,7 +55,7 @@ func TestAuthMiddleware(t *testing.T) {
 			setHeader:      true,
 			authHeader:     "Basic dXNlcjpwYXNz",
 			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthMissingToken),
+			wantErrorCode:  errcode.AuthMissingToken,
 			wantDownstream: false,
 		},
 		{
@@ -62,7 +63,7 @@ func TestAuthMiddleware(t *testing.T) {
 			setHeader:      true,
 			authHeader:     "Token abc",
 			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthMissingToken),
+			wantErrorCode:  errcode.AuthMissingToken,
 			wantDownstream: false,
 		},
 		{
@@ -70,7 +71,7 @@ func TestAuthMiddleware(t *testing.T) {
 			setHeader:      true,
 			authHeader:     "abcdef",
 			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthMissingToken),
+			wantErrorCode:  errcode.AuthMissingToken,
 			wantDownstream: false,
 		},
 		{
@@ -78,7 +79,7 @@ func TestAuthMiddleware(t *testing.T) {
 			setHeader:      true,
 			authHeader:     "Bearer ",
 			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthMissingToken),
+			wantErrorCode:  errcode.AuthMissingToken,
 			wantDownstream: false,
 		},
 		{
@@ -86,7 +87,7 @@ func TestAuthMiddleware(t *testing.T) {
 			setHeader:      true,
 			authHeader:     "bearer abc",
 			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthMissingToken),
+			wantErrorCode:  errcode.AuthMissingToken,
 			wantDownstream: false,
 		},
 		{
@@ -112,7 +113,7 @@ func TestAuthMiddleware(t *testing.T) {
 				return nil, fmt.Errorf("%w: underlying detail", auth.ErrTokenExpired)
 			},
 			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthExpiredToken),
+			wantErrorCode:  errcode.AuthExpiredToken,
 			wantDownstream: false,
 		},
 		{
@@ -123,7 +124,7 @@ func TestAuthMiddleware(t *testing.T) {
 				return nil, fmt.Errorf("%w: bad sig", auth.ErrTokenInvalid)
 			},
 			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthInvalidToken),
+			wantErrorCode:  errcode.AuthInvalidToken,
 			wantDownstream: false,
 		},
 		{
@@ -134,7 +135,7 @@ func TestAuthMiddleware(t *testing.T) {
 				return nil, errors.New("something exotic happened")
 			},
 			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthInvalidToken),
+			wantErrorCode:  errcode.AuthInvalidToken,
 			wantDownstream: false,
 		},
 		{
@@ -145,7 +146,7 @@ func TestAuthMiddleware(t *testing.T) {
 				return nil, nil
 			},
 			wantStatus:     http.StatusUnauthorized,
-			wantErrorCode:  int(CodeAuthInvalidToken),
+			wantErrorCode:  errcode.AuthInvalidToken,
 			wantDownstream: false,
 		},
 	}
@@ -276,8 +277,8 @@ func TestGateway_RequireAuth_RejectsMissingHeader(t *testing.T) {
 		t.Fatalf("status: got %d, want 401", rec.Code)
 	}
 	resp := decodeErrorResponse(t, rec.Body)
-	if resp.Error.Code != int(CodeAuthMissingToken) {
-		t.Errorf("code: got %d, want %d", resp.Error.Code, CodeAuthMissingToken)
+	if resp.Error.Code != errcode.AuthMissingToken {
+		t.Errorf("code: got %d, want %d", resp.Error.Code, errcode.AuthMissingToken)
 	}
 }
 
@@ -313,8 +314,8 @@ func TestAuthMiddleware_RejectsTokenWithWhitespace(t *testing.T) {
 				t.Fatalf("status: got %d, want 401 (body=%s)", rec.Code, rec.Body.String())
 			}
 			resp := decodeErrorResponse(t, rec.Body)
-			if resp.Error.Code != int(CodeAuthMissingToken) {
-				t.Errorf("code: got %d, want %d", resp.Error.Code, CodeAuthMissingToken)
+			if resp.Error.Code != errcode.AuthMissingToken {
+				t.Errorf("code: got %d, want %d", resp.Error.Code, errcode.AuthMissingToken)
 			}
 		})
 	}

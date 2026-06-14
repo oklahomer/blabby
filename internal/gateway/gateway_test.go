@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/errcode"
 )
 
 type stubAuthenticator struct {
@@ -74,8 +75,8 @@ func TestRegisterRoutes_WrongMethodReturns405WithJSONEnvelope(t *testing.T) {
 		t.Errorf("Content-Type: got %q, want application/json", got)
 	}
 	resp := decodeErrorResponse(t, rec.Body)
-	if resp.Error.Code != int(CodeInvalidRequest) {
-		t.Errorf("error.code: got %d, want %d", resp.Error.Code, CodeInvalidRequest)
+	if resp.Error.Code != errcode.InvalidRequest {
+		t.Errorf("error.code: got %d, want %d", resp.Error.Code, errcode.InvalidRequest)
 	}
 }
 
@@ -120,7 +121,7 @@ func TestRegisterRoutes_UnknownPathReturns404WithJSONEnvelope(t *testing.T) {
 		t.Errorf("Content-Type: got %q, want application/json", got)
 	}
 	resp := decodeErrorResponse(t, rec.Body)
-	if resp.Error.Code != int(CodeInvalidRequest) {
-		t.Errorf("error.code: got %d, want %d", resp.Error.Code, CodeInvalidRequest)
+	if resp.Error.Code != errcode.InvalidRequest {
+		t.Errorf("error.code: got %d, want %d", resp.Error.Code, errcode.InvalidRequest)
 	}
 }

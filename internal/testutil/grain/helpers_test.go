@@ -1,6 +1,10 @@
 package graintest
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/asynkron/protoactor-go/actor"
+)
 
 func TestNewFakeGrainContext_ReportsIdentityAndKind(t *testing.T) {
 	ctx := NewFakeGrainContext("general")
@@ -35,15 +39,57 @@ func TestNewFakeGrainContext_PanicsOnUnsupportedActorOps(t *testing.T) {
 	_ = ctx.Self() // backed by nil actor.Context — must panic
 }
 
+func TestFakeGrainContext_Options(t *testing.T) {
+	sender := actor.NewPID("test", "sender-1")
+	rec := &WatchRecorder{}
+	ctx := NewFakeGrainContext("room-1",
+		WithKind("RoomGrain"),
+		WithSender(sender),
+		WithMessage("hello"),
+		WithWatchRecorder(rec),
+	)
+
+	if ctx.Sender() != sender {
+		t.Errorf("Sender: got %v, want %v", ctx.Sender(), sender)
+	}
+	if got := ctx.Message(); got != "hello" {
+		t.Errorf("Message: got %v, want %q", got, "hello")
+	}
+
+	// Watch is recorded through the recorder; Unwatch is a no-op that must
+	// not reach the nil embedded actor.Context (it would panic).
+	watched := actor.NewPID("test", "watched-1")
+	ctx.Watch(watched)
+	ctx.Unwatch(watched)
+	pids := rec.PIDs()
+	if len(pids) != 1 || pids[0] != watched {
+		t.Fatalf("WatchRecorder.PIDs: got %v, want [%v]", pids, watched)
+	}
+}
+
+func TestWatch_WithoutRecorderIsNoOp(t *testing.T) {
+	ctx := NewFakeGrainContext("room-1")
+	// No recorder attached: Watch must be a silent no-op and must not reach
+	// the nil embedded actor.Context.
+	ctx.Watch(actor.NewPID("test", "x"))
+}
+
+func TestNewFakeGrainContextWithMessage(t *testing.T) {
+	ctx := NewFakeGrainContextWithMessage("room-1", 42)
+	if got := ctx.Message(); got != 42 {
+		t.Errorf("Message: got %v, want 42", got)
+	}
+	if got := ctx.Identity(); got != "room-1" {
+		t.Errorf("Identity: got %q, want %q", got, "room-1")
+	}
+}
+
 func TestRequestConstructors(t *testing.T) {
 	if got := NewJoinRequest("alice"); got.GetUser().GetId() != "alice" {
 		t.Errorf("NewJoinRequest user id: got %q, want %q", got.GetUser().GetId(), "alice")
 	}
 	if got := NewJoinRequest("alice"); got.GetUser().GetName() != "alice" {
 		t.Errorf("NewJoinRequest user name: got %q, want %q (defaults to id)", got.GetUser().GetName(), "alice")
-	}
-	if got := NewLeaveRequest("bob"); got.GetUserId() != "bob" {
-		t.Errorf("NewLeaveRequest user_id: got %q, want %q", got.GetUserId(), "bob")
 	}
 	got := NewPostMessageRequest("carol", "hello")
 	if got.GetUser().GetId() != "carol" || got.GetText() != "hello" {

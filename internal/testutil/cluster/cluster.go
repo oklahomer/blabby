@@ -3,6 +3,18 @@
 //
 // The Start function is for in-process integration tests only; do not use it
 // in production wiring. Production cluster startup lives in internal/clusterboot.
+//
+// # One cluster per package, shared across tests
+//
+// protoactor-go's remote.Start calls grpclog.SetLoggerV2, a process-global
+// write. Booting a second cluster while a previous cluster's grpc balancer
+// goroutine is still reading that global races under the race detector. The
+// race lives in protoactor/grpc, not in blabby. A test package that needs a
+// cluster should therefore start ONE in TestMain and share it across its
+// tests — each test using a distinct grain identity so state never overlaps —
+// rather than calling Start in every test. internal/grain/user/main_test.go is
+// the canonical TestMain shape (a minimal testing.TB stand-in plus LIFO
+// cleanups that run even if a test panics).
 package clustertest
 
 import (
@@ -50,6 +62,7 @@ type TB interface {
 	Helper()
 	Cleanup(func())
 	Fatalf(format string, args ...any)
+	Errorf(format string, args ...any)
 }
 
 // defaultRequestTimeout is the per-cluster-call timeout for tests that
@@ -112,7 +125,7 @@ func StartWithTimeout(tb TB, requestTimeout time.Duration, kinds ...*cluster.Kin
 	c := cluster.New(system, clusterCfg)
 	c.StartMember()
 
-	tb.Cleanup(func() { c.Shutdown(true) })
+	tb.Cleanup(func() { shutdownCluster(tb, c) })
 
 	// StartMember only sleeps 1s before returning; the automanaged
 	// provider's HTTP listener and first gossip cycle may not have
@@ -158,6 +171,30 @@ func waitForClusterReady(tb TB, autoPort int) {
 	}
 
 	time.Sleep(automanagedRefreshTTL + gossipSettleBuffer)
+}
+
+// clusterShutdownTimeout bounds how long a test's cleanup waits for
+// cluster.Shutdown to return. cluster.Shutdown(true) blocks until every actor
+// has stopped, so a grain whose Terminate hangs would otherwise wedge the whole
+// test binary until `go test` times out. Bounding it converts that into a
+// clear, localized cleanup failure on the owning test.
+const clusterShutdownTimeout = 10 * time.Second
+
+// shutdownCluster shuts c down without ever blocking the test process longer
+// than clusterShutdownTimeout. Shutdown runs in its own goroutine because it
+// blocks until all actors stop and a buggy Terminate can block forever.
+func shutdownCluster(tb TB, c *cluster.Cluster) {
+	tb.Helper()
+	done := make(chan struct{})
+	go func() {
+		c.Shutdown(true)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(clusterShutdownTimeout):
+		tb.Errorf("cluster shutdown did not complete within %s (a grain Terminate may be blocked)", clusterShutdownTimeout)
+	}
 }
 
 // freeTCPPort asks the kernel for an unused TCP port on the loopback

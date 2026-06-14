@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/gorilla/websocket"
+
+	"github.com/oklahomer/blabby/internal/errcode"
 )
 
 func TestEncodeAuthOk(t *testing.T) {
@@ -18,40 +22,56 @@ func TestEncodeAuthOk(t *testing.T) {
 func TestEncodeAuthError(t *testing.T) {
 	tests := []struct {
 		name    string
-		code    int32
-		status  string
+		code    errcode.Code
 		message string
 		want    string
 	}{
 		{
 			name:    "invalid token",
-			code:    1001,
-			status:  "AUTH_INVALID_TOKEN",
+			code:    errcode.AuthInvalidToken,
 			message: "invalid token",
 			want:    `{"code":1001,"message":"invalid token","status":"AUTH_INVALID_TOKEN","type":"auth_error"}`,
 		},
 		{
 			name:    "expired token",
-			code:    1002,
-			status:  "AUTH_EXPIRED_TOKEN",
+			code:    errcode.AuthExpiredToken,
 			message: "token has expired",
 			want:    `{"code":1002,"message":"token has expired","status":"AUTH_EXPIRED_TOKEN","type":"auth_error"}`,
 		},
 		{
 			name:    "missing token",
-			code:    1003,
-			status:  "AUTH_MISSING_TOKEN",
+			code:    errcode.AuthMissingToken,
 			message: "missing authentication token",
 			want:    `{"code":1003,"message":"missing authentication token","status":"AUTH_MISSING_TOKEN","type":"auth_error"}`,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := encodeAuthError(tc.code, tc.status, tc.message)
+			got := encodeAuthError(tc.code, tc.message)
 			if string(got) != tc.want {
 				t.Errorf("encodeAuthError = %s\nwant %s", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEncodeOutboundErrorResponse(t *testing.T) {
+	frame, ok := encodeOutboundMessage(&ErrorResponse{
+		Code:    errcode.RoomNotMember,
+		Message: "not a member",
+	})
+	if !ok {
+		t.Fatal("encodeOutboundMessage returned ok=false")
+	}
+	if frame.messageType != websocket.TextMessage {
+		t.Errorf("messageType = %d, want %d", frame.messageType, websocket.TextMessage)
+	}
+	if frame.eventKind != "error" {
+		t.Errorf("eventKind = %q, want error", frame.eventKind)
+	}
+	want := `{"code":2001,"message":"not a member","status":"ROOM_NOT_MEMBER","type":"error"}`
+	if string(frame.data) != want {
+		t.Errorf("encoded data = %s\nwant %s", frame.data, want)
 	}
 }
 
@@ -106,7 +126,7 @@ func TestEncodersNeverLeakSensitiveSubstrings(t *testing.T) {
 	const tokenSubstr = "ey-secret-jwt-payload"
 	const internalErr = "panic: runtime error"
 	out1 := encodeMessage("r", UserRef{ID: "s", Name: "sn"}, "harmless body", 1)
-	out2 := encodeAuthError(1001, "AUTH_INVALID_TOKEN", "invalid token")
+	out2 := encodeAuthError(errcode.AuthInvalidToken, "invalid token")
 
 	for _, b := range [][]byte{out1, out2} {
 		s := string(b)

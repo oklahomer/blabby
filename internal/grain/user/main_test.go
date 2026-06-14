@@ -2,6 +2,7 @@ package user_test
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -84,14 +85,19 @@ func TestMain(m *testing.M) {
 	// We need to call clustertest.Start with a *testing.T, but TestMain
 	// runs before any test exists. Construct a minimal stand-in: the
 	// helper only uses Helper, Cleanup, Fatalf, Errorf.
-	t := &mainT{}
-	sharedCluster = clustertest.Start(t, roomKind, userKind)
+	t := &mainT{output: os.Stderr}
 
-	// Wrap m.Run in a closure so the deferred cleanup runs before
-	// os.Exit (which skips defers). This guarantees cluster shutdown
-	// even if a test panics.
-	exit := func() int {
-		defer t.runCleanups()
+	// Run setup and tests inside one closure so the deferred cleanup runs
+	// before os.Exit (which skips defers). Starting the cluster INSIDE the
+	// closure means a Fatalf during bootstrap panics through runCleanups,
+	// shutting down whatever the partially-started cluster registered rather
+	// than leaking it; cleanup also runs if a test panics.
+	exit := func() (code int) {
+		defer func() {
+			t.runCleanups()
+			code = t.exitCode(code)
+		}()
+		sharedCluster = clustertest.Start(t, roomKind, userKind)
 		return m.Run()
 	}()
 	os.Exit(exit)
@@ -100,10 +106,12 @@ func TestMain(m *testing.M) {
 // mainT is a minimal *testing.T-shaped value usable from TestMain. It
 // satisfies the subset of methods that clustertest.Start invokes:
 // Helper (no-op), Cleanup (recorded for end-of-suite execution),
-// Fatalf (panics to abort TestMain), Errorf (logs to stderr).
+// Fatalf (panics to abort TestMain), Errorf (records failure and logs).
 type mainT struct {
 	mu       sync.Mutex
 	cleanups []func()
+	failed   bool
+	output   io.Writer
 }
 
 func (m *mainT) Helper() {}
@@ -120,12 +128,30 @@ func (m *mainT) Fatalf(format string, args ...any) {
 	panic(fmt.Sprintf("TestMain setup failed: "+format, args...))
 }
 
-// Errorf surfaces non-fatal warnings to stderr instead of dropping them.
-// clustertest.Start does not currently call Errorf, but adding the method
-// to the TB interface in the future would silently mask diagnostics
-// without this implementation.
+// Errorf records a package-level test failure and surfaces the diagnostic.
+// TestMain checks the recorded state after cleanups so shutdown failures cannot
+// leave a successful m.Run exit code unchanged.
 func (m *mainT) Errorf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "[clustertest] "+format+"\n", args...)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failed = true
+	out := m.output
+	if out == nil {
+		out = os.Stderr
+	}
+	// Best-effort diagnostic; a failed write to the test's own output is not
+	// actionable and must not mask the recorded failure above.
+	_, _ = fmt.Fprintf(out, "[clustertest] "+format+"\n", args...)
+}
+
+func (m *mainT) exitCode(code int) int {
+	m.mu.Lock()
+	failed := m.failed
+	m.mu.Unlock()
+	if code == 0 && failed {
+		return 1
+	}
+	return code
 }
 
 func (m *mainT) runCleanups() {
@@ -137,13 +163,13 @@ func (m *mainT) runCleanups() {
 	m.mu.Unlock()
 
 	// LIFO order, like *testing.T. Each cleanup is wrapped in its own
-	// recover so a panicking cleanup does not prevent later cleanups
-	// (notably the cluster shutdown) from running.
+	// recover so a panicking cleanup records failure without preventing later
+	// cleanups (notably the cluster shutdown) from running.
 	for i := len(cleanups) - 1; i >= 0; i-- {
 		func(fn func()) {
 			defer func() {
 				if r := recover(); r != nil {
-					fmt.Fprintf(os.Stderr, "[clustertest] cleanup panicked: %v\n", r)
+					m.Errorf("cleanup panicked: %v", r)
 				}
 			}()
 			fn()

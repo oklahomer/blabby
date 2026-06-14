@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
+	"github.com/oklahomer/blabby/internal/errcode"
 )
 
 func TestErrorResponseJSONSerialization(t *testing.T) {
@@ -55,7 +56,7 @@ func TestErrorResponseJSONSerialization(t *testing.T) {
 }
 
 func TestNewErrorDetail(t *testing.T) {
-	detail := NewErrorDetail(CodeAuthInvalidToken, "invalid token")
+	detail := NewErrorDetail(errcode.AuthInvalidToken, "invalid token")
 
 	if detail.Code != 1001 {
 		t.Errorf("expected code 1001, got %d", detail.Code)
@@ -68,103 +69,12 @@ func TestNewErrorDetail(t *testing.T) {
 	}
 }
 
-func TestErrorCodeConstants(t *testing.T) {
-	tests := []struct {
-		name string
-		code ErrorCode
-		want int
-	}{
-		{"CodeAuthInvalidToken", CodeAuthInvalidToken, 1001},
-		{"CodeAuthExpiredToken", CodeAuthExpiredToken, 1002},
-		{"CodeAuthMissingToken", CodeAuthMissingToken, 1003},
-		{"CodeRoomNotMember", CodeRoomNotMember, 2001},
-		{"CodeRoomAlreadyMember", CodeRoomAlreadyMember, 2002},
-		{"CodeRoomNotFound", CodeRoomNotFound, 2003},
-		{"CodeRateLimitExceeded", CodeRateLimitExceeded, 3001},
-		{"CodeInvalidRequest", CodeInvalidRequest, 4001},
-		{"CodeMissingField", CodeMissingField, 4002},
-		{"CodePayloadTooLarge", CodePayloadTooLarge, 4003},
-		{"CodeInternalError", CodeInternalError, 5001},
-		{"CodeServiceUnavailable", CodeServiceUnavailable, 5002},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if int(tt.code) != tt.want {
-				t.Errorf("%s = %d, want %d", tt.name, tt.code, tt.want)
-			}
-		})
-	}
-}
-
-func TestErrorCodeStatus(t *testing.T) {
-	tests := []struct {
-		code ErrorCode
-		want string
-	}{
-		{CodeAuthInvalidToken, "AUTH_INVALID_TOKEN"},
-		{CodeAuthExpiredToken, "AUTH_EXPIRED_TOKEN"},
-		{CodeAuthMissingToken, "AUTH_MISSING_TOKEN"},
-		{CodeRoomNotMember, "ROOM_NOT_MEMBER"},
-		{CodeRoomAlreadyMember, "ROOM_ALREADY_MEMBER"},
-		{CodeRoomNotFound, "ROOM_NOT_FOUND"},
-		{CodeRateLimitExceeded, "RATE_LIMIT_EXCEEDED"},
-		{CodeInvalidRequest, "INVALID_REQUEST"},
-		{CodeMissingField, "MISSING_FIELD"},
-		{CodePayloadTooLarge, "PAYLOAD_TOO_LARGE"},
-		{CodeInternalError, "INTERNAL_ERROR"},
-		{CodeServiceUnavailable, "SERVICE_UNAVAILABLE"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			if got := tt.code.Status(); got != tt.want {
-				t.Errorf("ErrorCode(%d).Status() = %q, want %q", tt.code, got, tt.want)
-			}
-		})
-	}
-
-	t.Run("unknown code", func(t *testing.T) {
-		if got := ErrorCode(9999).Status(); got != "UNKNOWN_ERROR" {
-			t.Errorf("ErrorCode(9999).Status() = %q, want %q", got, "UNKNOWN_ERROR")
-		}
-	})
-}
-
-func TestErrorCodeExhaustiveness(t *testing.T) {
-	allCodes := []ErrorCode{
-		CodeAuthInvalidToken, CodeAuthExpiredToken, CodeAuthMissingToken,
-		CodeRoomNotMember, CodeRoomAlreadyMember, CodeRoomNotFound,
-		CodeRateLimitExceeded,
-		CodeInvalidRequest, CodeMissingField, CodePayloadTooLarge,
-		CodeInternalError, CodeServiceUnavailable,
-	}
-
-	t.Run("all codes have a Status mapping", func(t *testing.T) {
-		for _, code := range allCodes {
-			if code.Status() == "UNKNOWN_ERROR" {
-				t.Errorf("ErrorCode(%d) returns UNKNOWN_ERROR — missing case in Status()", code)
-			}
-		}
-	})
-
-	t.Run("all codes are unique", func(t *testing.T) {
-		seen := make(map[ErrorCode]bool)
-		for _, code := range allCodes {
-			if seen[code] {
-				t.Errorf("duplicate ErrorCode value: %d", code)
-			}
-			seen[code] = true
-		}
-	})
-}
-
 func TestWriteErrorResponse(t *testing.T) {
 	tests := []struct {
 		name           string
 		httpStatus     int
 		detail         ErrorDetail
-		wantCode       int
+		wantCode       errcode.Code
 		wantStatus     string
 		wantMessage    string
 		wantHTTPStatus int
@@ -172,7 +82,7 @@ func TestWriteErrorResponse(t *testing.T) {
 		{
 			name:           "unauthorized error",
 			httpStatus:     http.StatusUnauthorized,
-			detail:         NewErrorDetail(CodeAuthInvalidToken, "token is invalid"),
+			detail:         NewErrorDetail(errcode.AuthInvalidToken, "token is invalid"),
 			wantCode:       1001,
 			wantStatus:     "AUTH_INVALID_TOKEN",
 			wantMessage:    "token is invalid",
@@ -181,7 +91,7 @@ func TestWriteErrorResponse(t *testing.T) {
 		{
 			name:           "not found error",
 			httpStatus:     http.StatusNotFound,
-			detail:         NewErrorDetail(CodeRoomNotFound, "room does not exist"),
+			detail:         NewErrorDetail(errcode.RoomNotFound, "room does not exist"),
 			wantCode:       2003,
 			wantStatus:     "ROOM_NOT_FOUND",
 			wantMessage:    "room does not exist",
@@ -190,7 +100,7 @@ func TestWriteErrorResponse(t *testing.T) {
 		{
 			name:           "internal error",
 			httpStatus:     http.StatusInternalServerError,
-			detail:         NewErrorDetail(CodeInternalError, "an internal error occurred"),
+			detail:         NewErrorDetail(errcode.InternalError, "an internal error occurred"),
 			wantCode:       5001,
 			wantStatus:     "INTERNAL_ERROR",
 			wantMessage:    "an internal error occurred",
@@ -266,39 +176,67 @@ func TestFromProtoErrorDetail(t *testing.T) {
 			t.Errorf("error = %v, want %v", err, ErrNilProtoErrorDetail)
 		}
 	})
+
+	tests := []struct {
+		name      string
+		proto     *commonpb.ErrorDetail
+		wantCause error
+	}{
+		{
+			name:      "rejects mismatched status",
+			proto:     &commonpb.ErrorDetail{Code: 2001, Status: "ROOM_NOT_FOUND", Message: "bad pair"},
+			wantCause: errcode.ErrStatusMismatch,
+		},
+		{
+			name:      "rejects unknown code",
+			proto:     &commonpb.ErrorDetail{Code: 9999, Status: "UNKNOWN_ERROR", Message: "bad code"},
+			wantCause: errcode.ErrUnknownCode,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := FromProtoErrorDetail(tt.proto)
+			if !errors.Is(err, ErrInvalidProtoErrorDetail) {
+				t.Errorf("error = %v, want %v", err, ErrInvalidProtoErrorDetail)
+			}
+			if !errors.Is(err, tt.wantCause) {
+				t.Errorf("error = %v, want cause %v", err, tt.wantCause)
+			}
+		})
+	}
 }
 
-func TestErrorCodeHTTPStatus(t *testing.T) {
+func TestHTTPStatus(t *testing.T) {
 	tests := []struct {
 		name string
-		code ErrorCode
+		code errcode.Code
 		want int
 	}{
-		{"AuthInvalidToken→401", CodeAuthInvalidToken, http.StatusUnauthorized},
-		{"AuthExpiredToken→401", CodeAuthExpiredToken, http.StatusUnauthorized},
-		{"AuthMissingToken→401", CodeAuthMissingToken, http.StatusUnauthorized},
-		{"RoomNotMember→403", CodeRoomNotMember, http.StatusForbidden},
-		{"RoomAlreadyMember→409", CodeRoomAlreadyMember, http.StatusConflict},
-		{"RoomNotFound→404", CodeRoomNotFound, http.StatusNotFound},
-		{"RateLimitExceeded→429", CodeRateLimitExceeded, http.StatusTooManyRequests},
-		{"InvalidRequest→400", CodeInvalidRequest, http.StatusBadRequest},
-		{"MissingField→400", CodeMissingField, http.StatusBadRequest},
-		{"PayloadTooLarge→413", CodePayloadTooLarge, http.StatusRequestEntityTooLarge},
-		{"InternalError→500", CodeInternalError, http.StatusInternalServerError},
-		{"ServiceUnavailable→503", CodeServiceUnavailable, http.StatusServiceUnavailable},
+		{"AuthInvalidToken→401", errcode.AuthInvalidToken, http.StatusUnauthorized},
+		{"AuthExpiredToken→401", errcode.AuthExpiredToken, http.StatusUnauthorized},
+		{"AuthMissingToken→401", errcode.AuthMissingToken, http.StatusUnauthorized},
+		{"RoomNotMember→403", errcode.RoomNotMember, http.StatusForbidden},
+		{"RoomAlreadyMember→409", errcode.RoomAlreadyMember, http.StatusConflict},
+		{"RoomNotFound→404", errcode.RoomNotFound, http.StatusNotFound},
+		{"RateLimitExceeded→429", errcode.RateLimitExceeded, http.StatusTooManyRequests},
+		{"InvalidRequest→400", errcode.InvalidRequest, http.StatusBadRequest},
+		{"MissingField→400", errcode.MissingField, http.StatusBadRequest},
+		{"PayloadTooLarge→413", errcode.PayloadTooLarge, http.StatusRequestEntityTooLarge},
+		{"InternalError→500", errcode.InternalError, http.StatusInternalServerError},
+		{"ServiceUnavailable→503", errcode.ServiceUnavailable, http.StatusServiceUnavailable},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.code.HTTPStatus(); got != tt.want {
-				t.Errorf("ErrorCode(%d).HTTPStatus() = %d, want %d", tt.code, got, tt.want)
+			if got := httpStatus(tt.code); got != tt.want {
+				t.Errorf("httpStatus(%d) = %d, want %d", tt.code, got, tt.want)
 			}
 		})
 	}
 
 	t.Run("unknown code falls through to 500", func(t *testing.T) {
-		if got := ErrorCode(9999).HTTPStatus(); got != http.StatusInternalServerError {
-			t.Errorf("ErrorCode(9999).HTTPStatus() = %d, want %d", got, http.StatusInternalServerError)
+		if got := httpStatus(errcode.Code(9999)); got != http.StatusInternalServerError {
+			t.Errorf("httpStatus(9999) = %d, want %d", got, http.StatusInternalServerError)
 		}
 	})
 }
@@ -307,7 +245,7 @@ func TestConvenienceErrorFunctions(t *testing.T) {
 	tests := []struct {
 		name       string
 		fn         func(string) ErrorDetail
-		wantCode   int
+		wantCode   errcode.Code
 		wantStatus string
 	}{
 		{"ErrAuthInvalidToken", ErrAuthInvalidToken, 1001, "AUTH_INVALID_TOKEN"},

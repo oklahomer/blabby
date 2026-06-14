@@ -3,100 +3,35 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
+	"github.com/oklahomer/blabby/internal/errcode"
 )
 
-// ErrorCode is a typed error code for programmatic error handling.
-type ErrorCode int
-
-// Error codes — Authentication (1000-1999)
-const (
-	CodeAuthInvalidToken ErrorCode = 1001
-	CodeAuthExpiredToken ErrorCode = 1002
-	CodeAuthMissingToken ErrorCode = 1003
-)
-
-// Error codes — Room / Membership (2000-2999)
-const (
-	CodeRoomNotMember     ErrorCode = 2001
-	CodeRoomAlreadyMember ErrorCode = 2002
-	CodeRoomNotFound      ErrorCode = 2003
-)
-
-// Error codes — Rate Limiting (3000-3999)
-const (
-	CodeRateLimitExceeded ErrorCode = 3001
-)
-
-// Error codes — Validation (4000-4999)
-const (
-	CodeInvalidRequest  ErrorCode = 4001
-	CodeMissingField    ErrorCode = 4002
-	CodePayloadTooLarge ErrorCode = 4003
-)
-
-// Error codes — System / Internal (5000-5999)
-const (
-	CodeInternalError      ErrorCode = 5001
-	CodeServiceUnavailable ErrorCode = 5002
-)
-
-// Status returns the canonical status string for the error code.
-func (c ErrorCode) Status() string {
-	switch c {
-	case CodeAuthInvalidToken:
-		return "AUTH_INVALID_TOKEN"
-	case CodeAuthExpiredToken:
-		return "AUTH_EXPIRED_TOKEN"
-	case CodeAuthMissingToken:
-		return "AUTH_MISSING_TOKEN"
-	case CodeRoomNotMember:
-		return "ROOM_NOT_MEMBER"
-	case CodeRoomAlreadyMember:
-		return "ROOM_ALREADY_MEMBER"
-	case CodeRoomNotFound:
-		return "ROOM_NOT_FOUND"
-	case CodeRateLimitExceeded:
-		return "RATE_LIMIT_EXCEEDED"
-	case CodeInvalidRequest:
-		return "INVALID_REQUEST"
-	case CodeMissingField:
-		return "MISSING_FIELD"
-	case CodePayloadTooLarge:
-		return "PAYLOAD_TOO_LARGE"
-	case CodeInternalError:
-		return "INTERNAL_ERROR"
-	case CodeServiceUnavailable:
-		return "SERVICE_UNAVAILABLE"
-	default:
-		return "UNKNOWN_ERROR"
-	}
-}
-
-// HTTPStatus returns the canonical HTTP status code for the error code.
-// It is the single source of truth for the gateway's code → HTTP mapping;
+// httpStatus returns the canonical HTTP status for a shared error code. It is
+// the single source of truth for the gateway's code → HTTP mapping;
 // every handler that translates a grain error into an HTTP response
 // calls it so the mapping cannot drift across endpoints.
-func (c ErrorCode) HTTPStatus() int {
-	switch c {
-	case CodeAuthInvalidToken, CodeAuthExpiredToken, CodeAuthMissingToken:
+func httpStatus(code errcode.Code) int {
+	switch code {
+	case errcode.AuthInvalidToken, errcode.AuthExpiredToken, errcode.AuthMissingToken:
 		return http.StatusUnauthorized
-	case CodeRoomNotMember:
+	case errcode.RoomNotMember:
 		return http.StatusForbidden
-	case CodeRoomAlreadyMember:
+	case errcode.RoomAlreadyMember:
 		return http.StatusConflict
-	case CodeRoomNotFound:
+	case errcode.RoomNotFound:
 		return http.StatusNotFound
-	case CodeRateLimitExceeded:
+	case errcode.RateLimitExceeded:
 		return http.StatusTooManyRequests
-	case CodeInvalidRequest, CodeMissingField:
+	case errcode.InvalidRequest, errcode.MissingField:
 		return http.StatusBadRequest
-	case CodePayloadTooLarge:
+	case errcode.PayloadTooLarge:
 		return http.StatusRequestEntityTooLarge
-	case CodeServiceUnavailable:
+	case errcode.ServiceUnavailable:
 		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
@@ -105,9 +40,9 @@ func (c ErrorCode) HTTPStatus() int {
 
 // ErrorDetail holds the error information for an API error response.
 type ErrorDetail struct {
-	Code    int    `json:"code"`
-	Status  string `json:"status"`
-	Message string `json:"message"`
+	Code    errcode.Code `json:"code"`
+	Status  string       `json:"status"`
+	Message string       `json:"message"`
 }
 
 // ErrorResponse is the top-level JSON envelope wrapping ErrorDetail.
@@ -115,10 +50,10 @@ type ErrorResponse struct {
 	Error ErrorDetail `json:"error"`
 }
 
-// NewErrorDetail constructs an ErrorDetail, deriving the status string from the ErrorCode.
-func NewErrorDetail(code ErrorCode, message string) ErrorDetail {
+// NewErrorDetail constructs an ErrorDetail, deriving status from the shared code.
+func NewErrorDetail(code errcode.Code, message string) ErrorDetail {
 	return ErrorDetail{
-		Code:    int(code),
+		Code:    code,
 		Status:  code.Status(),
 		Message: message,
 	}
@@ -139,63 +74,77 @@ func WriteErrorResponse(w http.ResponseWriter, httpStatus int, detail ErrorDetai
 // indicating a broken grain contract (failure reported without error details).
 var ErrNilProtoErrorDetail = errors.New("proto ErrorDetail is nil")
 
+// ErrInvalidProtoErrorDetail is returned when a protobuf ErrorDetail carries
+// an unknown code or a status that does not match its code.
+var ErrInvalidProtoErrorDetail = errors.New("proto ErrorDetail has invalid taxonomy")
+
 // FromProtoErrorDetail converts a protobuf ErrorDetail to a gateway ErrorDetail.
-// It returns an error if the proto is nil, which indicates a grain reported failure
-// without providing error details.
+// It returns an error if the proto is nil or its raw code/status pair does not
+// parse into the shared taxonomy.
 func FromProtoErrorDetail(proto *commonpb.ErrorDetail) (ErrorDetail, error) {
 	if proto == nil {
 		return ErrorDetail{}, ErrNilProtoErrorDetail
 	}
-	return ErrorDetail{
-		Code:    int(proto.Code),
-		Status:  proto.Status,
-		Message: proto.Message,
-	}, nil
+	code, err := errcode.Parse(proto.GetCode(), proto.GetStatus())
+	if err != nil {
+		return ErrorDetail{}, fmt.Errorf("%w: %w", ErrInvalidProtoErrorDetail, err)
+	}
+	return NewErrorDetail(code, proto.GetMessage()), nil
 }
 
-// Convenience constructors for common errors. Each pairs a fixed ErrorCode with
+// Convenience constructors for common errors. Each pairs a fixed code with
 // NewErrorDetail so call sites supply only the client-facing message and cannot
 // mismatch a code with the wrong status.
 
 // ErrAuthInvalidToken builds an ErrorDetail for a token that failed validation.
-func ErrAuthInvalidToken(msg string) ErrorDetail { return NewErrorDetail(CodeAuthInvalidToken, msg) }
+func ErrAuthInvalidToken(msg string) ErrorDetail {
+	return NewErrorDetail(errcode.AuthInvalidToken, msg)
+}
 
 // ErrAuthExpiredToken builds an ErrorDetail for an expired authentication token.
-func ErrAuthExpiredToken(msg string) ErrorDetail { return NewErrorDetail(CodeAuthExpiredToken, msg) }
+func ErrAuthExpiredToken(msg string) ErrorDetail {
+	return NewErrorDetail(errcode.AuthExpiredToken, msg)
+}
 
 // ErrAuthMissingToken builds an ErrorDetail for a request carrying no auth token.
-func ErrAuthMissingToken(msg string) ErrorDetail { return NewErrorDetail(CodeAuthMissingToken, msg) }
+func ErrAuthMissingToken(msg string) ErrorDetail {
+	return NewErrorDetail(errcode.AuthMissingToken, msg)
+}
 
 // ErrRoomNotMember builds an ErrorDetail for an action that requires a room
 // membership the caller does not hold.
-func ErrRoomNotMember(msg string) ErrorDetail { return NewErrorDetail(CodeRoomNotMember, msg) }
+func ErrRoomNotMember(msg string) ErrorDetail { return NewErrorDetail(errcode.RoomNotMember, msg) }
 
 // ErrRoomAlreadyMember builds an ErrorDetail for joining a room the caller has
 // already joined.
-func ErrRoomAlreadyMember(msg string) ErrorDetail { return NewErrorDetail(CodeRoomAlreadyMember, msg) }
+func ErrRoomAlreadyMember(msg string) ErrorDetail {
+	return NewErrorDetail(errcode.RoomAlreadyMember, msg)
+}
 
 // ErrRoomNotFound builds an ErrorDetail for a reference to an unknown room.
-func ErrRoomNotFound(msg string) ErrorDetail { return NewErrorDetail(CodeRoomNotFound, msg) }
+func ErrRoomNotFound(msg string) ErrorDetail { return NewErrorDetail(errcode.RoomNotFound, msg) }
 
 // ErrRateLimitExceeded builds an ErrorDetail for a caller that exceeded its
 // rate limit.
-func ErrRateLimitExceeded(msg string) ErrorDetail { return NewErrorDetail(CodeRateLimitExceeded, msg) }
+func ErrRateLimitExceeded(msg string) ErrorDetail {
+	return NewErrorDetail(errcode.RateLimitExceeded, msg)
+}
 
 // ErrInvalidRequest builds an ErrorDetail for a malformed or semantically
 // invalid request.
-func ErrInvalidRequest(msg string) ErrorDetail { return NewErrorDetail(CodeInvalidRequest, msg) }
+func ErrInvalidRequest(msg string) ErrorDetail { return NewErrorDetail(errcode.InvalidRequest, msg) }
 
 // ErrMissingField builds an ErrorDetail for a request missing a required field.
-func ErrMissingField(msg string) ErrorDetail { return NewErrorDetail(CodeMissingField, msg) }
+func ErrMissingField(msg string) ErrorDetail { return NewErrorDetail(errcode.MissingField, msg) }
 
 // ErrPayloadTooLarge builds an ErrorDetail for a request body over the size limit.
-func ErrPayloadTooLarge(msg string) ErrorDetail { return NewErrorDetail(CodePayloadTooLarge, msg) }
+func ErrPayloadTooLarge(msg string) ErrorDetail { return NewErrorDetail(errcode.PayloadTooLarge, msg) }
 
 // ErrInternalError builds an ErrorDetail for an unexpected server-side failure.
-func ErrInternalError(msg string) ErrorDetail { return NewErrorDetail(CodeInternalError, msg) }
+func ErrInternalError(msg string) ErrorDetail { return NewErrorDetail(errcode.InternalError, msg) }
 
 // ErrServiceUnavailable builds an ErrorDetail for a temporarily unavailable
 // dependency.
 func ErrServiceUnavailable(msg string) ErrorDetail {
-	return NewErrorDetail(CodeServiceUnavailable, msg)
+	return NewErrorDetail(errcode.ServiceUnavailable, msg)
 }
