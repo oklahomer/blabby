@@ -63,8 +63,11 @@ coverage:
 docker:
 	docker build -t blabby .
 
+# --remove-orphans prunes containers for services no longer in the compose file
+# (e.g. a container left over from a removed/renamed service) so they neither
+# linger nor trigger a compose warning. It never touches services still defined.
 up:
-	docker compose up
+	docker compose up --remove-orphans
 
 setup-hooks:
 	git config core.hooksPath .githooks
@@ -75,7 +78,7 @@ setup-hooks:
 # current schema, since the init script runs only against an empty data directory.
 db-reset:
 	docker compose down -v
-	docker compose up -d postgres
+	docker compose up -d --remove-orphans postgres
 
 # Open an interactive psql shell against the running postgres service.
 db-shell:
