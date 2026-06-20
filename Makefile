@@ -1,7 +1,11 @@
-.PHONY: generate build test test-race test-cluster lint spec-lint docs-preview coverage docker up setup-hooks
+.PHONY: generate build test test-race test-cluster lint spec-lint docs-preview coverage docker up db-reset db-shell setup-hooks
 
 DOCS_PORT ?= 8081
 ASYNCAPI_PORT ?= 8082
+
+# Dev database credentials used by db-shell; match the docker-compose.yml defaults.
+POSTGRES_USER ?= blabby
+POSTGRES_DB ?= blabby
 
 generate:
 	buf generate
@@ -59,8 +63,23 @@ coverage:
 docker:
 	docker build -t blabby .
 
+# --remove-orphans prunes containers for services no longer in the compose file
+# (e.g. a container left over from a removed/renamed service) so they neither
+# linger nor trigger a compose warning. It never touches services still defined.
 up:
-	docker compose up
+	docker compose up --remove-orphans
 
 setup-hooks:
 	git config core.hooksPath .githooks
+
+# Recreate the database from a clean volume. `docker compose down -v` removes the
+# named db-data volume; bringing postgres back up re-runs the entrypoint, which
+# applies internal/persistence/schema.sql. This is the canonical way to apply the
+# current schema, since the init script runs only against an empty data directory.
+db-reset:
+	docker compose down -v
+	docker compose up -d --remove-orphans postgres
+
+# Open an interactive psql shell against the running postgres service.
+db-shell:
+	docker compose exec postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)

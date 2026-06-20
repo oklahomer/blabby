@@ -28,3 +28,29 @@ services:
       - "--seeds=backend:6330"
     ports:
       - "${SERVER_PORT:-8080}:8080"
+
+  # Persistent storage: PostgreSQL with the PGroonga extension for CJK-aware
+  # full-text search. The app tiers do not depend on this service yet — Phase 1
+  # in-memory behavior is unchanged — it is provisioned here so `make up` brings
+  # up a ready database for local development. On a fresh volume the entrypoint
+  # runs the mounted schema.sql (which creates the PGroonga extension); use
+  # `make db-reset` to re-provision after editing the schema.
+  postgres:
+    image: groonga/pgroonga:4.0.6-alpine-17
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-blabby}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-blabby}"
+      POSTGRES_DB: "${POSTGRES_DB:-blabby}"
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./internal/persistence/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-blabby} -d ${POSTGRES_DB:-blabby}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db-data:

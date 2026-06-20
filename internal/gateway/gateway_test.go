@@ -31,9 +31,6 @@ func (s *stubAuthenticator) ValidateToken(ctx context.Context, token string) (*a
 func TestNewGateway(t *testing.T) {
 	stub := &stubAuthenticator{}
 	g := NewGateway(stub, nil, nil)
-	if g == nil {
-		t.Fatal("NewGateway returned nil")
-	}
 	if g.auth != stub {
 		t.Fatal("Gateway.auth does not reference the authenticator passed to the constructor")
 	}
