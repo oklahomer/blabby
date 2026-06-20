@@ -32,9 +32,6 @@ func TestBuildConstructsCluster(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			c := Build(tc.cc, Kinds(nil)...)
-			if c == nil {
-				t.Fatal("Build returned nil")
-			}
 			if c.ActorSystem == nil {
 				t.Fatal("Build returned a cluster without an actor system")
 			}
@@ -59,9 +56,6 @@ func TestKindsRegistersUserAndRoom(t *testing.T) {
 
 	got := make(map[string]bool, len(kinds))
 	for _, k := range kinds {
-		if k == nil {
-			t.Fatal("Kinds returned a nil kind")
-		}
 		got[k.Kind] = true
 	}
 
