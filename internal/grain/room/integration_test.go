@@ -75,7 +75,7 @@ func TestRoomGrain_Integration_FanOutThroughCluster(t *testing.T) {
 	// retry internally until the topology is ready.
 	roomClient := roompb.GetRoomGrainGrainClient(c, "general")
 
-	joinResp, err := roomClient.Join(graintest.NewJoinRequest("alice"))
+	joinResp, err := roomClient.Join(graintest.NewJoinRequest("1"))
 	if err != nil {
 		t.Fatalf("Join via cluster: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestRoomGrain_Integration_FanOutThroughCluster(t *testing.T) {
 		t.Fatalf("Join: error=%+v", joinResp.GetError())
 	}
 
-	postResp, err := roomClient.PostMessage(graintest.NewPostMessageRequest("alice", "integration"))
+	postResp, err := roomClient.PostMessage(graintest.NewPostMessageRequest("1", "integration"))
 	if err != nil {
 		t.Fatalf("PostMessage via cluster: %v", err)
 	}

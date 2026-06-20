@@ -32,13 +32,13 @@ func serveQuery(t *testing.T, g *Gateway, pattern, path, userID string) *httptes
 
 func TestHandleRoomList_ReturnsDefaultRoomsInOrder(t *testing.T) {
 	g := gatewayWithFake(&fakeUserGrainCaller{})
-	rec := serveQuery(t, g, "GET /rooms", "/rooms", "alice")
+	rec := serveQuery(t, g, "GET /rooms", "/rooms", "1")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
 	}
 	got := strings.TrimSpace(rec.Body.String())
-	want := `{"rooms":[{"id":"general","name":"General"},{"id":"random","name":"Random"}]}`
+	want := `{"rooms":[{"id":"4","name":"General"},{"id":"5","name":"Random"}]}`
 	if got != want {
 		t.Errorf("body mismatch:\n got: %s\nwant: %s", got, want)
 	}
@@ -55,7 +55,7 @@ func TestHandleRoomList_RejectsMissingAuthContext(t *testing.T) {
 func TestHandleRoomJoined_EmptySliceMarshalsAsArrayNotNull(t *testing.T) {
 	fake := &fakeUserGrainCaller{getJoinedResp: &userpb.GetJoinedRoomsResponse{RoomIds: nil}}
 	g := gatewayWithFake(fake)
-	rec := serveQuery(t, g, "GET /rooms/joined", "/rooms/joined", "alice")
+	rec := serveQuery(t, g, "GET /rooms/joined", "/rooms/joined", "1")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -69,10 +69,10 @@ func TestHandleRoomJoined_EmptySliceMarshalsAsArrayNotNull(t *testing.T) {
 func TestHandleRoomJoined_PreservesGrainOrder(t *testing.T) {
 	// Grain returns an arbitrary order; gateway must NOT re-sort.
 	fake := &fakeUserGrainCaller{getJoinedResp: &userpb.GetJoinedRoomsResponse{
-		RoomIds: []string{"random", "general"},
+		RoomIds: []string{"5", "4"},
 	}}
 	g := gatewayWithFake(fake)
-	rec := serveQuery(t, g, "GET /rooms/joined", "/rooms/joined", "alice")
+	rec := serveQuery(t, g, "GET /rooms/joined", "/rooms/joined", "1")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -81,15 +81,15 @@ func TestHandleRoomJoined_PreservesGrainOrder(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(resp.RoomIDs) != 2 || resp.RoomIDs[0] != "random" || resp.RoomIDs[1] != "general" {
-		t.Errorf("RoomIDs = %v, want [random, general] (order preserved)", resp.RoomIDs)
+	if len(resp.RoomIDs) != 2 || resp.RoomIDs[0] != "5" || resp.RoomIDs[1] != "4" {
+		t.Errorf("RoomIDs = %v, want [5, 4] (order preserved)", resp.RoomIDs)
 	}
 }
 
 func TestHandleRoomJoined_TransportErrorReturns503(t *testing.T) {
 	fake := &fakeUserGrainCaller{getJoinedErr: errors.New("cluster down")}
 	g := gatewayWithFake(fake)
-	rec := serveQuery(t, g, "GET /rooms/joined", "/rooms/joined", "alice")
+	rec := serveQuery(t, g, "GET /rooms/joined", "/rooms/joined", "1")
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)

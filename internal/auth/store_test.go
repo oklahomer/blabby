@@ -81,14 +81,14 @@ func TestInMemoryUserStore_Resolve(t *testing.T) {
 		{name: "alice resolves to her username", rawID: auth.UserIDAlice.String(), wantName: "alice"},
 		{name: "bob resolves to his username", rawID: auth.UserIDBob.String(), wantName: "bob"},
 		{name: "charlie resolves to his username", rawID: auth.UserIDCharlie.String(), wantName: "charlie"},
-		{name: "unknown id returns error", rawID: "nonexistent-user", wantErr: true},
+		{name: "unknown id returns error", rawID: "999", wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			uid, err := id.NewUserID(tt.rawID)
+			uid, err := id.ParseUserID(tt.rawID)
 			if err != nil {
-				t.Fatalf("NewUserID(%q): %v", tt.rawID, err)
+				t.Fatalf("ParseUserID(%q): %v", tt.rawID, err)
 			}
 			ref, err := store.Resolve(uid)
 			if tt.wantErr {

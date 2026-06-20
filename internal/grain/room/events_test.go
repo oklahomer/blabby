@@ -8,13 +8,13 @@ import (
 )
 
 func TestBuildJoinedEvent(t *testing.T) {
-	got := buildJoinedEvent("general", mustUserRef(t, "alice", "Alice"))
+	got := buildJoinedEvent("general", mustUserRef(t, "1", "Alice"))
 
 	if got.GetRoomId() != "general" {
 		t.Errorf("RoomId: got %q, want %q", got.GetRoomId(), "general")
 	}
-	if got.GetUser().GetId() != "alice" {
-		t.Errorf("User.Id: got %q, want %q", got.GetUser().GetId(), "alice")
+	if got.GetUser().GetId() != "1" {
+		t.Errorf("User.Id: got %q, want %q", got.GetUser().GetId(), "1")
 	}
 	if got.GetUser().GetName() != "Alice" {
 		t.Errorf("User.Name: got %q, want %q", got.GetUser().GetName(), "Alice")
@@ -25,13 +25,13 @@ func TestBuildJoinedEvent(t *testing.T) {
 }
 
 func TestBuildLeftEvent(t *testing.T) {
-	got := buildLeftEvent("general", mustUserRef(t, "alice", "Alice"))
+	got := buildLeftEvent("general", mustUserRef(t, "1", "Alice"))
 
 	if got.GetRoomId() != "general" {
 		t.Errorf("RoomId: got %q, want %q", got.GetRoomId(), "general")
 	}
-	if got.GetUser().GetId() != "alice" {
-		t.Errorf("User.Id: got %q, want %q", got.GetUser().GetId(), "alice")
+	if got.GetUser().GetId() != "1" {
+		t.Errorf("User.Id: got %q, want %q", got.GetUser().GetId(), "1")
 	}
 	if got.GetUser().GetName() != "Alice" {
 		t.Errorf("User.Name: got %q, want %q", got.GetUser().GetName(), "Alice")
@@ -43,13 +43,13 @@ func TestBuildLeftEvent(t *testing.T) {
 
 func TestBuildForwardMessage(t *testing.T) {
 	ts := time.UnixMilli(12345)
-	got := buildForwardMessage("general", mustUserRef(t, "alice", "Alice"), "hello", ts)
+	got := buildForwardMessage("general", mustUserRef(t, "1", "Alice"), "hello", ts)
 
 	if got.GetRoomId() != "general" {
 		t.Errorf("RoomId: got %q, want %q", got.GetRoomId(), "general")
 	}
-	if got.GetSender().GetId() != "alice" {
-		t.Errorf("Sender.Id: got %q, want %q", got.GetSender().GetId(), "alice")
+	if got.GetSender().GetId() != "1" {
+		t.Errorf("Sender.Id: got %q, want %q", got.GetSender().GetId(), "1")
 	}
 	if got.GetSender().GetName() != "Alice" {
 		t.Errorf("Sender.Name: got %q, want %q", got.GetSender().GetName(), "Alice")

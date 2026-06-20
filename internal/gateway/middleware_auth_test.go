@@ -21,7 +21,7 @@ import (
 // row with error-handling boilerplate.
 func mustUserID(t *testing.T, raw string) id.UserID {
 	t.Helper()
-	uid, err := id.NewUserID(raw)
+	uid, err := id.ParseUserID(raw)
 	if err != nil {
 		t.Fatalf("mustUserID(%q): %v", raw, err)
 	}
@@ -30,7 +30,7 @@ func mustUserID(t *testing.T, raw string) id.UserID {
 
 func TestAuthMiddleware(t *testing.T) {
 	const validToken = "valid-token"
-	const validUserID = "user-123"
+	const validUserID = "123"
 
 	tests := []struct {
 		name             string
@@ -241,14 +241,14 @@ func TestAuthMiddleware_DoesNotLeakTokenToLogs(t *testing.T) {
 func TestGateway_RequireAuth_WrapsHandlerFunc(t *testing.T) {
 	g := NewGateway(&stubAuthenticator{
 		validateTokenFn: func(ctx context.Context, token string) (*auth.Claims, error) {
-			return &auth.Claims{UserID: mustUserID(t, "alice")}, nil
+			return &auth.Claims{UserID: mustUserID(t, "1")}, nil
 		},
 	}, nil, nil)
 
 	handler := g.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		uid, ok := auth.UserIDFromContext(r.Context())
-		if !ok || uid.String() != "alice" {
-			t.Errorf("expected alice in context, got %q ok=%v", uid.String(), ok)
+		if !ok || uid.String() != "1" {
+			t.Errorf("expected user 1 in context, got %q ok=%v", uid.String(), ok)
 		}
 		w.WriteHeader(http.StatusOK)
 	})

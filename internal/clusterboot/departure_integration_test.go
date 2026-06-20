@@ -105,15 +105,15 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 		name: "RoomGrain",
 		activate: func(c *cluster.Cluster, identity string) error {
 			_, err := roompb.GetRoomGrainGrainClient(c, identity).
-				Leave(&roompb.LeaveRequest{UserId: "placement-probe"})
+				Leave(&roompb.LeaveRequest{UserId: "999999"})
 			return err
 		},
 	}
 
 	const victim = 1
-	recoveryUserID := findIdentityOn(t, client, members, victim, "recovery-user", userKind)
-	routingUserID := findIdentityOn(t, client, members, 0, "routing-user", userKind)
-	roomID := findIdentityOn(t, client, members, victim, "room", roomKind)
+	recoveryUserID := findIdentityOn(t, client, members, victim, 1000, userKind)
+	routingUserID := findIdentityOn(t, client, members, 0, 2000, userKind)
+	roomID := findIdentityOn(t, client, members, victim, 3000, roomKind)
 
 	recoveryBefore, recoveryBeforePID := spawnConnectionProbe(client)
 	routingConnection, routingConnectionPID := spawnConnectionProbe(client)
@@ -414,17 +414,21 @@ func shutdownCluster(c *cluster.Cluster) error {
 	}
 }
 
+// findIdentityOn searches for a grain identity that the cluster places on the
+// target member, probing numeric Snowflake-shaped identities from base upward so
+// the user/room grains parse them (ids are numeric now). Each caller passes a
+// distinct base to keep the discovered user/room identities apart.
 func findIdentityOn(
 	t *testing.T,
 	client *cluster.Cluster,
 	members []*testMember,
 	target int,
-	prefix string,
+	base int64,
 	kind testGrainKind,
 ) string {
 	t.Helper()
 	for i := 0; i < 200; i++ {
-		identity := fmt.Sprintf("%s-%d", prefix, i)
+		identity := strconv.FormatInt(base+int64(i), 10)
 		requireEventually(t, fmt.Sprintf("activate %s/%s", kind.name, identity), func() error {
 			return kind.activate(client, identity)
 		})
@@ -434,7 +438,7 @@ func findIdentityOn(
 			return identity
 		}
 	}
-	t.Fatalf("no %s identity with prefix %q was placed on member %d", kind.name, prefix, target)
+	t.Fatalf("no %s identity from base %d was placed on member %d", kind.name, base, target)
 	return ""
 }
 
@@ -509,8 +513,8 @@ func sendMessage(member *cluster.Cluster, userID, roomID, text string) error {
 func forwardMessage(member *cluster.Cluster, userID, text string) error {
 	_, err := userpb.GetUserGrainGrainClient(member, userID).
 		ForwardMessage(&userpb.ForwardMessageRequest{
-			RoomId:    "general",
-			Sender:    &commonpb.UserRef{Id: "sender", Name: "Sender"},
+			RoomId:    "4",
+			Sender:    &commonpb.UserRef{Id: "2", Name: "Sender"},
 			Text:      text,
 			Timestamp: timestamppb.New(time.UnixMilli(1)),
 		})

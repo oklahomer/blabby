@@ -85,7 +85,7 @@ func (a *JWTAuthenticator) Authenticate(_ context.Context, params AuthParams) (*
 		return nil, errors.New("failed to authenticate: invalid credentials")
 	}
 
-	userID, err := id.NewUserID(user.ID)
+	userID, err := id.ParseUserID(user.ID)
 	if err != nil {
 		slog.Error("authentication failed", "username", params.Username, "reason", "store_user_id_invalid", "error", err)
 		return nil, errors.New("failed to authenticate: invalid credentials")
@@ -144,7 +144,7 @@ func (a *JWTAuthenticator) ValidateToken(_ context.Context, tokenString string) 
 		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
 	}
 
-	userID, err := id.NewUserID(claims.Subject)
+	userID, err := id.ParseUserID(claims.Subject)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
 	}

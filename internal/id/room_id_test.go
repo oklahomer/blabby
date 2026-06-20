@@ -1,71 +1,96 @@
 package id
 
 import (
+	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 )
 
 func TestNewRoomID(t *testing.T) {
-	t.Run("valid input round-trips through String", func(t *testing.T) {
-		rid, err := NewRoomID("general")
+	t.Run("positive value round-trips through Int64 and String", func(t *testing.T) {
+		rid, err := NewRoomID(4)
 		if err != nil {
 			t.Fatalf("NewRoomID returned error: %v", err)
 		}
-		if rid.String() != "general" {
-			t.Errorf("String() = %q, want %q", rid.String(), "general")
+		if rid.Int64() != 4 {
+			t.Errorf("Int64() = %d, want 4", rid.Int64())
+		}
+		if rid.String() != "4" {
+			t.Errorf("String() = %q, want %q", rid.String(), "4")
 		}
 	})
 
-	t.Run("zero value has empty String", func(t *testing.T) {
-		var zero RoomID
-		if zero.String() != "" {
-			t.Errorf("zero RoomID String() = %q, want empty", zero.String())
-		}
-	})
-
-	t.Run("wraps sentinel and prefixes with room_id", func(t *testing.T) {
-		_, err := NewRoomID("")
-		if err == nil {
-			t.Fatal("NewRoomID(\"\") returned nil error")
-		}
-		if !errors.Is(err, ErrEmptyIdentifier) {
-			t.Errorf("err does not wrap ErrEmptyIdentifier: %v", err)
-		}
-		if !strings.HasPrefix(err.Error(), "room_id: ") {
-			t.Errorf("err = %q, want prefix %q", err.Error(), "room_id: ")
-		}
-	})
-
-	t.Run("rejects path-traversal slash that mux URL-decodes", func(t *testing.T) {
-		_, err := NewRoomID("foo/bar")
-		if !errors.Is(err, ErrIdentifierInvalidChar) {
-			t.Errorf("expected ErrIdentifierInvalidChar for slash, got %v", err)
+	t.Run("rejects non-positive values", func(t *testing.T) {
+		for _, v := range []int64{0, -1} {
+			got, err := NewRoomID(v)
+			if !errors.Is(err, ErrInvalidRoomID) {
+				t.Errorf("NewRoomID(%d) err = %v, want ErrInvalidRoomID", v, err)
+			}
+			if got != (RoomID{}) {
+				t.Errorf("NewRoomID(%d) returned %#v, want zero value", v, got)
+			}
 		}
 	})
 
 	t.Run("structurally identical RoomIDs compare equal", func(t *testing.T) {
-		a, _ := NewRoomID("general")
-		b, _ := NewRoomID("general")
+		a, _ := NewRoomID(4)
+		b, _ := NewRoomID(4)
 		if a != b {
 			t.Errorf("equal-valued RoomIDs compared not equal: %#v vs %#v", a, b)
 		}
 	})
 }
 
-// TestUserIDAndRoomIDAreDistinctTypes is a compile-time guard masquerading
-// as a runtime test. It is the only place that exercises the cross-type
-// rejection. If a future refactor accidentally aliases UserID and RoomID
-// to the same struct (e.g., via a generic Identifier[T]), this file stops
-// compiling. The body intentionally does almost nothing at runtime.
-func TestUserIDAndRoomIDAreDistinctTypes(t *testing.T) {
-	uid, _ := NewUserID("alice")
-	rid, _ := NewRoomID("general")
+func TestParseRoomID(t *testing.T) {
+	t.Run("decimal string parses to the same value", func(t *testing.T) {
+		rid, err := ParseRoomID("5")
+		if err != nil {
+			t.Fatalf("ParseRoomID returned error: %v", err)
+		}
+		if rid.Int64() != 5 {
+			t.Errorf("Int64() = %d, want 5", rid.Int64())
+		}
+	})
 
-	// The point of the test: distinct types accept distinct sets of
-	// values via the type system. The runtime values may match (both
-	// wrap a string), but the types do not.
-	if uid.String() == rid.String() {
-		t.Fatalf("test fixtures collided on string value; pick different inputs")
+	t.Run("rejects non-numeric and non-positive input", func(t *testing.T) {
+		for _, s := range []string{"", "general", "foo/bar", "0", "-1"} {
+			if _, err := ParseRoomID(s); err == nil {
+				t.Errorf("ParseRoomID(%q) = nil error, want failure", s)
+			}
+		}
+	})
+}
+
+func TestRoomID_JSONRoundTrip(t *testing.T) {
+	rid, _ := NewRoomID(7240534144614405)
+
+	data, err := json.Marshal(rid)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(data) != `"7240534144614405"` {
+		t.Errorf("Marshal = %s, want a decimal string", data)
+	}
+
+	var got RoomID
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got != rid {
+		t.Errorf("round-trip = %v, want %v", got, rid)
+	}
+}
+
+// TestUserIDAndRoomIDAreDistinctTypes is a compile-time guard masquerading as a
+// runtime test. If a future refactor accidentally aliases UserID and RoomID to
+// the same struct (e.g., via a generic Identifier[T]), this file stops compiling.
+func TestUserIDAndRoomIDAreDistinctTypes(t *testing.T) {
+	uid, _ := NewUserID(1)
+	rid, _ := NewRoomID(1)
+
+	// The runtime values may match (both wrap an int64), but the types do not,
+	// so no function accepting one will accept the other.
+	if uid.Int64() != rid.Int64() {
+		t.Fatalf("test fixtures diverged; both should wrap the same int64")
 	}
 }

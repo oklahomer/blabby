@@ -76,8 +76,8 @@ func TestFanout_SelfEcho_NoDeadlock_AndDelivers(t *testing.T) {
 	const displayName = "Alice Example"
 	c := clustertest.Start(t, user.NewKind(stubDirectory{name: displayName}), room.NewKind())
 
-	const userID = "alice-fanout-int"
-	const roomID = "general"
+	const userID = "1"
+	const roomID = "4"
 
 	probe := &fanoutProbe{}
 	probePID := c.ActorSystem.Root.Spawn(actor.PropsFromProducer(func() actor.Actor { return probe }))

@@ -28,7 +28,7 @@ func TestHandleLogin(t *testing.T) {
 		if params.Username != "alice" || params.Password != "secret" {
 			return nil, errors.New("invalid credentials")
 		}
-		return &auth.Result{UserID: mustUserID(t, "user-alice"), Token: "signed.jwt.token"}, nil
+		return &auth.Result{UserID: mustUserID(t, "1"), Token: "signed.jwt.token"}, nil
 	}
 
 	tests := []struct {
@@ -217,7 +217,7 @@ func TestHandleLogin_NilResultFromAuthenticatorReturns500(t *testing.T) {
 func TestHandleLogin_EmptyTokenFromAuthenticatorReturns500(t *testing.T) {
 	g := NewGateway(&stubAuthenticator{
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
-			return &auth.Result{UserID: mustUserID(t, "user-alice"), Token: ""}, nil
+			return &auth.Result{UserID: mustUserID(t, "1"), Token: ""}, nil
 		},
 	}, nil, nil)
 

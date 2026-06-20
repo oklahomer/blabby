@@ -39,7 +39,7 @@ func TestNewGateway(t *testing.T) {
 func TestRegisterRoutes_LoginRouteRegistered(t *testing.T) {
 	g := NewGateway(&stubAuthenticator{
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
-			return &auth.Result{UserID: mustUserID(t, "u1"), Token: "tok"}, nil
+			return &auth.Result{UserID: mustUserID(t, "1"), Token: "tok"}, nil
 		},
 	}, nil, nil)
 	handler := g.RegisterRoutes()

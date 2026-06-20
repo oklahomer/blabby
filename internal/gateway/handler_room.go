@@ -58,9 +58,8 @@ type sendMessageSuccessResponse struct {
 //
 // Note: Go 1.22+ mux dispatches PUT /rooms//membership to the catch-all "/"
 // pattern (handleNotFound), so the empty-segment case never reaches this
-// handler. The trim and structural checks inside id.NewRoomID cover
-// URL-encoded whitespace (e.g. PUT /rooms/%20/membership), which the mux
-// does match.
+// handler. A non-numeric segment (e.g. PUT /rooms/%20/membership), which the mux
+// does match, fails id.ParseRoomID and is rejected as a bad request.
 func (g *Gateway) handleRoomMembershipPut(w http.ResponseWriter, r *http.Request) {
 	userID, ok := authenticatedUserID(w, r, endpointRoomMembershipPut)
 	if !ok {
@@ -197,11 +196,11 @@ func authenticatedUserID(w http.ResponseWriter, r *http.Request, endpoint string
 	return userID, true
 }
 
-// requireRoomID extracts and parses {id} from the request path. The
-// structural rules (length cap, control chars, slash, etc.) live on
-// id.NewRoomID and apply uniformly across every consumer.
+// requireRoomID extracts and parses {id} from the request path. The decimal
+// Snowflake form is decoded by id.ParseRoomID, which rejects any non-numeric or
+// non-positive segment uniformly across every consumer.
 func requireRoomID(w http.ResponseWriter, r *http.Request, endpoint string, userID id.UserID) (id.RoomID, bool) {
-	roomID, err := id.NewRoomID(r.PathValue("id"))
+	roomID, err := id.ParseRoomID(r.PathValue("id"))
 	if err != nil {
 		slog.Warn("room handler rejected request",
 			"endpoint", endpoint, "method", r.Method,

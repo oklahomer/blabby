@@ -25,8 +25,8 @@ type UserRef struct {
 // and within maxUserNameBytes; the UserID must be non-zero (parsed at its own
 // boundary via [NewUserID]).
 func NewUserRef(userID UserID, name string) (UserRef, error) {
-	if userID.String() == "" {
-		return UserRef{}, fmt.Errorf("user_ref: id must not be empty")
+	if userID == (UserID{}) {
+		return UserRef{}, fmt.Errorf("user_ref: id must not be zero")
 	}
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {

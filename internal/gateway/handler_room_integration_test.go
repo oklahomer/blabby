@@ -30,7 +30,7 @@ type integrationAuth struct {
 }
 
 func (a *integrationAuth) Authenticate(_ context.Context, _ auth.AuthParams) (*auth.Result, error) {
-	uid, err := id.NewUserID(a.userID)
+	uid, err := id.ParseUserID(a.userID)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func (a *integrationAuth) ValidateToken(_ context.Context, token string) (*auth.
 	if token != a.token {
 		return nil, auth.ErrTokenInvalid
 	}
-	uid, err := id.NewUserID(a.userID)
+	uid, err := id.ParseUserID(a.userID)
 	if err != nil {
 		return nil, auth.ErrTokenInvalid
 	}
@@ -80,8 +80,8 @@ func (s *stubRoomGrain) PostMessage(*roompb.PostMessageRequest, cluster.GrainCon
 // stub Room grain isolates this test from Room → User fan-out, which
 // would deadlock on a single-member cluster.
 func TestGateway_RoomEndpoints_Integration(t *testing.T) {
-	const userID = "alice-room-int"
-	const roomID = "general"
+	const userID = "1"
+	const roomID = "4"
 	const bearer = "integration-token-room"
 	stubPostTime := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 
@@ -166,7 +166,7 @@ func TestGateway_RoomEndpoints_Integration(t *testing.T) {
 	if rec.status != http.StatusOK {
 		t.Fatalf("/rooms: status = %d", rec.status)
 	}
-	if !strings.Contains(rec.body, `"id":"general"`) {
+	if !strings.Contains(rec.body, `"id":"4"`) {
 		t.Errorf("/rooms body missing default room: %s", rec.body)
 	}
 }

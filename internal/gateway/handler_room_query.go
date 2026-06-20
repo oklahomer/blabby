@@ -14,13 +14,15 @@ type roomDescriptor struct {
 	Name string `json:"name"`
 }
 
-// defaultRooms is the Phase 1 hardcoded room list. The list is short
-// and intentionally so; production room provisioning is deferred to a
-// future epic. The slice is treated as effectively immutable — never
-// sort or mutate in place because handlers may run concurrently.
+// defaultRooms is the interim hardcoded room catalogue. The ids are the decimal
+// Snowflakes the persistence seed assigns the dev rooms (room 4/5 in schema.sql),
+// so joining a catalogue entry addresses the same room the database knows; a
+// DB-backed catalogue replaces this slice in a later phase. The slice is treated
+// as effectively immutable — never sort or mutate in place because handlers may
+// run concurrently.
 var defaultRooms = []roomDescriptor{
-	{ID: "general", Name: "General"},
-	{ID: "random", Name: "Random"},
+	{ID: "4", Name: "General"},
+	{ID: "5", Name: "Random"},
 }
 
 type roomListResponse struct {

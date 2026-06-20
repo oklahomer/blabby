@@ -115,6 +115,6 @@ func (s *roomState) memberIDs() []id.UserID {
 	for userID := range s.members {
 		out = append(out, userID)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	sort.Slice(out, func(i, j int) bool { return out[i].Int64() < out[j].Int64() })
 	return out
 }

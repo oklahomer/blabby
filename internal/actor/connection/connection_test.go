@@ -146,7 +146,7 @@ func writeAuthFrame(t *testing.T, c *websocket.Conn, token string) {
 }
 
 func aliceClaims() *auth.Claims {
-	uid, err := id.NewUserID("alice")
+	uid, err := id.NewUserID(1)
 	if err != nil {
 		panic(err)
 	}
@@ -200,8 +200,8 @@ func TestAuth_HappyPath(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 RegisterConnection call, got %d", len(calls))
 	}
-	if calls[0].userID != "alice" {
-		t.Errorf("userID: got %q, want alice", calls[0].userID)
+	if calls[0].userID != "1" {
+		t.Errorf("userID: got %q, want 1", calls[0].userID)
 	}
 	pid := calls[0].req.GetRequesterPid()
 	if pid.GetAddress() == "" || pid.GetId() == "" {

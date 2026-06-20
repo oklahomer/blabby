@@ -67,7 +67,7 @@ func TestNewJWTAuthenticator_Panics(t *testing.T) {
 
 // TestJWTAuthenticator_Authenticate_InvalidStoredUserID covers the
 // data-integrity path: credentials match, but the stored user ID does not
-// satisfy id.NewUserID. The client must see a generic credential failure, not
+// satisfy id.ParseUserID. The client must see a generic credential failure, not
 // a distinct error, and no token is issued.
 func TestJWTAuthenticator_Authenticate_InvalidStoredUserID(t *testing.T) {
 	hash, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
@@ -75,7 +75,7 @@ func TestJWTAuthenticator_Authenticate_InvalidStoredUserID(t *testing.T) {
 		t.Fatalf("setup: hash password: %v", err)
 	}
 	store := stubUserStore{user: auth.StoredUser{
-		ID:           "bad/id", // '/' is rejected by id.NewUserID
+		ID:           "bad/id", // non-numeric, rejected by id.ParseUserID
 		Username:     "mallory",
 		PasswordHash: hash,
 	}}
@@ -288,7 +288,7 @@ func TestJWTAuthenticator_ValidateToken(t *testing.T) {
 		}
 	})
 
-	// Subjects that pass JWT-library validation but fail the id.NewUserID
+	// Subjects that pass JWT-library validation but fail the id.ParseUserID
 	// rules must surface as invalid tokens — a JWT that cannot identify a
 	// user is invalid at this boundary, not a separate failure mode.
 	subjectCases := []struct {
@@ -296,9 +296,9 @@ func TestJWTAuthenticator_ValidateToken(t *testing.T) {
 		subject string
 	}{
 		{name: "empty subject", subject: ""},
-		{name: "whitespace-only subject", subject: " \t"},
-		{name: "subject with NUL", subject: "alice\x00"},
-		{name: "subject with slash", subject: "foo/bar"},
+		{name: "non-numeric subject", subject: "alice"},
+		{name: "non-positive subject", subject: "0"},
+		{name: "subject with NUL", subject: "1\x00"},
 	}
 	for _, tc := range subjectCases {
 		t.Run("structurally invalid subject ("+tc.name+") is rejected with ErrTokenInvalid", func(t *testing.T) {

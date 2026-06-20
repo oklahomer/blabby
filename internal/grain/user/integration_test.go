@@ -60,7 +60,7 @@ func (s *stubRoomGrain) PostMessage(req *roompb.PostMessageRequest, _ cluster.Gr
 // TestUserGrain_Integration_RoutesCommandsThroughCluster drives the full
 // User grain command surface through the generated cluster client. Uses
 // the package-shared cluster (see TestMain in main_test.go); a unique user
-// identity ("alice-integration") keeps this test isolated from sibling
+// identity ("11") keeps this test isolated from sibling
 // tests that share the same cluster.
 //
 // Covers NewKind, Init's clusterRoomClient wiring, and the
@@ -68,11 +68,11 @@ func (s *stubRoomGrain) PostMessage(req *roompb.PostMessageRequest, _ cluster.Gr
 // against the fake roomClient cannot reach.
 func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	resetStubRoomCounters()
-	const userID = "alice-integration"
+	const userID = "11"
 	uc := userpb.GetUserGrainGrainClient(sharedCluster, userID)
 
 	// JoinRoom — exercises clusterRoomClient.Join end-to-end.
-	joinResp, err := uc.JoinRoom(&userpb.JoinRoomRequest{RoomId: "general"})
+	joinResp, err := uc.JoinRoom(&userpb.JoinRoomRequest{RoomId: "4"})
 	if err != nil {
 		t.Fatalf("JoinRoom via cluster: %v", err)
 	}
@@ -94,13 +94,13 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJoinedRooms via cluster: %v", err)
 	}
-	if got := listResp.GetRoomIds(); len(got) != 1 || got[0] != "general" {
+	if got := listResp.GetRoomIds(); len(got) != 1 || got[0] != "4" {
 		t.Errorf("RoomIds: got %v, want [general]", got)
 	}
 
 	// SendMessage — exercises clusterRoomClient.PostMessage and the
 	// timestamp pass-through.
-	sendResp, err := uc.SendMessage(&userpb.SendMessageRequest{RoomId: "general", Text: "integration"})
+	sendResp, err := uc.SendMessage(&userpb.SendMessageRequest{RoomId: "4", Text: "integration"})
 	if err != nil {
 		t.Fatalf("SendMessage via cluster: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	}
 
 	// LeaveRoom — exercises clusterRoomClient.Leave.
-	leaveResp, err := uc.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: "general"})
+	leaveResp, err := uc.LeaveRoom(&userpb.LeaveRoomRequest{RoomId: "4"})
 	if err != nil {
 		t.Fatalf("LeaveRoom via cluster: %v", err)
 	}
@@ -152,13 +152,13 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	}
 
 	if _, err := uc.ForwardMessage(&userpb.ForwardMessageRequest{
-		RoomId: "general", Sender: &commonpb.UserRef{Id: userID, Name: seededDisplayName}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
+		RoomId: "4", Sender: &commonpb.UserRef{Id: userID, Name: seededDisplayName}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
 	}); err != nil {
 		t.Fatalf("ForwardMessage via cluster: %v", err)
 	}
 
 	if _, err := uc.NotifyRoomEvent(&userpb.NotifyRoomEventRequest{
-		RoomId: "general", User: &commonpb.UserRef{Id: "bob", Name: "Bob Example"}, EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
+		RoomId: "4", User: &commonpb.UserRef{Id: "2", Name: "Bob Example"}, EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	}); err != nil {
 		t.Fatalf("NotifyRoomEvent via cluster: %v", err)
 	}

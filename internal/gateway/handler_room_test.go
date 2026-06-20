@@ -107,8 +107,8 @@ func captureSlog(t *testing.T, fn func()) []byte {
 // ---- handleRoomMembershipPut ------------------------------------------
 
 func TestHandleRoomMembershipPut(t *testing.T) {
-	const okUser = "alice"
-	const okRoom = "general"
+	const okUser = "1"
+	const okRoom = "4"
 
 	tests := []struct {
 		name        string
@@ -225,8 +225,8 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 			wantCode:   4001,
 		},
 		{
-			name:       "overlong room_id → 400 + 4001",
-			path:       "/rooms/" + strings.Repeat("a", id.MaxIdentifierBytes+1) + "/membership",
+			name:       "non-numeric room_id → 400 + 4001",
+			path:       "/rooms/not-a-number/membership",
 			userID:     okUser,
 			stubResp:   &userpb.JoinRoomResponse{},
 			wantStatus: http.StatusBadRequest,
@@ -266,8 +266,8 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 // ---- handleRoomMembershipDelete ---------------------------------------
 
 func TestHandleRoomMembershipDelete(t *testing.T) {
-	const okUser = "alice"
-	const okRoom = "general"
+	const okUser = "1"
+	const okRoom = "4"
 
 	tests := []struct {
 		name       string
@@ -337,8 +337,8 @@ func TestHandleRoomMembershipDelete(t *testing.T) {
 // ---- handleRoomSendMessage --------------------------------------------
 
 func TestHandleRoomSendMessage_HappyPath(t *testing.T) {
-	const okUser = "alice"
-	const okRoom = "general"
+	const okUser = "1"
+	const okRoom = "4"
 	const okText = "hi"
 	wantTSMillis := int64(1234567890)
 
@@ -369,7 +369,7 @@ func TestHandleRoomSendMessage_NilTimestampWritesZero(t *testing.T) {
 	fake := &fakeUserGrainCaller{sendResp: &userpb.SendMessageResponse{}}
 	g := gatewayWithFake(fake)
 	rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
-		"/rooms/general/messages", `{"text":"hi"}`, "application/json", "alice")
+		"/rooms/4/messages", `{"text":"hi"}`, "application/json", "1")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -426,7 +426,7 @@ func TestHandleRoomSendMessage_BusinessAndTransportErrors(t *testing.T) {
 			fake := &fakeUserGrainCaller{sendResp: tt.stubResp, sendErr: tt.stubErr}
 			g := gatewayWithFake(fake)
 			rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
-				"/rooms/general/messages", `{"text":"hi"}`, "application/json", "alice")
+				"/rooms/4/messages", `{"text":"hi"}`, "application/json", "1")
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
@@ -519,7 +519,7 @@ func TestHandleRoomSendMessage_BodyValidation(t *testing.T) {
 			}}
 			g := gatewayWithFake(fake)
 			rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
-				"/rooms/general/messages", tt.body, tt.contentType, "alice")
+				"/rooms/4/messages", tt.body, tt.contentType, "1")
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d (body=%s)", rec.Code, tt.wantStatus, rec.Body.String())
@@ -549,10 +549,10 @@ func TestHandleRoomSendMessage_LoggingNFR1(t *testing.T) {
 
 	logBytes := captureSlog(t, func() {
 		body := `{"text":"` + secretText + `"}`
-		req := httptest.NewRequest(http.MethodPost, "/rooms/general/messages", strings.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/rooms/4/messages", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+bearerToken) // defense in depth
-		req = withUserContext(t, req, "alice")
+		req = withUserContext(t, req, "1")
 
 		mux := http.NewServeMux()
 		mux.HandleFunc("POST /rooms/{id}/messages", g.handleRoomSendMessage)

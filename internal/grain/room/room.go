@@ -194,7 +194,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 // pre-removal member snapshot (including the leaver, so their connection
 // can update UI state symmetrically with Join).
 func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*roompb.LeaveResponse, error) {
-	userID, err := id.NewUserID(req.GetUserId())
+	userID, err := id.ParseUserID(req.GetUserId())
 	if err != nil {
 		slog.Warn(eventRoomMemberLeaveRejected,
 			"grain_type", ctx.Kind(),
@@ -336,7 +336,7 @@ func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []id.UserID, 
 // invalid id, or an empty name is rejected so handlers can return
 // INVALID_REQUEST.
 func parseUserRef(p *commonpb.UserRef) (id.UserRef, error) {
-	userID, err := id.NewUserID(p.GetId())
+	userID, err := id.ParseUserID(p.GetId())
 	if err != nil {
 		return id.UserRef{}, err
 	}

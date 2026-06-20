@@ -151,14 +151,14 @@ func TestUserGrain_SenderPID(t *testing.T) {
 	c := sharedCluster
 
 	t.Run("Delivery — PID-in-payload reaches the registered actor", func(t *testing.T) {
-		const userID = "alice-delivery"
+		const userID = "12"
 		r, pid := spawnReceiver(t, c)
 		registerSelfWithPID(t, c, pid, r, userID)
 
 		const senderName = "Alice Delivery"
 		uc := userpb.GetUserGrainGrainClient(c, userID)
 		fwdReq := &userpb.ForwardMessageRequest{
-			RoomId: "general", Sender: &commonpb.UserRef{Id: userID, Name: senderName}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
+			RoomId: "4", Sender: &commonpb.UserRef{Id: userID, Name: senderName}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
 		}
 		if _, err := uc.ForwardMessage(fwdReq); err != nil {
 			t.Fatalf("ForwardMessage via cluster: %v", err)
@@ -175,7 +175,7 @@ func TestUserGrain_SenderPID(t *testing.T) {
 	})
 
 	t.Run("MultiDeviceDelivery — both registered actors receive the fan-out", func(t *testing.T) {
-		const userID = "alice-multi"
+		const userID = "13"
 		rA, pidA := spawnReceiver(t, c)
 		rB, pidB := spawnReceiver(t, c)
 		registerSelfWithPID(t, c, pidA, rA, userID)
@@ -183,7 +183,7 @@ func TestUserGrain_SenderPID(t *testing.T) {
 
 		uc := userpb.GetUserGrainGrainClient(c, userID)
 		fwdReq := &userpb.ForwardMessageRequest{
-			RoomId: "general", Sender: &commonpb.UserRef{Id: userID, Name: "Alice Multi"}, Text: "multi-device", Timestamp: timestamppb.New(time.UnixMilli(42)),
+			RoomId: "4", Sender: &commonpb.UserRef{Id: userID, Name: "Alice Multi"}, Text: "multi-device", Timestamp: timestamppb.New(time.UnixMilli(42)),
 		}
 		if _, err := uc.ForwardMessage(fwdReq); err != nil {
 			t.Fatalf("ForwardMessage via cluster: %v", err)
@@ -200,7 +200,7 @@ func TestUserGrain_SenderPID(t *testing.T) {
 	})
 
 	t.Run("WatchEvictsOnTermination — Terminated drops the entry so fan-out stops", func(t *testing.T) {
-		const userID = "alice-watch-evict"
+		const userID = "14"
 		// Two receivers: A is poisoned mid-test to fire Terminated at the
 		// User grain; B stays alive and must keep receiving fan-outs.
 		rA, pidA := spawnReceiver(t, c)
@@ -223,7 +223,7 @@ func TestUserGrain_SenderPID(t *testing.T) {
 		// Poison has been applied, so within a small number of
 		// attempts the grain stops trying to send to A.
 		fwdReq := &userpb.ForwardMessageRequest{
-			RoomId: "general", Sender: &commonpb.UserRef{Id: userID, Name: "Alice Watch"}, Text: "after-evict", Timestamp: timestamppb.New(time.UnixMilli(99)),
+			RoomId: "4", Sender: &commonpb.UserRef{Id: userID, Name: "Alice Watch"}, Text: "after-evict", Timestamp: timestamppb.New(time.UnixMilli(99)),
 		}
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {

@@ -3,7 +3,6 @@ package auth
 import (
 	"fmt"
 
-	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/oklahomer/blabby/internal/id"
@@ -28,18 +27,29 @@ type InMemoryUserStore struct {
 	byID  map[string]StoredUser // keyed by user ID, for reverse profile lookup
 }
 
-// Pre-generated UUIDs for the hardcoded test users.
-// Fixed values keep tests deterministic.
+// Fixed Snowflake ids for the hardcoded dev users, matching the low-end ids the
+// persistence seed assigns (service_user 1..3 in schema.sql) so the in-memory and
+// database identities agree. Fixed values keep tests deterministic.
 var (
-	UserIDAlice   = uuid.MustParse("019644a2-b78c-7e10-8b1a-ee7c502a0001")
-	UserIDBob     = uuid.MustParse("019644a2-b78c-7e10-8b1a-ee7c502a0002")
-	UserIDCharlie = uuid.MustParse("019644a2-b78c-7e10-8b1a-ee7c502a0003")
+	UserIDAlice   = mustSeedUserID(1)
+	UserIDBob     = mustSeedUserID(2)
+	UserIDCharlie = mustSeedUserID(3)
 )
+
+// mustSeedUserID wraps a fixed seed id, panicking on the impossible case of an
+// invalid literal so the package fails loudly at init rather than at use.
+func mustSeedUserID(v int64) id.UserID {
+	uid, err := id.NewUserID(v)
+	if err != nil {
+		panic(fmt.Sprintf("auth: invalid seed user id %d: %v", v, err))
+	}
+	return uid
+}
 
 // NewInMemoryUserStore creates a store pre-configured with test users.
 func NewInMemoryUserStore() *InMemoryUserStore {
 	users := []struct {
-		id       uuid.UUID
+		id       id.UserID
 		username string
 		password string
 	}{
