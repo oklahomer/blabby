@@ -22,7 +22,7 @@ func TestGateway_WebSocket_Integration(t *testing.T) {
 	const token = "integration-token-ws"
 
 	c := clustertest.Start(t, user.NewKind(nil))
-	g := gateway.NewGateway(&integrationAuth{userID: userID, token: token}, c, c.ActorSystem.Root)
+	g := gateway.NewGateway(&integrationAuth{userID: userID, token: token}, newStubRoomDirectory(), c, c.ActorSystem.Root)
 	srv := httptest.NewServer(g.RegisterRoutes())
 	t.Cleanup(srv.Close)
 

@@ -61,7 +61,10 @@ CREATE TABLE IF NOT EXISTS service_user (
 -- owner is not a column — it is the room_membership row with role = 'owner'.
 CREATE TABLE IF NOT EXISTS room (
     id           BIGINT      PRIMARY KEY,
-    public_code  TEXT        NOT NULL UNIQUE,
+    -- The UNIQUE constraint is named explicitly so roomrepo's collision
+    -- classifier (publicCodeConstraint) cannot drift from Postgres's implicit
+    -- naming.
+    public_code  TEXT        NOT NULL CONSTRAINT room_public_code_key UNIQUE,
     display_name TEXT        NOT NULL,
     created_by   BIGINT      NOT NULL REFERENCES service_user (id),
     status       room_status NOT NULL,

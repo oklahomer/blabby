@@ -46,8 +46,11 @@ func withUserContext(t *testing.T, req *http.Request, userID string) *http.Reque
 // guard does not fire; the fields are typed pointers and remain unused
 // because the seam intercepts the call before any cluster method runs.
 func gatewayWithFake(fake userGrainCaller) *Gateway {
+	dir := newStubRoomDirectory()
 	return &Gateway{
 		auth:      &stubAuthenticator{},
+		rooms:     dir,
+		roomCodes: newRoomCodeCache(dir),
 		cluster:   sentinelCluster(),
 		actorRoot: sentinelActorRoot(),
 		userGrain: func(id.UserID) userGrainCaller { return fake },
@@ -108,7 +111,7 @@ func captureSlog(t *testing.T, fn func()) []byte {
 
 func TestHandleRoomMembershipPut(t *testing.T) {
 	const okUser = "1"
-	const okRoom = "4"
+	const okRoomCode = "RG000000004"
 
 	tests := []struct {
 		name        string
@@ -122,19 +125,19 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 	}{
 		{
 			name:       "happy path returns 200 success",
-			path:       "/rooms/" + okRoom + "/membership",
+			path:       "/rooms/" + okRoomCode + "/membership",
 			userID:     okUser,
 			stubResp:   &userpb.JoinRoomResponse{},
 			wantStatus: http.StatusOK,
 			assertCalls: func(t *testing.T, f *fakeUserGrainCaller) {
-				if f.joinReq == nil || f.joinReq.GetRoomId() != okRoom {
-					t.Fatalf("expected JoinRoom called with room_id=%q, got %+v", okRoom, f.joinReq)
+				if f.joinReq == nil || f.joinReq.GetRoomId() != "4" {
+					t.Fatalf("expected JoinRoom called with room_id=%q, got %+v", "4", f.joinReq)
 				}
 			},
 		},
 		{
 			name:   "business error 2001 → 403",
-			path:   "/rooms/" + okRoom + "/membership",
+			path:   "/rooms/" + okRoomCode + "/membership",
 			userID: okUser,
 			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
 				Code: 2001, Status: "ROOM_NOT_MEMBER", Message: "not a member",
@@ -144,7 +147,7 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 		},
 		{
 			name:   "business error 2002 → 409",
-			path:   "/rooms/" + okRoom + "/membership",
+			path:   "/rooms/" + okRoomCode + "/membership",
 			userID: okUser,
 			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
 				Code: 2002, Status: "ROOM_ALREADY_MEMBER", Message: "already member",
@@ -154,7 +157,7 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 		},
 		{
 			name:   "business error 2003 → 404",
-			path:   "/rooms/" + okRoom + "/membership",
+			path:   "/rooms/" + okRoomCode + "/membership",
 			userID: okUser,
 			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
 				Code: 2003, Status: "ROOM_NOT_FOUND", Message: "no such room",
@@ -164,7 +167,7 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 		},
 		{
 			name:   "business error 4001 → 400",
-			path:   "/rooms/" + okRoom + "/membership",
+			path:   "/rooms/" + okRoomCode + "/membership",
 			userID: okUser,
 			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
 				Code: 4001, Status: "INVALID_REQUEST", Message: "bad",
@@ -174,7 +177,7 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 		},
 		{
 			name:   "mismatched business error fails closed",
-			path:   "/rooms/" + okRoom + "/membership",
+			path:   "/rooms/" + okRoomCode + "/membership",
 			userID: okUser,
 			stubResp: &userpb.JoinRoomResponse{Error: &commonpb.ErrorDetail{
 				Code: 2001, Status: "ROOM_NOT_FOUND", Message: "bad pair",
@@ -184,7 +187,7 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 		},
 		{
 			name:       "transport error → 503 + 5002",
-			path:       "/rooms/" + okRoom + "/membership",
+			path:       "/rooms/" + okRoomCode + "/membership",
 			userID:     okUser,
 			stubErr:    errors.New("cluster down"),
 			wantStatus: http.StatusServiceUnavailable,
@@ -192,7 +195,7 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 		},
 		{
 			name:       "missing user_id in context → 500 + 5001",
-			path:       "/rooms/" + okRoom + "/membership",
+			path:       "/rooms/" + okRoomCode + "/membership",
 			userID:     "",
 			stubResp:   &userpb.JoinRoomResponse{},
 			wantStatus: http.StatusInternalServerError,
@@ -225,12 +228,25 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 			wantCode:   4001,
 		},
 		{
-			name:       "non-numeric room_id → 400 + 4001",
+			name:       "malformed room code → 400 + 4001",
 			path:       "/rooms/not-a-number/membership",
 			userID:     okUser,
 			stubResp:   &userpb.JoinRoomResponse{},
 			wantStatus: http.StatusBadRequest,
 			wantCode:   4001,
+		},
+		{
+			name:       "valid but unknown room code → 404 + 2003",
+			path:       "/rooms/RZ000000099/membership",
+			userID:     okUser,
+			stubResp:   &userpb.JoinRoomResponse{},
+			wantStatus: http.StatusNotFound,
+			wantCode:   2003,
+			assertCalls: func(t *testing.T, f *fakeUserGrainCaller) {
+				if f.calls != 0 {
+					t.Fatalf("expected no grain call for an unresolved room, got %d", f.calls)
+				}
+			},
 		},
 	}
 
@@ -267,7 +283,7 @@ func TestHandleRoomMembershipPut(t *testing.T) {
 
 func TestHandleRoomMembershipDelete(t *testing.T) {
 	const okUser = "1"
-	const okRoom = "4"
+	const okRoomCode = "RG000000004"
 
 	tests := []struct {
 		name       string
@@ -310,7 +326,7 @@ func TestHandleRoomMembershipDelete(t *testing.T) {
 			fake := &fakeUserGrainCaller{leaveResp: tt.stubResp, leaveErr: tt.stubErr}
 			g := gatewayWithFake(fake)
 			rec := servePath(t, g, http.MethodDelete, "DELETE /rooms/{id}/membership",
-				"/rooms/"+okRoom+"/membership", "", "", okUser)
+				"/rooms/"+okRoomCode+"/membership", "", "", okUser)
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
@@ -321,8 +337,8 @@ func TestHandleRoomMembershipDelete(t *testing.T) {
 				if !resp.Success {
 					t.Fatalf("expected success=true, got %+v", resp)
 				}
-				if fake.leaveReq == nil || fake.leaveReq.GetRoomId() != okRoom {
-					t.Fatalf("expected LeaveRoom called with room_id=%q, got %+v", okRoom, fake.leaveReq)
+				if fake.leaveReq == nil || fake.leaveReq.GetRoomId() != "4" {
+					t.Fatalf("expected LeaveRoom called with room_id=%q, got %+v", "4", fake.leaveReq)
 				}
 			} else if tt.wantCode != 0 {
 				resp := decodeErrorResponse(t, rec.Body)
@@ -338,7 +354,7 @@ func TestHandleRoomMembershipDelete(t *testing.T) {
 
 func TestHandleRoomSendMessage_HappyPath(t *testing.T) {
 	const okUser = "1"
-	const okRoom = "4"
+	const okRoomCode = "RG000000004"
 	const okText = "hi"
 	wantTSMillis := int64(1234567890)
 
@@ -347,7 +363,7 @@ func TestHandleRoomSendMessage_HappyPath(t *testing.T) {
 	}}
 	g := gatewayWithFake(fake)
 	rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
-		"/rooms/"+okRoom+"/messages", `{"text":"`+okText+`"}`, "application/json", okUser)
+		"/rooms/"+okRoomCode+"/messages", `{"text":"`+okText+`"}`, "application/json", okUser)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
@@ -360,8 +376,8 @@ func TestHandleRoomSendMessage_HappyPath(t *testing.T) {
 	if resp.Timestamp != wantTSMillis {
 		t.Errorf("timestamp = %d, want %d", resp.Timestamp, wantTSMillis)
 	}
-	if fake.sendReq == nil || fake.sendReq.GetText() != okText || fake.sendReq.GetRoomId() != okRoom {
-		t.Fatalf("SendMessage called with %+v, want room=%q text=%q", fake.sendReq, okRoom, okText)
+	if fake.sendReq == nil || fake.sendReq.GetText() != okText || fake.sendReq.GetRoomId() != "4" {
+		t.Fatalf("SendMessage called with %+v, want room=%q text=%q", fake.sendReq, "4", okText)
 	}
 }
 
@@ -369,7 +385,7 @@ func TestHandleRoomSendMessage_NilTimestampWritesZero(t *testing.T) {
 	fake := &fakeUserGrainCaller{sendResp: &userpb.SendMessageResponse{}}
 	g := gatewayWithFake(fake)
 	rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
-		"/rooms/4/messages", `{"text":"hi"}`, "application/json", "1")
+		"/rooms/RG000000004/messages", `{"text":"hi"}`, "application/json", "1")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -426,7 +442,7 @@ func TestHandleRoomSendMessage_BusinessAndTransportErrors(t *testing.T) {
 			fake := &fakeUserGrainCaller{sendResp: tt.stubResp, sendErr: tt.stubErr}
 			g := gatewayWithFake(fake)
 			rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
-				"/rooms/4/messages", `{"text":"hi"}`, "application/json", "1")
+				"/rooms/RG000000004/messages", `{"text":"hi"}`, "application/json", "1")
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
@@ -519,7 +535,7 @@ func TestHandleRoomSendMessage_BodyValidation(t *testing.T) {
 			}}
 			g := gatewayWithFake(fake)
 			rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
-				"/rooms/4/messages", tt.body, tt.contentType, "1")
+				"/rooms/RG000000004/messages", tt.body, tt.contentType, "1")
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d (body=%s)", rec.Code, tt.wantStatus, rec.Body.String())
@@ -549,7 +565,7 @@ func TestHandleRoomSendMessage_LoggingNFR1(t *testing.T) {
 
 	logBytes := captureSlog(t, func() {
 		body := `{"text":"` + secretText + `"}`
-		req := httptest.NewRequest(http.MethodPost, "/rooms/4/messages", strings.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/rooms/RG000000004/messages", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+bearerToken) // defense in depth
 		req = withUserContext(t, req, "1")

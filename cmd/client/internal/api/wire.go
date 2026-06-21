@@ -74,16 +74,10 @@ type Room struct {
 }
 
 // RoomListResponse mirrors internal/gateway/handler_room_query.go
-// roomListResponse for HTTP 200 outcomes of GET /rooms.
+// roomListResponse for HTTP 200 outcomes of GET /rooms and GET /rooms/joined:
+// both return room descriptors (opaque R… id + name).
 type RoomListResponse struct {
 	Rooms []Room `json:"rooms"`
-}
-
-// JoinedRoomsResponse mirrors internal/gateway/handler_room_query.go
-// joinedRoomsResponse for HTTP 200 outcomes of GET /rooms/joined. The
-// server normalises an empty list to `[]`, never `null`.
-type JoinedRoomsResponse struct {
-	RoomIDs []string `json:"room_ids"`
 }
 
 // JoinSuccessResponse mirrors internal/gateway/handler_room.go

@@ -33,6 +33,7 @@ import (
 	"github.com/oklahomer/blabby/internal/clusterboot"
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/logging"
+	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
 const (
@@ -88,13 +89,13 @@ func main() {
 	level := logging.SetupDefault()
 	slog.Info("server.startup", "log_level", level.String())
 
-	cfg, cc, err := parseConfig(os.Args[1:])
+	cfg, dbCfg, cc, err := parseConfig(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 
-	if err := run(cfg, cc); err != nil {
+	if err := run(cfg, dbCfg, cc); err != nil {
 		slog.Error("server.fatal", "error", err)
 		os.Exit(1)
 	}
@@ -104,24 +105,29 @@ func main() {
 // and cluster configuration. It uses a dedicated FlagSet so it can be driven
 // directly from tests; the cluster flags are registered by clusterboot on the
 // same FlagSet.
-func parseConfig(args []string) (config, clusterboot.Config, error) {
+func parseConfig(args []string) (config, postgres.Config, clusterboot.Config, error) {
 	fs := flag.NewFlagSet("blabby-gateway", flag.ContinueOnError)
 	listen := fs.String("listen", defaultListenAddr, "HTTP listen address (host:port)")
 	secret := fs.String("jwt-secret", "", "JWT signing secret; a development default is used when empty")
+	dbCfg := postgres.BindFlags(fs)
 	clusterCfg := clusterboot.BindFlags(fs, gatewayClusterDefaults())
 	if err := fs.Parse(args); err != nil {
-		return config{}, clusterboot.Config{}, err
+		return config{}, postgres.Config{}, clusterboot.Config{}, err
 	}
 
 	cfg, err := newConfig(*listen, *secret)
 	if err != nil {
-		return config{}, clusterboot.Config{}, err
+		return config{}, postgres.Config{}, clusterboot.Config{}, err
+	}
+	dc, err := dbCfg()
+	if err != nil {
+		return config{}, postgres.Config{}, clusterboot.Config{}, err
 	}
 	cc, err := clusterCfg()
 	if err != nil {
-		return config{}, clusterboot.Config{}, err
+		return config{}, postgres.Config{}, clusterboot.Config{}, err
 	}
-	return cfg, cc, nil
+	return cfg, dc, cc, nil
 }
 
 // newConfig validates raw flag values into a config (parse, don't validate).
@@ -150,7 +156,7 @@ func newConfig(listen, secret string) (config, error) {
 // until a shutdown signal arrives. On shutdown it drains HTTP first (serve) and
 // then leaves the cluster (deferred), so in-flight requests finish before the
 // client's transport goes away.
-func run(cfg config, cc clusterboot.Config) error {
+func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	if cfg.usingDevSecret {
 		slog.Warn("server.jwt_secret.dev_default",
 			"detail", "using built-in development JWT secret; set --jwt-secret for any real deployment")
@@ -158,6 +164,16 @@ func run(cfg config, cc clusterboot.Config) error {
 	for _, w := range cc.Warnings() {
 		slog.Warn("server.cluster.config_warning", "detail", w)
 	}
+
+	// The gateway holds its own read pool to resolve client-facing room codes (R…)
+	// to internal RoomIDs. It reads rooms but never mints them, so the room repo's
+	// id source is unused.
+	pool, err := postgres.NewPool(context.Background(), dbCfg)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+	roomDir := gateway.NewRoomRepoDirectory(pool)
 
 	// The in-memory store backs credential lookup for login and token issue.
 	// The gateway never resolves display names — that is the User grain's job —
@@ -181,7 +197,7 @@ func run(cfg config, cc clusterboot.Config) error {
 	slog.Info("server.cluster.started", "advertised_address", c.ActorSystem.Address())
 
 	authenticator := auth.NewJWTAuthenticator([]byte(cfg.jwtSecret), store)
-	gw := gateway.NewGateway(authenticator, c, c.ActorSystem.Root)
+	gw := gateway.NewGateway(authenticator, roomDir, c, c.ActorSystem.Root)
 
 	srv := &http.Server{
 		Addr:              cfg.listenAddr,

@@ -104,18 +104,33 @@ func (s *roomStubServer) handleRoomsJoined(w http.ResponseWriter, _ *http.Reques
 	idx := atomic.LoadInt32(&s.joinedCalls)
 	atomic.AddInt32(&s.joinedCalls, 1)
 	seq := s.joinedSequence
-	if len(seq) == 0 {
-		_ = json.NewEncoder(w).Encode(api.JoinedRoomsResponse{RoomIDs: []string{}})
-		return
+	var roomIDs []string
+	if len(seq) > 0 {
+		if int(idx) >= len(seq) {
+			idx = int32(len(seq) - 1)
+		}
+		roomIDs = seq[idx]
 	}
-	if int(idx) >= len(seq) {
-		idx = int32(len(seq) - 1)
+	_ = json.NewEncoder(w).Encode(api.RoomListResponse{Rooms: s.roomsFromIDs(roomIDs)})
+}
+
+// roomsFromIDs turns the stub's joined-id sequence into descriptors, resolving
+// each id to its catalogue name (falling back to the id) so the joined response
+// carries the same names as GET /rooms — as the real gateway does.
+func (s *roomStubServer) roomsFromIDs(ids []string) []api.Room {
+	nameByID := make(map[string]string, len(s.rooms))
+	for _, room := range s.rooms {
+		nameByID[room.ID] = room.Name
 	}
-	roomIDs := seq[idx]
-	if roomIDs == nil {
-		roomIDs = []string{}
+	rooms := make([]api.Room, 0, len(ids))
+	for _, roomID := range ids {
+		name := nameByID[roomID]
+		if name == "" {
+			name = roomID
+		}
+		rooms = append(rooms, api.Room{ID: roomID, Name: name})
 	}
-	_ = json.NewEncoder(w).Encode(api.JoinedRoomsResponse{RoomIDs: roomIDs})
+	return rooms
 }
 
 func (s *roomStubServer) handleRoomCommand(w http.ResponseWriter, r *http.Request) {

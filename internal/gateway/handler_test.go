@@ -132,7 +132,7 @@ func TestHandleLogin(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := NewGateway(&stubAuthenticator{authenticateFn: tt.authFn}, nil, nil)
+			g := NewGateway(&stubAuthenticator{authenticateFn: tt.authFn}, nil, nil, nil)
 
 			req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
@@ -176,7 +176,7 @@ func TestHandleLogin_AuthErrorMessageDoesNotLeakDetails(t *testing.T) {
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
 			return nil, errors.New("user alice not found in database table users")
 		},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"alice","password":"x"}`))
 	rec := httptest.NewRecorder()
@@ -199,7 +199,7 @@ func TestHandleLogin_NilResultFromAuthenticatorReturns500(t *testing.T) {
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
 			return nil, nil
 		},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"alice","password":"secret"}`))
 	rec := httptest.NewRecorder()
@@ -219,7 +219,7 @@ func TestHandleLogin_EmptyTokenFromAuthenticatorReturns500(t *testing.T) {
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
 			return &auth.Result{UserID: mustUserID(t, "1"), Token: ""}, nil
 		},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"alice","password":"secret"}`))
 	rec := httptest.NewRecorder()
@@ -239,7 +239,7 @@ func TestHandleLogin_BodyTooLargeReturns400(t *testing.T) {
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
 			return &auth.Result{Token: "tok"}, nil
 		},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	// Build a JSON body larger than the 1 MB cap.
 	huge := strings.Repeat("a", (1<<20)+10)

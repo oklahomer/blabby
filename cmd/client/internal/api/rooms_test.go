@@ -37,7 +37,10 @@ func TestLoadJoinedRoomsCmdSuccess(t *testing.T) {
 			t.Errorf("missing/incorrect bearer header: %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(JoinedRoomsResponse{RoomIDs: []string{"general", "random"}})
+		_ = json.NewEncoder(w).Encode(RoomListResponse{Rooms: []Room{
+			{ID: "RG000000004", Name: "General"},
+			{ID: "RH000000005", Name: "Random"},
+		}})
 	}))
 	defer srv.Close()
 
@@ -46,15 +49,16 @@ func TestLoadJoinedRoomsCmdSuccess(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected JoinedRoomsLoaded, got %T: %#v", msg, msg)
 	}
-	if !reflect.DeepEqual(got.RoomIDs, []string{"general", "random"}) {
-		t.Fatalf("got room ids %#v", got.RoomIDs)
+	want := []Room{{ID: "RG000000004", Name: "General"}, {ID: "RH000000005", Name: "Random"}}
+	if !reflect.DeepEqual(got.Rooms, want) {
+		t.Fatalf("got rooms %#v, want %#v", got.Rooms, want)
 	}
 }
 
 func TestLoadJoinedRoomsCmdEmpty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"room_ids":[]}`))
+		_, _ = w.Write([]byte(`{"rooms":[]}`))
 	}))
 	defer srv.Close()
 
@@ -63,8 +67,8 @@ func TestLoadJoinedRoomsCmdEmpty(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected JoinedRoomsLoaded, got %T", msg)
 	}
-	if len(got.RoomIDs) != 0 {
-		t.Fatalf("expected empty list, got %#v", got.RoomIDs)
+	if len(got.Rooms) != 0 {
+		t.Fatalf("expected empty list, got %#v", got.Rooms)
 	}
 }
 
@@ -356,7 +360,7 @@ func (d *deadlineCapturingTransport) RoundTrip(req *http.Request) (*http.Respons
 func TestRoomCmdsZeroTimeoutUsesDefault(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(JoinedRoomsResponse{RoomIDs: nil})
+		_ = json.NewEncoder(w).Encode(RoomListResponse{Rooms: nil})
 	}))
 	defer srv.Close()
 

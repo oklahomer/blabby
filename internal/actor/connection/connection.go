@@ -51,6 +51,7 @@ const (
 	eventConnectionWriteError             = "connection.write.error"
 	eventConnectionWriteBackpressure      = "connection.write.backpressure"
 	eventConnectionEventUnknown           = "connection.event.unknown"
+	eventConnectionRoomCodeUnresolved     = "connection.room_code.unresolved"
 	eventConnectionCloseFrameError        = "connection.close_frame.error"
 	eventConnectionReadPumpPanic          = "connection.read_pump.panic"
 	eventConnectionSupervision            = "connection.supervision"
@@ -67,6 +68,14 @@ type UserGrainCaller interface {
 	RegisterConnection(userID string, req *userpb.RegisterConnectionRequest) (*userpb.RegisterConnectionResponse, error)
 }
 
+// RoomCodeResolver maps an internal RoomID — parsed from the decimal id the Room
+// grain fans out — to the opaque public room code (R…) the client sees. The
+// connection translates every outbound frame's room id through it so no internal
+// numeric room id ever crosses the WebSocket.
+type RoomCodeResolver interface {
+	PublicRoomCode(ctx context.Context, roomID id.RoomID) (string, error)
+}
+
 // UserConnection is the actor that owns the meaning of one WebSocket
 // connection. Pumps own transport I/O; this actor owns authentication,
 // behavior transitions, and cluster communication decisions.
@@ -76,6 +85,7 @@ type UserConnection struct {
 	conn       *websocket.Conn
 	auth       auth.Authenticator
 	userClient UserGrainCaller
+	roomCodes  RoomCodeResolver
 
 	userID id.UserID
 
@@ -123,6 +133,14 @@ func WithUserGrainCaller(uc UserGrainCaller) Option {
 	return optionFunc(func(c *userConnectionConfig) { c.userClient = uc })
 }
 
+// WithRoomCodeResolver injects the resolver that translates internal room ids in
+// fan-out messages to the public R… codes sent on the wire. Production wires the
+// gateway's directory-backed resolver; a frame whose room id cannot be resolved is
+// dropped rather than leaking the internal id.
+func WithRoomCodeResolver(r RoomCodeResolver) Option {
+	return optionFunc(func(c *userConnectionConfig) { c.roomCodes = r })
+}
+
 // WithAppHeartbeat enables application-level ping/pong timing for the
 // connection. The actor decides what ping and timeout mean; this option only
 // configures timer ownership in middleware.
@@ -165,6 +183,7 @@ func NewProps(conn *websocket.Conn, a auth.Authenticator, c *cluster.Cluster, op
 				conn:       cfg.conn,
 				auth:       cfg.auth,
 				userClient: cfg.userClient,
+				roomCodes:  cfg.roomCodes,
 				outbound:   make(chan any, outboundBufferSize),
 			}
 			uc.behavior = actor.NewBehavior()
@@ -179,6 +198,7 @@ type userConnectionConfig struct {
 	conn        *websocket.Conn
 	auth        auth.Authenticator
 	userClient  UserGrainCaller
+	roomCodes   RoomCodeResolver
 	authTimeout time.Duration
 	heartbeat   heartbeatConfig
 }
@@ -487,13 +507,48 @@ func (uc *UserConnection) logAuthRejected(ctx actor.Context, reason string, code
 	)
 }
 
+// publicRoomCode parses the internal room id carried by a fan-out message and
+// resolves it to its client-facing R… code. It returns ok=false when the id is
+// unparseable, no resolver is configured, or the id cannot be resolved; the caller
+// drops the frame rather than leak the internal id onto the wire.
+func (uc *UserConnection) publicRoomCode(ctx actor.Context, internalRoomID string) (string, bool) {
+	roomID, err := id.ParseRoomID(internalRoomID)
+	if err != nil {
+		slog.Error(eventConnectionRoomCodeUnresolved,
+			"actor_type", actorType, "pid", ctx.Self().String(),
+			"user_id", uc.userID.String(), "room_id", internalRoomID,
+			"reason", "unparseable_room_id", "error", err)
+		return "", false
+	}
+	if uc.roomCodes == nil {
+		slog.Error(eventConnectionRoomCodeUnresolved,
+			"actor_type", actorType, "pid", ctx.Self().String(),
+			"user_id", uc.userID.String(), "room_id", internalRoomID,
+			"reason", "resolver_not_configured")
+		return "", false
+	}
+	code, err := uc.roomCodes.PublicRoomCode(context.Background(), roomID)
+	if err != nil {
+		slog.Error(eventConnectionRoomCodeUnresolved,
+			"actor_type", actorType, "pid", ctx.Self().String(),
+			"user_id", uc.userID.String(), "room_id", internalRoomID,
+			"error", err)
+		return "", false
+	}
+	return code, true
+}
+
 func (uc *UserConnection) forwardMessage(ctx actor.Context, req *userpb.ForwardMessageRequest) {
+	roomCode, ok := uc.publicRoomCode(ctx, req.GetRoomId())
+	if !ok {
+		return
+	}
 	var timestamp time.Time
 	if ts := req.GetTimestamp(); ts != nil {
 		timestamp = ts.AsTime()
 	}
 	uc.sendOutbound(ctx, &ChatDelivered{
-		RoomID:    req.GetRoomId(),
+		RoomID:    roomCode,
 		Sender:    UserRef{ID: req.GetSender().GetId(), Name: req.GetSender().GetName()},
 		Text:      req.GetText(),
 		Timestamp: timestamp,
@@ -502,27 +557,37 @@ func (uc *UserConnection) forwardMessage(ctx actor.Context, req *userpb.ForwardM
 		"actor_type", actorType,
 		"pid", ctx.Self().String(),
 		"user_id", uc.userID.String(),
-		"room_id", req.GetRoomId(),
+		"room_id", roomCode,
 		"sender_id", req.GetSender().GetId(),
 		"text_len", len(req.GetText()),
 	)
 }
 
 func (uc *UserConnection) forwardRoomEvent(ctx actor.Context, req *userpb.NotifyRoomEventRequest) {
-	var out any
-	switch req.GetEventType() {
-	case userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED:
-		out = &RoomJoined{RoomID: req.GetRoomId(), User: UserRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()}}
-	case userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT:
-		out = &RoomLeft{RoomID: req.GetRoomId(), User: UserRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()}}
-	default:
+	// Classify the event first, so an unknown type is dropped without spending a
+	// room-code lookup it would never use.
+	eventType := req.GetEventType()
+	if eventType != userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED &&
+		eventType != userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT {
 		slog.Warn(eventConnectionEventUnknown,
 			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 			"user_id", uc.userID.String(),
-			"event_type", req.GetEventType().String(),
+			"event_type", eventType.String(),
 		)
 		return
+	}
+
+	roomCode, ok := uc.publicRoomCode(ctx, req.GetRoomId())
+	if !ok {
+		return
+	}
+	user := UserRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()}
+	var out any
+	if eventType == userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED {
+		out = &RoomJoined{RoomID: roomCode, User: user}
+	} else {
+		out = &RoomLeft{RoomID: roomCode, User: user}
 	}
 	uc.sendOutbound(ctx, out)
 }

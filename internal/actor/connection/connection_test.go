@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -81,6 +82,36 @@ type session struct {
 	system *actor.ActorSystem
 }
 
+// identityRoomCodes returns the id's decimal string unchanged (no translation), so
+// tests asserting on a numeric room id see it pass through. It is the default
+// resolver in startSession.
+type identityRoomCodes struct{}
+
+func (identityRoomCodes) PublicRoomCode(_ context.Context, roomID id.RoomID) (string, error) {
+	return roomID.String(), nil
+}
+
+// stubRoomCodes maps RoomIDs to fixed public codes and errors for any id not in
+// the map, exercising the translation and drop-on-unresolved paths.
+type stubRoomCodes struct{ codes map[id.RoomID]string }
+
+func (s stubRoomCodes) PublicRoomCode(_ context.Context, roomID id.RoomID) (string, error) {
+	if code, ok := s.codes[roomID]; ok {
+		return code, nil
+	}
+	return "", fmt.Errorf("stub: unknown room id %s", roomID)
+}
+
+// mustRoomID builds a RoomID for test fixtures, failing on an invalid value.
+func mustRoomID(t *testing.T, v int64) id.RoomID {
+	t.Helper()
+	r, err := id.NewRoomID(v)
+	if err != nil {
+		t.Fatalf("NewRoomID(%d): %v", v, err)
+	}
+	return r
+}
+
 func startSession(t *testing.T, authStub *stubAuthenticator, grainStub UserGrainCaller, opts ...Option) *session {
 	t.Helper()
 
@@ -93,7 +124,10 @@ func startSession(t *testing.T, authStub *stubAuthenticator, grainStub UserGrain
 			t.Errorf("upgrade: %v", err)
 			return
 		}
-		fullOpts := append([]Option{WithUserGrainCaller(grainStub)}, opts...)
+		fullOpts := append([]Option{
+			WithUserGrainCaller(grainStub),
+			WithRoomCodeResolver(identityRoomCodes{}),
+		}, opts...)
 		props := NewProps(c, authStub, nil, fullOpts...)
 		pidCh <- system.Root.Spawn(props)
 	}))
@@ -416,7 +450,7 @@ func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {
 
 	when := time.UnixMilli(1700000000000)
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		RoomId: "general", Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
+		RoomId: "4", Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
 		Text: "hello", Timestamp: timestamppb.New(when),
 	})
 
@@ -424,7 +458,7 @@ func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {
 	if got["type"] != "message" {
 		t.Errorf("type: got %v, want message", got["type"])
 	}
-	if got["room_id"] != "general" || got["text"] != "hello" {
+	if got["room_id"] != "4" || got["text"] != "hello" {
 		t.Errorf("payload mismatch: %v", got)
 	}
 	if sender := userObject(t, got, "sender"); sender["id"] != "bob" || sender["name"] != "Bob Builder" {
@@ -432,6 +466,32 @@ func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {
 	}
 	if got["timestamp"].(float64) != 1700000000000 {
 		t.Errorf("timestamp: got %v, want 1700000000000", got["timestamp"])
+	}
+}
+
+// TestForwardMessage_TranslatesRoomIDToPublicCode proves the connection replaces
+// the internal room id from the grain with the opaque public code before it
+// reaches the wire, so no internal numeric room id crosses the WebSocket.
+func TestForwardMessage_TranslatesRoomIDToPublicCode(t *testing.T) {
+	authStub := &stubAuthenticator{validateFn: func(_ context.Context, _ string) (*auth.Claims, error) {
+		return aliceClaims(), nil
+	}}
+	sess := startSession(t, authStub, &recordingGrainCaller{},
+		WithRoomCodeResolver(stubRoomCodes{codes: map[id.RoomID]string{mustRoomID(t, 4): "RG000000004"}}))
+	writeAuthFrame(t, sess.client, "tok")
+	_ = readJSON(t, sess.client) // auth_ok
+
+	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
+		RoomId: "4", Sender: &commonpb.UserRef{Id: "2", Name: "Bob"},
+		Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(1)),
+	})
+
+	got := readJSON(t, sess.client)
+	if got["type"] != "message" {
+		t.Fatalf("type: got %v, want message", got["type"])
+	}
+	if got["room_id"] != "RG000000004" {
+		t.Errorf("room_id: got %v, want RG000000004 (internal id 4 translated to its public code)", got["room_id"])
 	}
 }
 
@@ -456,7 +516,7 @@ func TestRoomEvent_JoinedAndLeftSerialise(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		RoomId: "4", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	})
 	joined := readJSON(t, sess.client)
@@ -468,7 +528,7 @@ func TestRoomEvent_JoinedAndLeftSerialise(t *testing.T) {
 	}
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		RoomId: "4", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT,
 	})
 	left := readJSON(t, sess.client)
@@ -489,14 +549,14 @@ func TestRoomEvent_UnspecifiedDoesNotCloseSession(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		RoomId: "4", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_UNSPECIFIED,
 	})
 
 	// Push a known event afterwards. If the unknown event killed the session
 	// we'd never see this frame.
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "general", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		RoomId: "4", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	})
 	if got := readJSON(t, sess.client); got["type"] != "joined" {
@@ -600,7 +660,7 @@ func TestLogs_MessageBodyIsNeverLogged(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		RoomId: "general", Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
+		RoomId: "4", Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
 		Text:      secretBody,
 		Timestamp: timestamppb.New(time.UnixMilli(1)),
 	})

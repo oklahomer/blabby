@@ -59,7 +59,8 @@ func (g *Gateway) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	props := connection.NewProps(conn, g.auth, g.cluster)
+	props := connection.NewProps(conn, g.auth, g.cluster,
+		connection.WithRoomCodeResolver(g.roomCodes))
 	pid = g.actorRoot.Spawn(props)
 	slog.Info("ws.upgrade.ok",
 		"method", r.Method,

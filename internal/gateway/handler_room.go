@@ -13,6 +13,7 @@ import (
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
 )
 
 const (
@@ -58,14 +59,14 @@ type sendMessageSuccessResponse struct {
 //
 // Note: Go 1.22+ mux dispatches PUT /rooms//membership to the catch-all "/"
 // pattern (handleNotFound), so the empty-segment case never reaches this
-// handler. A non-numeric segment (e.g. PUT /rooms/%20/membership), which the mux
-// does match, fails id.ParseRoomID and is rejected as a bad request.
+// handler. A malformed segment (e.g. PUT /rooms/%20/membership), which the mux
+// does match, fails id.ParseRoomCode and is rejected as a bad request.
 func (g *Gateway) handleRoomMembershipPut(w http.ResponseWriter, r *http.Request) {
 	userID, ok := authenticatedUserID(w, r, endpointRoomMembershipPut)
 	if !ok {
 		return
 	}
-	roomID, ok := requireRoomID(w, r, endpointRoomMembershipPut, userID)
+	roomID, ok := g.requireRoomID(w, r, endpointRoomMembershipPut, userID)
 	if !ok {
 		return
 	}
@@ -93,7 +94,7 @@ func (g *Gateway) handleRoomMembershipDelete(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	roomID, ok := requireRoomID(w, r, endpointRoomMembershipDelete, userID)
+	roomID, ok := g.requireRoomID(w, r, endpointRoomMembershipDelete, userID)
 	if !ok {
 		return
 	}
@@ -122,7 +123,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	roomID, ok := requireRoomID(w, r, endpointRoomMessage, userID)
+	roomID, ok := g.requireRoomID(w, r, endpointRoomMessage, userID)
 	if !ok {
 		return
 	}
@@ -196,16 +197,30 @@ func authenticatedUserID(w http.ResponseWriter, r *http.Request, endpoint string
 	return userID, true
 }
 
-// requireRoomID extracts and parses {id} from the request path. The decimal
-// Snowflake form is decoded by id.ParseRoomID, which rejects any non-numeric or
-// non-positive segment uniformly across every consumer.
-func requireRoomID(w http.ResponseWriter, r *http.Request, endpoint string, userID id.UserID) (id.RoomID, bool) {
-	roomID, err := id.ParseRoomID(r.PathValue("id"))
+// requireRoomID extracts {id} from the request path as a client-facing R… code
+// and resolves it to the internal RoomID via the room directory. A malformed code
+// is a 400; a code that resolves to no active room is a 404; a directory failure
+// is a 503. The internal id is never accepted from or returned to the client.
+func (g *Gateway) requireRoomID(w http.ResponseWriter, r *http.Request, endpoint string, userID id.UserID) (id.RoomID, bool) {
+	code, err := id.ParseRoomCode(r.PathValue("id"))
 	if err != nil {
 		slog.Warn("room handler rejected request",
 			"endpoint", endpoint, "method", r.Method,
-			"user_id", userID, "reason", "invalid_room_id")
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("room_id is required"))
+			"user_id", userID, "reason", "invalid_room_code")
+		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("room id is invalid"))
+		return id.RoomID{}, false
+	}
+	roomID, err := g.rooms.Resolve(r.Context(), code)
+	switch {
+	case errors.Is(err, roomrepo.ErrRoomNotFound):
+		slog.Warn("room handler rejected request",
+			"endpoint", endpoint, "method", r.Method,
+			"user_id", userID, "reason", "room_not_found")
+		WriteErrorResponse(w, http.StatusNotFound, ErrRoomNotFound("room not found"))
+		return id.RoomID{}, false
+	case err != nil:
+		logRoomTransportError(endpoint, r.Method, userID, id.RoomID{})
+		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to resolve room"))
 		return id.RoomID{}, false
 	}
 	return roomID, true

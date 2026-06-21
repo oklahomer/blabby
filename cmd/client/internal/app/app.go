@@ -261,13 +261,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case api.JoinedRoomsLoaded:
-		m.roomsState.JoinedIDs = v.RoomIDs
+		// Descriptors carry the name alongside the id, so the Rooms pane shows
+		// real names after a reload without relying on an in-session capture.
+		if m.nameForID == nil {
+			m.nameForID = map[string]string{}
+		}
+		ids := make([]string, len(v.Rooms))
+		for i, room := range v.Rooms {
+			ids[i] = room.ID
+			m.nameForID[room.ID] = room.Name
+		}
+		m.roomsState.JoinedIDs = ids
+		m.roomsState.NameForID = m.nameForID
 		m.roomsState.Loading = false
 		m.roomsState.LoadError = ""
-		if len(v.RoomIDs) == 0 {
+		if len(ids) == 0 {
 			m.roomsState.Cursor = 0
-		} else if m.roomsState.Cursor > len(v.RoomIDs)-1 {
-			m.roomsState.Cursor = len(v.RoomIDs) - 1
+		} else if m.roomsState.Cursor > len(ids)-1 {
+			m.roomsState.Cursor = len(ids) - 1
 		}
 		return m, nil
 
