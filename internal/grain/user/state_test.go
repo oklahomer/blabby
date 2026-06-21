@@ -11,7 +11,7 @@ import (
 
 func mustRoomID(t *testing.T, raw string) id.RoomID {
 	t.Helper()
-	r, err := id.NewRoomID(raw)
+	r, err := id.ParseRoomID(raw)
 	if err != nil {
 		t.Fatalf("mustRoomID(%q): %v", raw, err)
 	}
@@ -139,12 +139,12 @@ func TestUserState_ConnectionPIDs_EmptyReturnsNil(t *testing.T) {
 func TestUserState_JoinedRooms(t *testing.T) {
 	t.Run("join then snapshot is sorted", func(t *testing.T) {
 		s := newUserState()
-		s.joinRoom(mustRoomID(t, "zulu"))
-		s.joinRoom(mustRoomID(t, "alpha"))
-		s.joinRoom(mustRoomID(t, "mike"))
+		s.joinRoom(mustRoomID(t, "22"))
+		s.joinRoom(mustRoomID(t, "20"))
+		s.joinRoom(mustRoomID(t, "21"))
 
 		got := s.joinedRoomIDs()
-		want := []id.RoomID{mustRoomID(t, "alpha"), mustRoomID(t, "mike"), mustRoomID(t, "zulu")}
+		want := []id.RoomID{mustRoomID(t, "20"), mustRoomID(t, "21"), mustRoomID(t, "22")}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("joinedRoomIDs: got %v, want %v", got, want)
 		}
@@ -152,11 +152,11 @@ func TestUserState_JoinedRooms(t *testing.T) {
 
 	t.Run("re-join is a no-op", func(t *testing.T) {
 		s := newUserState()
-		s.joinRoom(mustRoomID(t, "general"))
-		s.joinRoom(mustRoomID(t, "general"))
+		s.joinRoom(mustRoomID(t, "4"))
+		s.joinRoom(mustRoomID(t, "4"))
 
 		got := s.joinedRoomIDs()
-		want := []id.RoomID{mustRoomID(t, "general")}
+		want := []id.RoomID{mustRoomID(t, "4")}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("joinedRoomIDs: got %v, want %v", got, want)
 		}
@@ -164,12 +164,12 @@ func TestUserState_JoinedRooms(t *testing.T) {
 
 	t.Run("leave removes membership", func(t *testing.T) {
 		s := newUserState()
-		s.joinRoom(mustRoomID(t, "general"))
-		s.joinRoom(mustRoomID(t, "random"))
-		s.leaveRoom(mustRoomID(t, "general"))
+		s.joinRoom(mustRoomID(t, "4"))
+		s.joinRoom(mustRoomID(t, "5"))
+		s.leaveRoom(mustRoomID(t, "4"))
 
 		got := s.joinedRoomIDs()
-		want := []id.RoomID{mustRoomID(t, "random")}
+		want := []id.RoomID{mustRoomID(t, "5")}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("joinedRoomIDs: got %v, want %v", got, want)
 		}
@@ -177,11 +177,11 @@ func TestUserState_JoinedRooms(t *testing.T) {
 
 	t.Run("leave unknown room is a no-op", func(t *testing.T) {
 		s := newUserState()
-		s.joinRoom(mustRoomID(t, "general"))
-		s.leaveRoom(mustRoomID(t, "missing"))
+		s.joinRoom(mustRoomID(t, "4"))
+		s.leaveRoom(mustRoomID(t, "99"))
 
 		got := s.joinedRoomIDs()
-		want := []id.RoomID{mustRoomID(t, "general")}
+		want := []id.RoomID{mustRoomID(t, "4")}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("joinedRoomIDs: got %v, want %v", got, want)
 		}

@@ -20,10 +20,11 @@ import (
 // long indefinite wait that would freeze the UI.
 const DefaultRoomCallTimeout = 5 * time.Second
 
-// JoinedRoomsLoaded is emitted by LoadJoinedRoomsCmd on HTTP 200. The
-// slice is exactly the room_ids the server returned, in order.
+// JoinedRoomsLoaded is emitted by LoadJoinedRoomsCmd on HTTP 200. The slice is
+// the joined rooms the server returned, in order, as descriptors (opaque R… id +
+// name) so names survive a reload without an in-session lookup.
 type JoinedRoomsLoaded struct {
-	RoomIDs []string
+	Rooms []Room
 }
 
 // JoinedRoomsLoadFailed is emitted by LoadJoinedRoomsCmd for every
@@ -81,7 +82,7 @@ func LoadJoinedRoomsCmd(client *http.Client, server, token string, timeout time.
 			return JoinedRoomsLoadFailed{Message: err.Error()}
 		}
 		if httpStatus == http.StatusOK {
-			var resp JoinedRoomsResponse
+			var resp RoomListResponse
 			if err := json.Unmarshal(raw, &resp); err != nil {
 				return JoinedRoomsLoadFailed{
 					Message:    fmt.Sprintf("decode joined rooms: %s", err.Error()),

@@ -128,7 +128,7 @@ func (g *Grain) Init(ctx cluster.GrainContext) {
 // outbound command.
 func (g *Grain) resolveSelf(ctx cluster.GrainContext) *commonpb.UserRef {
 	identity := ctx.Identity()
-	uid, err := id.NewUserID(identity)
+	uid, err := id.ParseUserID(identity)
 	if err != nil {
 		slog.Warn(eventUserProfileSeedFailed,
 			"grain_type", ctx.Kind(), "grain_id", identity, "reason", "invalid_identity")
@@ -219,7 +219,7 @@ func (g *Grain) RegisterConnection(req *userpb.RegisterConnectionRequest, ctx cl
 // and, on success, records the room in the user's joined set. Business
 // errors from the Room grain are parsed and canonicalized before forwarding.
 func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) (*userpb.JoinRoomResponse, error) {
-	roomID, err := id.NewRoomID(req.GetRoomId())
+	roomID, err := id.ParseRoomID(req.GetRoomId())
 	if err != nil {
 		slog.Warn(eventUserRoomJoinRejected,
 			"grain_type", ctx.Kind(),
@@ -269,7 +269,7 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 // LeaveRoom mirrors JoinRoom: routes to the Room grain and, on success,
 // removes the room from the user's joined set.
 func (g *Grain) LeaveRoom(req *userpb.LeaveRoomRequest, ctx cluster.GrainContext) (*userpb.LeaveRoomResponse, error) {
-	roomID, err := id.NewRoomID(req.GetRoomId())
+	roomID, err := id.ParseRoomID(req.GetRoomId())
 	if err != nil {
 		slog.Warn(eventUserRoomLeaveRejected,
 			"grain_type", ctx.Kind(),
@@ -316,7 +316,7 @@ func (g *Grain) LeaveRoom(req *userpb.LeaveRoomRequest, ctx cluster.GrainContext
 // grain does NOT echo the message locally — multi-device echo is realized
 // via the Room grain's fan-out call to ForwardMessage.
 func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainContext) (*userpb.SendMessageResponse, error) {
-	roomID, err := id.NewRoomID(req.GetRoomId())
+	roomID, err := id.ParseRoomID(req.GetRoomId())
 	if err != nil {
 		slog.Warn(eventUserMessageSendRejected,
 			"grain_type", ctx.Kind(),

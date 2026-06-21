@@ -10,7 +10,7 @@ import (
 
 func mustUserID(t *testing.T, raw string) id.UserID {
 	t.Helper()
-	u, err := id.NewUserID(raw)
+	u, err := id.ParseUserID(raw)
 	if err != nil {
 		t.Fatalf("mustUserID(%q): %v", raw, err)
 	}
@@ -30,10 +30,10 @@ func mustUserRef(t *testing.T, rawID, name string) id.UserRef {
 }
 
 func TestRoomState_AddRemoveMember(t *testing.T) {
-	alice := mustUserID(t, "alice")
-	bob := mustUserID(t, "bob")
-	aliceRef := mustUserRef(t, "alice", "alice")
-	bobRef := mustUserRef(t, "bob", "bob")
+	alice := mustUserID(t, "1")
+	bob := mustUserID(t, "2")
+	aliceRef := mustUserRef(t, "1", "1")
+	bobRef := mustUserRef(t, "2", "2")
 
 	tests := []struct {
 		name      string
@@ -92,10 +92,10 @@ func TestRoomState_AddRemoveMember(t *testing.T) {
 }
 
 func TestRoomState_IsMember(t *testing.T) {
-	alice := mustUserID(t, "alice")
-	bob := mustUserID(t, "bob")
+	alice := mustUserID(t, "1")
+	bob := mustUserID(t, "2")
 	s := newRoomState()
-	s.addMember(mustUserRef(t, "alice", "alice"))
+	s.addMember(mustUserRef(t, "1", "1"))
 
 	if !s.isMember(alice) {
 		t.Errorf("isMember(alice): got false, want true")
@@ -106,10 +106,10 @@ func TestRoomState_IsMember(t *testing.T) {
 }
 
 func TestRoomState_MemberRef_CachesNameAndRefresh(t *testing.T) {
-	alice := mustUserID(t, "alice")
-	bob := mustUserID(t, "bob")
+	alice := mustUserID(t, "1")
+	bob := mustUserID(t, "2")
 	s := newRoomState()
-	s.addMember(mustUserRef(t, "alice", "Alice"))
+	s.addMember(mustUserRef(t, "1", "Alice"))
 
 	ref, ok := s.memberRef(alice)
 	if !ok {
@@ -123,14 +123,14 @@ func TestRoomState_MemberRef_CachesNameAndRefresh(t *testing.T) {
 	}
 
 	// refreshMember updates an existing member's cached display name.
-	s.refreshMember(mustUserRef(t, "alice", "Alice Renamed"))
+	s.refreshMember(mustUserRef(t, "1", "Alice Renamed"))
 	ref, _ = s.memberRef(alice)
 	if ref.Name() != "Alice Renamed" {
 		t.Errorf("after refresh, memberRef(alice).Name(): got %q, want %q", ref.Name(), "Alice Renamed")
 	}
 
 	// refreshMember is a no-op for a non-member and must not resurrect one.
-	s.refreshMember(mustUserRef(t, "bob", "Bob"))
+	s.refreshMember(mustUserRef(t, "2", "Bob"))
 	if _, ok := s.memberRef(bob); ok {
 		t.Errorf("memberRef(bob): got ok=true, want false (refresh must not add a non-member)")
 	}
@@ -138,19 +138,19 @@ func TestRoomState_MemberRef_CachesNameAndRefresh(t *testing.T) {
 
 func TestRoomState_MemberIDs_Sorted(t *testing.T) {
 	s := newRoomState()
-	for _, ref := range []id.UserRef{mustUserRef(t, "charlie", "charlie"), mustUserRef(t, "alice", "alice"), mustUserRef(t, "bob", "bob")} {
+	for _, ref := range []id.UserRef{mustUserRef(t, "3", "3"), mustUserRef(t, "1", "1"), mustUserRef(t, "2", "2")} {
 		s.addMember(ref)
 	}
 
 	got := s.memberIDs()
-	want := []id.UserID{mustUserID(t, "alice"), mustUserID(t, "bob"), mustUserID(t, "charlie")}
+	want := []id.UserID{mustUserID(t, "1"), mustUserID(t, "2"), mustUserID(t, "3")}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("memberIDs: got %v, want %v (must be sorted)", got, want)
 	}
 
 	// Mutating the snapshot must not affect the underlying state.
-	got[0] = mustUserID(t, "mutated")
-	if !s.isMember(mustUserID(t, "alice")) {
+	got[0] = mustUserID(t, "777")
+	if !s.isMember(mustUserID(t, "1")) {
 		t.Errorf("snapshot mutation leaked into state")
 	}
 }
@@ -158,7 +158,7 @@ func TestRoomState_MemberIDs_Sorted(t *testing.T) {
 func TestRoomState_RecordMessage_RingBufferBound(t *testing.T) {
 	s := newRoomState()
 	s.maxRecentMessages = 3
-	alice := mustUserID(t, "alice")
+	alice := mustUserID(t, "1")
 
 	for i := int64(1); i <= 5; i++ {
 		s.recordMessage(chatMessage{senderID: alice, text: "msg", timestamp: time.UnixMilli(i)})

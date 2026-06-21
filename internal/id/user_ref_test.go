@@ -7,17 +7,17 @@ import (
 	"github.com/oklahomer/blabby/internal/id"
 )
 
-func mustUserID(t *testing.T, raw string) id.UserID {
+func mustUserID(t *testing.T, raw int64) id.UserID {
 	t.Helper()
 	u, err := id.NewUserID(raw)
 	if err != nil {
-		t.Fatalf("NewUserID(%q): %v", raw, err)
+		t.Fatalf("NewUserID(%d): %v", raw, err)
 	}
 	return u
 }
 
 func TestNewUserRef(t *testing.T) {
-	valid := mustUserID(t, "alice")
+	valid := mustUserID(t, 1)
 
 	tests := []struct {
 		name     string

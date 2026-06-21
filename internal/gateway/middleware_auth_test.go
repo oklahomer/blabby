@@ -21,7 +21,7 @@ import (
 // row with error-handling boilerplate.
 func mustUserID(t *testing.T, raw string) id.UserID {
 	t.Helper()
-	uid, err := id.NewUserID(raw)
+	uid, err := id.ParseUserID(raw)
 	if err != nil {
 		t.Fatalf("mustUserID(%q): %v", raw, err)
 	}
@@ -30,7 +30,7 @@ func mustUserID(t *testing.T, raw string) id.UserID {
 
 func TestAuthMiddleware(t *testing.T) {
 	const validToken = "valid-token"
-	const validUserID = "user-123"
+	const validUserID = "123"
 
 	tests := []struct {
 		name             string
@@ -153,7 +153,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := NewGateway(&stubAuthenticator{validateTokenFn: tt.validateTokenFn}, nil, nil)
+			g := NewGateway(&stubAuthenticator{validateTokenFn: tt.validateTokenFn}, nil, nil, nil)
 
 			downstreamInvoked := false
 			var capturedUserID id.UserID
@@ -220,7 +220,7 @@ func TestAuthMiddleware_DoesNotLeakTokenToLogs(t *testing.T) {
 		validateTokenFn: func(ctx context.Context, token string) (*auth.Claims, error) {
 			return nil, fmt.Errorf("%w: detail", auth.ErrTokenInvalid)
 		},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
 	req.Header.Set("Authorization", "Bearer "+secretToken)
@@ -241,14 +241,14 @@ func TestAuthMiddleware_DoesNotLeakTokenToLogs(t *testing.T) {
 func TestGateway_RequireAuth_WrapsHandlerFunc(t *testing.T) {
 	g := NewGateway(&stubAuthenticator{
 		validateTokenFn: func(ctx context.Context, token string) (*auth.Claims, error) {
-			return &auth.Claims{UserID: mustUserID(t, "alice")}, nil
+			return &auth.Claims{UserID: mustUserID(t, "1")}, nil
 		},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	handler := g.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		uid, ok := auth.UserIDFromContext(r.Context())
-		if !ok || uid.String() != "alice" {
-			t.Errorf("expected alice in context, got %q ok=%v", uid.String(), ok)
+		if !ok || uid.String() != "1" {
+			t.Errorf("expected user 1 in context, got %q ok=%v", uid.String(), ok)
 		}
 		w.WriteHeader(http.StatusOK)
 	})
@@ -264,7 +264,7 @@ func TestGateway_RequireAuth_WrapsHandlerFunc(t *testing.T) {
 }
 
 func TestGateway_RequireAuth_RejectsMissingHeader(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{}, nil, nil)
+	g := NewGateway(&stubAuthenticator{}, nil, nil, nil)
 	handler := g.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler must not run when auth fails")
 	})
@@ -291,7 +291,7 @@ func TestAuthMiddleware_RejectsTokenWithWhitespace(t *testing.T) {
 			t.Fatalf("authenticator must not be called for whitespace token, got %q", token)
 			return nil, nil
 		},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	for _, header := range []string{
 		"Bearer abc def",

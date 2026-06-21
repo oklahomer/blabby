@@ -143,9 +143,9 @@ paths:
                 $ref: '#/components/schemas/RoomListResponse'
               example:
                 rooms:
-                  - id: general
+                  - id: RG000000004
                     name: General
-                  - id: random
+                  - id: RH000000005
                     name: Random
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -156,20 +156,24 @@ paths:
         - Rooms
       summary: List the rooms the caller has joined.
       description: |
-        Returns the identifiers of the rooms the authenticated user is currently a
-        member of. An empty result is the JSON array `[]`, never `null`.
+        Returns the rooms the authenticated user is currently a member of, as
+        descriptors (opaque `R…` id + name) — the same shape as the catalogue. When
+        the user has joined no rooms, the `rooms` array is `[]`, never `null`.
       responses:
         '200':
-          description: The caller's joined-room identifiers.
+          description: The caller's joined rooms.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JoinedRoomsResponse'
+                $ref: '#/components/schemas/RoomListResponse'
               example:
-                room_ids:
-                  - general
+                rooms:
+                  - id: RG000000004
+                    name: General
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /rooms/{id}/membership:
@@ -197,6 +201,8 @@ paths:
           $ref: '#/components/responses/InvalidRoomId'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/RoomNotFound'
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
@@ -223,6 +229,8 @@ paths:
           $ref: '#/components/responses/InvalidRoomId'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/RoomNotFound'
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
@@ -286,6 +294,8 @@ paths:
                   code: 2001
                   status: ROOM_NOT_MEMBER
                   message: not a member of this room
+        '404':
+          $ref: '#/components/responses/RoomNotFound'
         '413':
           description: The request body exceeded the 8 KiB limit.
           content:
@@ -314,14 +324,14 @@ components:
       in: path
       required: true
       description: |
-        Room identifier. The value is trimmed of surrounding whitespace and then
-        required to be non-empty, at most 256 bytes, and free of ASCII control
-        characters, Unicode whitespace, and `/`. A value that violates these rules
-        is rejected with `400 INVALID_REQUEST`.
+        The opaque public room code: `R` followed by 10 Crockford Base32 symbols
+        (e.g. `RG000000004`). Input is parsed leniently (case-insensitive, `O`→`0`,
+        `I`/`L`→`1`). A malformed code is rejected with `400 INVALID_REQUEST`; a
+        well-formed code that matches no active room is `404 ROOM_NOT_FOUND`. The
+        internal numeric room id is never accepted here.
       schema:
         type: string
-        x-max-utf8-bytes: 256
-      example: general
+      example: RG000000004
   schemas:
     LoginRequest:
       type: object
@@ -356,7 +366,7 @@ components:
       properties:
         rooms:
           type: array
-          description: The available rooms.
+          description: The rooms, as descriptors. Used for both the catalogue and the caller's joined rooms.
           items:
             $ref: '#/components/schemas/RoomDescriptor'
     RoomDescriptor:
@@ -367,20 +377,12 @@ components:
       properties:
         id:
           type: string
-          description: The room identifier used in path parameters and event frames.
+          description: |
+            The opaque public room code (`R…`) used in path parameters and event
+            frames. The internal numeric room id is never exposed.
         name:
           type: string
           description: The room's human-readable display name.
-    JoinedRoomsResponse:
-      type: object
-      required:
-        - room_ids
-      properties:
-        room_ids:
-          type: array
-          description: Identifiers of the rooms the caller has joined; `[]` when none.
-          items:
-            type: string
     SendMessageRequest:
       type: object
       required:
@@ -467,7 +469,7 @@ components:
               status: AUTH_MISSING_TOKEN
               message: missing authorization header
     InvalidRoomId:
-      description: The room identifier in the path was missing or invalid.
+      description: The room code in the path was missing or malformed.
       content:
         application/json:
           schema:
@@ -476,7 +478,20 @@ components:
             error:
               code: 4001
               status: INVALID_REQUEST
-              message: room_id is required
+              message: room id is invalid
+    RoomNotFound:
+      description: |
+        The room code is well-formed but matches no active room (the room does not
+        exist or is no longer active).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: 2003
+              status: ROOM_NOT_FOUND
+              message: room not found
     ServiceUnavailable:
       description: A backend dependency was temporarily unreachable. The request may be retried.
       content:

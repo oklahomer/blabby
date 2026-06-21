@@ -152,7 +152,7 @@ components:
         - name: generalMessage
           payload:
             type: message
-            room_id: general
+            room_id: RG000000004
             sender:
               id: alice
               name: Alice
@@ -169,7 +169,7 @@ components:
         - name: aliceJoined
           payload:
             type: joined
-            room_id: general
+            room_id: RG000000004
             user:
               id: alice
               name: Alice
@@ -184,7 +184,7 @@ components:
         - name: aliceLeft
           payload:
             type: left
-            room_id: general
+            room_id: RG000000004
             user:
               id: alice
               name: Alice
@@ -263,7 +263,9 @@ components:
           const: message
         room_id:
           type: string
-          description: The room the message belongs to.
+          description: |
+            The room the message belongs to, as its opaque public code (`R…`).
+            The internal numeric room id is never sent.
         sender:
           $ref: '#/components/schemas/UserRef'
         text:
@@ -285,7 +287,9 @@ components:
           const: joined
         room_id:
           type: string
-          description: The room the membership change applies to.
+          description: |
+            The room the membership change applies to, as its opaque public code
+            (`R…`). The internal numeric room id is never sent.
         user:
           $ref: '#/components/schemas/UserRef'
     LeftPayload:
@@ -300,7 +304,9 @@ components:
           const: left
         room_id:
           type: string
-          description: The room the membership change applies to.
+          description: |
+            The room the membership change applies to, as its opaque public code
+            (`R…`). The internal numeric room id is never sent.
         user:
           $ref: '#/components/schemas/UserRef'
     AuthErrorPayload:

@@ -306,13 +306,19 @@ func TestUpdateJoinedRoomsLoadedPopulatesPane(t *testing.T) {
 	m.modal = nil
 	m.roomsState.Loading = true
 
-	next, _ := m.Update(api.JoinedRoomsLoaded{RoomIDs: []string{"general", "random"}})
+	next, _ := m.Update(api.JoinedRoomsLoaded{Rooms: []api.Room{
+		{ID: "general", Name: "General"},
+		{ID: "random", Name: "Random"},
+	}})
 	got := next.(Model)
 	if got.roomsState.Loading {
 		t.Fatal("Loading flag not cleared")
 	}
 	if len(got.roomsState.JoinedIDs) != 2 {
 		t.Fatalf("JoinedIDs not stored: %#v", got.roomsState.JoinedIDs)
+	}
+	if got.roomsState.NameForID["general"] != "General" {
+		t.Fatalf("descriptor name not populated into NameForID: %#v", got.roomsState.NameForID)
 	}
 }
 

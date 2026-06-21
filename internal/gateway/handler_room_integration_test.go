@@ -30,7 +30,7 @@ type integrationAuth struct {
 }
 
 func (a *integrationAuth) Authenticate(_ context.Context, _ auth.AuthParams) (*auth.Result, error) {
-	uid, err := id.NewUserID(a.userID)
+	uid, err := id.ParseUserID(a.userID)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func (a *integrationAuth) ValidateToken(_ context.Context, token string) (*auth.
 	if token != a.token {
 		return nil, auth.ErrTokenInvalid
 	}
-	uid, err := id.NewUserID(a.userID)
+	uid, err := id.ParseUserID(a.userID)
 	if err != nil {
 		return nil, auth.ErrTokenInvalid
 	}
@@ -80,8 +80,8 @@ func (s *stubRoomGrain) PostMessage(*roompb.PostMessageRequest, cluster.GrainCon
 // stub Room grain isolates this test from Room → User fan-out, which
 // would deadlock on a single-member cluster.
 func TestGateway_RoomEndpoints_Integration(t *testing.T) {
-	const userID = "alice-room-int"
-	const roomID = "general"
+	const userID = "1"
+	const roomCode = "RG000000004" // resolves to internal room id 4 via the stub directory
 	const bearer = "integration-token-room"
 	stubPostTime := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 
@@ -93,17 +93,17 @@ func TestGateway_RoomEndpoints_Integration(t *testing.T) {
 
 	c := clustertest.Start(t, roomKind, userKind)
 
-	g := gateway.NewGateway(&integrationAuth{userID: userID, token: bearer}, c, c.ActorSystem.Root)
+	g := gateway.NewGateway(&integrationAuth{userID: userID, token: bearer}, newStubRoomDirectory(), c, c.ActorSystem.Root)
 	srv := httptest.NewServer(g.RegisterRoutes())
 	t.Cleanup(srv.Close)
 
 	authHeader := "Bearer " + bearer
 
 	// 1. Ensure membership in "general" twice; both requests are successful.
-	if rec := doMembership(t, http.MethodPut, srv.URL+"/rooms/"+roomID+"/membership", authHeader); rec.status != http.StatusOK {
+	if rec := doMembership(t, http.MethodPut, srv.URL+"/rooms/"+roomCode+"/membership", authHeader); rec.status != http.StatusOK {
 		t.Fatalf("join: status = %d (body=%s)", rec.status, rec.body)
 	}
-	if rec := doMembership(t, http.MethodPut, srv.URL+"/rooms/"+roomID+"/membership", authHeader); rec.status != http.StatusOK {
+	if rec := doMembership(t, http.MethodPut, srv.URL+"/rooms/"+roomCode+"/membership", authHeader); rec.status != http.StatusOK {
 		t.Fatalf("repeated join: status = %d (body=%s)", rec.status, rec.body)
 	}
 
@@ -113,17 +113,20 @@ func TestGateway_RoomEndpoints_Integration(t *testing.T) {
 		t.Fatalf("/rooms/joined after join: status = %d (body=%s)", rec.status, rec.body)
 	}
 	var joined struct {
-		RoomIDs []string `json:"room_ids"`
+		Rooms []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"rooms"`
 	}
 	if err := json.Unmarshal([]byte(rec.body), &joined); err != nil {
 		t.Fatalf("decode joined: %v", err)
 	}
-	if len(joined.RoomIDs) != 1 || joined.RoomIDs[0] != roomID {
-		t.Errorf("joined rooms after join: got %v, want [%q]", joined.RoomIDs, roomID)
+	if len(joined.Rooms) != 1 || joined.Rooms[0].ID != roomCode {
+		t.Errorf("joined rooms after join: got %+v, want [%q]", joined.Rooms, roomCode)
 	}
 
 	// 3. Send a message and confirm a non-zero timestamp came back.
-	rec = doPOST(t, srv.URL+"/rooms/"+roomID+"/messages",
+	rec = doPOST(t, srv.URL+"/rooms/"+roomCode+"/messages",
 		`{"text":"integration"}`, "application/json", authHeader)
 	if rec.status != http.StatusOK {
 		t.Fatalf("send: status = %d (body=%s)", rec.status, rec.body)
@@ -144,10 +147,10 @@ func TestGateway_RoomEndpoints_Integration(t *testing.T) {
 	}
 
 	// 4. Ensure membership is absent twice and confirm the list stays empty.
-	if rec := doMembership(t, http.MethodDelete, srv.URL+"/rooms/"+roomID+"/membership", authHeader); rec.status != http.StatusOK {
+	if rec := doMembership(t, http.MethodDelete, srv.URL+"/rooms/"+roomCode+"/membership", authHeader); rec.status != http.StatusOK {
 		t.Fatalf("leave: status = %d (body=%s)", rec.status, rec.body)
 	}
-	if rec := doMembership(t, http.MethodDelete, srv.URL+"/rooms/"+roomID+"/membership", authHeader); rec.status != http.StatusOK {
+	if rec := doMembership(t, http.MethodDelete, srv.URL+"/rooms/"+roomCode+"/membership", authHeader); rec.status != http.StatusOK {
 		t.Fatalf("repeated leave: status = %d (body=%s)", rec.status, rec.body)
 	}
 	rec = doGET(t, srv.URL+"/rooms/joined", authHeader)
@@ -157,17 +160,18 @@ func TestGateway_RoomEndpoints_Integration(t *testing.T) {
 	if err := json.Unmarshal([]byte(rec.body), &joined); err != nil {
 		t.Fatalf("decode joined-after-leave: %v", err)
 	}
-	if len(joined.RoomIDs) != 0 {
-		t.Errorf("joined rooms after leave: got %v, want []", joined.RoomIDs)
+	if len(joined.Rooms) != 0 {
+		t.Errorf("joined rooms after leave: got %+v, want []", joined.Rooms)
 	}
 
-	// 5. /rooms returns the static catalogue.
+	// 5. /rooms returns the active-room catalogue (directory-backed; here the
+	// stub directory) as R… descriptors.
 	rec = doGET(t, srv.URL+"/rooms", authHeader)
 	if rec.status != http.StatusOK {
 		t.Fatalf("/rooms: status = %d", rec.status)
 	}
-	if !strings.Contains(rec.body, `"id":"general"`) {
-		t.Errorf("/rooms body missing default room: %s", rec.body)
+	if !strings.Contains(rec.body, `"id":"RG000000004"`) {
+		t.Errorf("/rooms body missing seeded room: %s", rec.body)
 	}
 }
 

@@ -97,7 +97,7 @@ func (s *chatStubServer) handleWS(w http.ResponseWriter, r *http.Request) {
 
 func (s *chatStubServer) handleRoomsJoined(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(api.JoinedRoomsResponse{RoomIDs: []string{"general"}})
+	_ = json.NewEncoder(w).Encode(api.RoomListResponse{Rooms: []api.Room{{ID: "general", Name: "general"}}})
 }
 
 func (s *chatStubServer) handleRoomCommand(w http.ResponseWriter, r *http.Request) {

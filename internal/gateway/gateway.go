@@ -15,6 +15,8 @@ import (
 // between client-facing JSON / WebSocket frames and internal services.
 type Gateway struct {
 	auth      auth.Authenticator
+	rooms     RoomDirectory
+	roomCodes *roomCodeCache
 	cluster   *cluster.Cluster
 	actorRoot *actor.RootContext
 
@@ -24,9 +26,19 @@ type Gateway struct {
 	userGrain func(userID id.UserID) userGrainCaller
 }
 
-// NewGateway constructs a Gateway. All three arguments are required.
-func NewGateway(authenticator auth.Authenticator, c *cluster.Cluster, root *actor.RootContext) *Gateway {
-	return &Gateway{auth: authenticator, cluster: c, actorRoot: root}
+// NewGateway constructs a Gateway from its dependencies: the authenticator, the
+// room directory (which resolves the opaque R… codes to and from internal RoomIDs
+// for both HTTP routes and the WebSocket fan-out via a cached resolver), and the
+// cluster client plus root for grain dispatch. Production wires all of them; a
+// test may pass nil for a dependency the exercised routes do not touch.
+func NewGateway(authenticator auth.Authenticator, rooms RoomDirectory, c *cluster.Cluster, root *actor.RootContext) *Gateway {
+	return &Gateway{
+		auth:      authenticator,
+		rooms:     rooms,
+		roomCodes: newRoomCodeCache(rooms),
+		cluster:   c,
+		actorRoot: root,
+	}
 }
 
 // RegisterRoutes returns an http.Handler with all gateway routes registered.

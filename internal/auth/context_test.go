@@ -10,7 +10,7 @@ import (
 
 func mustUserID(t *testing.T, raw string) id.UserID {
 	t.Helper()
-	uid, err := id.NewUserID(raw)
+	uid, err := id.ParseUserID(raw)
 	if err != nil {
 		t.Fatalf("mustUserID(%q): %v", raw, err)
 	}
@@ -18,7 +18,7 @@ func mustUserID(t *testing.T, raw string) id.UserID {
 }
 
 func TestContextWithUserID_RoundTrip(t *testing.T) {
-	want := mustUserID(t, "user-123")
+	want := mustUserID(t, "123")
 	ctx := auth.ContextWithUserID(context.Background(), want)
 
 	got, ok := auth.UserIDFromContext(ctx)
@@ -60,7 +60,7 @@ func TestUserIDFromContext_WrongTypedValue(t *testing.T) {
 	// collide with auth's unexported context key. We simulate that by storing
 	// a value under a different key type and asserting we cannot retrieve it.
 	type otherKey struct{}
-	ctx := context.WithValue(context.Background(), otherKey{}, mustUserID(t, "user-evil"))
+	ctx := context.WithValue(context.Background(), otherKey{}, mustUserID(t, "666"))
 
 	got, ok := auth.UserIDFromContext(ctx)
 	if ok {

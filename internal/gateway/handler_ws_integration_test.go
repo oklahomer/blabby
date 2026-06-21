@@ -18,11 +18,11 @@ import (
 )
 
 func TestGateway_WebSocket_Integration(t *testing.T) {
-	const userID = "alice-ws-integration"
+	const userID = "1"
 	const token = "integration-token-ws"
 
 	c := clustertest.Start(t, user.NewKind(nil))
-	g := gateway.NewGateway(&integrationAuth{userID: userID, token: token}, c, c.ActorSystem.Root)
+	g := gateway.NewGateway(&integrationAuth{userID: userID, token: token}, newStubRoomDirectory(), c, c.ActorSystem.Root)
 	srv := httptest.NewServer(g.RegisterRoutes())
 	t.Cleanup(srv.Close)
 
@@ -42,8 +42,8 @@ func TestGateway_WebSocket_Integration(t *testing.T) {
 
 	resp, err := userpb.GetUserGrainGrainClient(c, userID).
 		ForwardMessage(&userpb.ForwardMessageRequest{
-			RoomId:    "general",
-			Sender:    &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
+			RoomId:    "4",
+			Sender:    &commonpb.UserRef{Id: "2", Name: "Bob Builder"},
 			Text:      "hello-cluster",
 			Timestamp: timestamppb.New(time.UnixMilli(1700000000000)),
 		})
@@ -62,7 +62,7 @@ func TestGateway_WebSocket_Integration(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected nested sender object, got %v (%T)", got["sender"], got["sender"])
 	}
-	if sender["id"] != "bob" || sender["name"] != "Bob Builder" {
+	if sender["id"] != "2" || sender["name"] != "Bob Builder" {
 		t.Errorf("expected sender {id:bob name:Bob Builder}, got %v", sender)
 	}
 }

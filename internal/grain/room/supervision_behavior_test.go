@@ -81,7 +81,7 @@ func startFanoutHarness(t *testing.T, n userNotifier, logger *slog.Logger) (*act
 
 func notifyJob(t *testing.T) *fanoutNotify {
 	t.Helper()
-	uid, err := id.NewUserID("alice")
+	uid, err := id.NewUserID(1)
 	if err != nil {
 		t.Fatalf("user id: %v", err)
 	}

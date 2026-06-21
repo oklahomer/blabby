@@ -64,8 +64,8 @@ func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(captureBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	const alice = "alice-int"
-	const general = "general-int"
+	const alice = "1"
+	const general = "4"
 
 	roomClient := roompb.GetRoomGrainGrainClient(c, general)
 
