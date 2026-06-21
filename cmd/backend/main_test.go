@@ -47,7 +47,7 @@ func TestParseConfig(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseConfig(tc.args)
+			_, got, err := parseConfig(tc.args)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got config %+v", got)

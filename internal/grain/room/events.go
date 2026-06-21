@@ -43,8 +43,10 @@ func buildForwardMessage(roomID string, sender id.UserRef, text string, timestam
 	}
 }
 
-// protoUserRef converts a domain UserRef into the wire UserRef carried by
-// fan-out payloads.
+// protoUserRef converts the minimal user identity ref (id.UserRef: id + display
+// name) into the wire UserRef carried by fan-out payloads. The richer
+// public-code/status fields of common.UserRef are left empty until userrepo
+// lands; see domain.UserRef for that fuller shape.
 func protoUserRef(u id.UserRef) *commonpb.UserRef {
 	return &commonpb.UserRef{Id: u.ID().String(), Name: u.Name()}
 }

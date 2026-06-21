@@ -4,6 +4,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 )
 
@@ -28,6 +29,11 @@ type chatMessage struct {
 // global immutability rule does not apply to grain state (architecture.md
 // "Grain State Management").
 type roomState struct {
+	// ref is the room's reference metadata, hydrated from the source of truth on
+	// activation. refLoaded reports whether hydration succeeded for an active
+	// room; until it does, the grain is invalid and every command is rejected.
+	ref       domain.RoomRef
+	refLoaded bool
 	// members caches each member's denormalized UserRef (id + display name),
 	// keyed by id. The Room owns this cache so fan-out can label events
 	// locally — never a synchronous lookup back to the User grain.
@@ -43,6 +49,18 @@ func newRoomState() roomState {
 		members:           map[id.UserID]id.UserRef{},
 		maxRecentMessages: maxRecentMessages,
 	}
+}
+
+// loadRoom caches the activated reference metadata and marks the grain loaded.
+func (s *roomState) loadRoom(ref domain.RoomRef) {
+	s.ref = ref
+	s.refLoaded = true
+}
+
+// isLoaded reports whether the grain hydrated an active room on activation. A
+// command on an unloaded grain (absent or archived room) is rejected.
+func (s *roomState) isLoaded() bool {
+	return s.refLoaded
 }
 
 // addMember records ref as a new member, keyed by its id. Returns false if the

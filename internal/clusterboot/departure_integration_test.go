@@ -252,7 +252,7 @@ func startTestMembers(t *testing.T, count int) ([]*testMember, string) {
 		}
 
 		member := &testMember{
-			cluster:    Build(cc, Kinds(nil)...),
+			cluster:    Build(cc, Kinds(nil, activeAnyRoomLoader{})...),
 			topologies: make(chan *cluster.ClusterTopology, 16),
 		}
 		member.loggingSub = SubscribeTopologyLogging(member.cluster)
