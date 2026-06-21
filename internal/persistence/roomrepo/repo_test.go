@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
@@ -150,7 +151,7 @@ func TestCreate_Success(t *testing.T) {
 	if room.DisplayName != "General" {
 		t.Errorf("DisplayName = %q, want General", room.DisplayName)
 	}
-	if room.Status != RoomStatusActive {
+	if room.Status != domain.RoomStatusActive {
 		t.Errorf("Status = %q, want active", room.Status)
 	}
 	if room.CreatedBy.Int64() != 1 {

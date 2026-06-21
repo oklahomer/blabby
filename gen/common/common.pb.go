@@ -100,17 +100,25 @@ func (x *ErrorDetail) GetMessage() string {
 	return ""
 }
 
-// UserRef is a denormalized snapshot of a user as they appear in a room
-// event or message: their stable `id` plus the display `name` captured at
-// the moment the payload was produced. It travels with join/message/event
-// payloads so a recipient can label "who" without a separate lookup, and is
-// cached by the Room grain so fan-out never blocks on a per-member query.
+// UserRef is a denormalized snapshot of a user's public reference metadata as it
+// appears in a room event or message: the internal `id` plus the client-facing
+// fields. It travels with join/message/event payloads so a recipient can label
+// "who" without a separate lookup, and is cached by the Room grain so fan-out
+// never blocks on a per-member query.
+//
+// `id` is the internal decimal Snowflake string; `public_code` is the bare
+// canonical user code (the gateway prefixes it `U…` for clients). `status` and
+// `metadata_version` are reference metadata; a receiver applies a snapshot only
+// when `metadata_version` is newer.
 type UserRef struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name            string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	PublicCode      string                 `protobuf:"bytes,3,opt,name=public_code,json=publicCode,proto3" json:"public_code,omitempty"`
+	Status          string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	MetadataVersion int64                  `protobuf:"varint,5,opt,name=metadata_version,json=metadataVersion,proto3" json:"metadata_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *UserRef) Reset() {
@@ -157,6 +165,247 @@ func (x *UserRef) GetName() string {
 	return ""
 }
 
+func (x *UserRef) GetPublicCode() string {
+	if x != nil {
+		return x.PublicCode
+	}
+	return ""
+}
+
+func (x *UserRef) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *UserRef) GetMetadataVersion() int64 {
+	if x != nil {
+		return x.MetadataVersion
+	}
+	return 0
+}
+
+// RoomRef is the room counterpart of UserRef: a denormalized snapshot of a room's
+// reference metadata. `room_id` is the internal decimal Snowflake string;
+// `public_code` is the bare canonical room code (the gateway prefixes it `R…`).
+type RoomRef struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	RoomId          string                 `protobuf:"bytes,1,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
+	PublicCode      string                 `protobuf:"bytes,2,opt,name=public_code,json=publicCode,proto3" json:"public_code,omitempty"`
+	Name            string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Status          string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	MetadataVersion int64                  `protobuf:"varint,5,opt,name=metadata_version,json=metadataVersion,proto3" json:"metadata_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *RoomRef) Reset() {
+	*x = RoomRef{}
+	mi := &file_common_common_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RoomRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RoomRef) ProtoMessage() {}
+
+func (x *RoomRef) ProtoReflect() protoreflect.Message {
+	mi := &file_common_common_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RoomRef.ProtoReflect.Descriptor instead.
+func (*RoomRef) Descriptor() ([]byte, []int) {
+	return file_common_common_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *RoomRef) GetRoomId() string {
+	if x != nil {
+		return x.RoomId
+	}
+	return ""
+}
+
+func (x *RoomRef) GetPublicCode() string {
+	if x != nil {
+		return x.PublicCode
+	}
+	return ""
+}
+
+func (x *RoomRef) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *RoomRef) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *RoomRef) GetMetadataVersion() int64 {
+	if x != nil {
+		return x.MetadataVersion
+	}
+	return 0
+}
+
+// MembershipRef is the room-centric view of one membership: the member (UserRef)
+// plus their relationship metadata. It carries no room id — the owning Room grain
+// already knows the room.
+type MembershipRef struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	User               *UserRef               `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	Role               string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	JoinedAtUnixMillis int64                  `protobuf:"varint,3,opt,name=joined_at_unix_millis,json=joinedAtUnixMillis,proto3" json:"joined_at_unix_millis,omitempty"`
+	MetadataVersion    int64                  `protobuf:"varint,4,opt,name=metadata_version,json=metadataVersion,proto3" json:"metadata_version,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *MembershipRef) Reset() {
+	*x = MembershipRef{}
+	mi := &file_common_common_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MembershipRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MembershipRef) ProtoMessage() {}
+
+func (x *MembershipRef) ProtoReflect() protoreflect.Message {
+	mi := &file_common_common_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MembershipRef.ProtoReflect.Descriptor instead.
+func (*MembershipRef) Descriptor() ([]byte, []int) {
+	return file_common_common_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *MembershipRef) GetUser() *UserRef {
+	if x != nil {
+		return x.User
+	}
+	return nil
+}
+
+func (x *MembershipRef) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *MembershipRef) GetJoinedAtUnixMillis() int64 {
+	if x != nil {
+		return x.JoinedAtUnixMillis
+	}
+	return 0
+}
+
+func (x *MembershipRef) GetMetadataVersion() int64 {
+	if x != nil {
+		return x.MetadataVersion
+	}
+	return 0
+}
+
+// JoinedRoomRef is the user-centric mirror of MembershipRef: the joined room
+// (RoomRef) plus the relationship metadata, as cached by the User grain.
+type JoinedRoomRef struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Room               *RoomRef               `protobuf:"bytes,1,opt,name=room,proto3" json:"room,omitempty"`
+	Role               string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	JoinedAtUnixMillis int64                  `protobuf:"varint,3,opt,name=joined_at_unix_millis,json=joinedAtUnixMillis,proto3" json:"joined_at_unix_millis,omitempty"`
+	MetadataVersion    int64                  `protobuf:"varint,4,opt,name=metadata_version,json=metadataVersion,proto3" json:"metadata_version,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *JoinedRoomRef) Reset() {
+	*x = JoinedRoomRef{}
+	mi := &file_common_common_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JoinedRoomRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JoinedRoomRef) ProtoMessage() {}
+
+func (x *JoinedRoomRef) ProtoReflect() protoreflect.Message {
+	mi := &file_common_common_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JoinedRoomRef.ProtoReflect.Descriptor instead.
+func (*JoinedRoomRef) Descriptor() ([]byte, []int) {
+	return file_common_common_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *JoinedRoomRef) GetRoom() *RoomRef {
+	if x != nil {
+		return x.Room
+	}
+	return nil
+}
+
+func (x *JoinedRoomRef) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *JoinedRoomRef) GetJoinedAtUnixMillis() int64 {
+	if x != nil {
+		return x.JoinedAtUnixMillis
+	}
+	return 0
+}
+
+func (x *JoinedRoomRef) GetMetadataVersion() int64 {
+	if x != nil {
+		return x.MetadataVersion
+	}
+	return 0
+}
+
 var File_common_common_proto protoreflect.FileDescriptor
 
 const file_common_common_proto_rawDesc = "" +
@@ -165,10 +414,31 @@ const file_common_common_proto_rawDesc = "" +
 	"\vErrorDetail\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"-\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\x91\x01\n" +
 	"\aUserRef\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04nameB1Z/github.com/oklahomer/blabby/gen/common;commonpbb\x06proto3"
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
+	"\vpublic_code\x18\x03 \x01(\tR\n" +
+	"publicCode\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\x12)\n" +
+	"\x10metadata_version\x18\x05 \x01(\x03R\x0fmetadataVersion\"\x9a\x01\n" +
+	"\aRoomRef\x12\x17\n" +
+	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x1f\n" +
+	"\vpublic_code\x18\x02 \x01(\tR\n" +
+	"publicCode\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\x12)\n" +
+	"\x10metadata_version\x18\x05 \x01(\x03R\x0fmetadataVersion\"\xa6\x01\n" +
+	"\rMembershipRef\x12#\n" +
+	"\x04user\x18\x01 \x01(\v2\x0f.common.UserRefR\x04user\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\x121\n" +
+	"\x15joined_at_unix_millis\x18\x03 \x01(\x03R\x12joinedAtUnixMillis\x12)\n" +
+	"\x10metadata_version\x18\x04 \x01(\x03R\x0fmetadataVersion\"\xa6\x01\n" +
+	"\rJoinedRoomRef\x12#\n" +
+	"\x04room\x18\x01 \x01(\v2\x0f.common.RoomRefR\x04room\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\x121\n" +
+	"\x15joined_at_unix_millis\x18\x03 \x01(\x03R\x12joinedAtUnixMillis\x12)\n" +
+	"\x10metadata_version\x18\x04 \x01(\x03R\x0fmetadataVersionB1Z/github.com/oklahomer/blabby/gen/common;commonpbb\x06proto3"
 
 var (
 	file_common_common_proto_rawDescOnce sync.Once
@@ -182,17 +452,22 @@ func file_common_common_proto_rawDescGZIP() []byte {
 	return file_common_common_proto_rawDescData
 }
 
-var file_common_common_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_common_common_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_common_common_proto_goTypes = []any{
-	(*ErrorDetail)(nil), // 0: common.ErrorDetail
-	(*UserRef)(nil),     // 1: common.UserRef
+	(*ErrorDetail)(nil),   // 0: common.ErrorDetail
+	(*UserRef)(nil),       // 1: common.UserRef
+	(*RoomRef)(nil),       // 2: common.RoomRef
+	(*MembershipRef)(nil), // 3: common.MembershipRef
+	(*JoinedRoomRef)(nil), // 4: common.JoinedRoomRef
 }
 var file_common_common_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	1, // 0: common.MembershipRef.user:type_name -> common.UserRef
+	2, // 1: common.JoinedRoomRef.room:type_name -> common.RoomRef
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_common_common_proto_init() }
@@ -206,7 +481,7 @@ func file_common_common_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_common_common_proto_rawDesc), len(file_common_common_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
@@ -46,7 +47,7 @@ func TestRoomRepoIntegration(t *testing.T) {
 	if created.ID.Int64() != rawID {
 		t.Fatalf("created id = %d, want %d", created.ID.Int64(), rawID)
 	}
-	if created.Status != RoomStatusActive {
+	if created.Status != domain.RoomStatusActive {
 		t.Fatalf("created status = %q, want active", created.Status)
 	}
 	if !strings.HasPrefix(created.PublicID(), "R") {

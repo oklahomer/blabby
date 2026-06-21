@@ -27,12 +27,50 @@ message ErrorDetail {
   string message = 3;
 }
 
-// UserRef is a denormalized snapshot of a user as they appear in a room
-// event or message: their stable `id` plus the display `name` captured at
-// the moment the payload was produced. It travels with join/message/event
-// payloads so a recipient can label "who" without a separate lookup, and is
-// cached by the Room grain so fan-out never blocks on a per-member query.
+// UserRef is a denormalized snapshot of a user's public reference metadata as it
+// appears in a room event or message: the internal `id` plus the client-facing
+// fields. It travels with join/message/event payloads so a recipient can label
+// "who" without a separate lookup, and is cached by the Room grain so fan-out
+// never blocks on a per-member query.
+//
+// `id` is the internal decimal Snowflake string; `public_code` is the bare
+// canonical user code (the gateway prefixes it `U…` for clients). `status` and
+// `metadata_version` are reference metadata; a receiver applies a snapshot only
+// when `metadata_version` is newer.
 message UserRef {
   string id = 1;
   string name = 2;
+  string public_code = 3;
+  string status = 4;
+  int64 metadata_version = 5;
+}
+
+// RoomRef is the room counterpart of UserRef: a denormalized snapshot of a room's
+// reference metadata. `room_id` is the internal decimal Snowflake string;
+// `public_code` is the bare canonical room code (the gateway prefixes it `R…`).
+message RoomRef {
+  string room_id = 1;
+  string public_code = 2;
+  string name = 3;
+  string status = 4;
+  int64 metadata_version = 5;
+}
+
+// MembershipRef is the room-centric view of one membership: the member (UserRef)
+// plus their relationship metadata. It carries no room id — the owning Room grain
+// already knows the room.
+message MembershipRef {
+  UserRef user = 1;
+  string role = 2;
+  int64 joined_at_unix_millis = 3;
+  int64 metadata_version = 4;
+}
+
+// JoinedRoomRef is the user-centric mirror of MembershipRef: the joined room
+// (RoomRef) plus the relationship metadata, as cached by the User grain.
+message JoinedRoomRef {
+  RoomRef room = 1;
+  string role = 2;
+  int64 joined_at_unix_millis = 3;
+  int64 metadata_version = 4;
 }

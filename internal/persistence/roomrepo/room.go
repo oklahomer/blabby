@@ -14,18 +14,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
-)
-
-// RoomStatus is a room's lifecycle state, mirroring the room_status SQL enum.
-type RoomStatus string
-
-const (
-	// RoomStatusActive marks a listable, joinable room.
-	RoomStatusActive RoomStatus = "active"
-	// RoomStatusArchived marks a retired room: not listed and not addressable
-	// (lookups treat it as absent).
-	RoomStatusArchived RoomStatus = "archived"
 )
 
 // Room is the domain view of a room row. Its identifiers are parsed value objects,
@@ -36,7 +26,7 @@ type Room struct {
 	PublicCode  id.PublicCode
 	DisplayName string
 	CreatedBy   id.UserID
-	Status      RoomStatus
+	Status      domain.RoomStatus
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -56,9 +46,10 @@ type roomRow struct {
 	updatedAt   time.Time
 }
 
-// toDomain parses a raw row into a Room, enforcing the id invariants at the
-// boundary. A row that violates them (non-positive id, malformed public_code) is a
-// data-integrity error surfaced to the caller rather than silently trusted.
+// toDomain parses a raw row into a Room, enforcing the id and status invariants at
+// the boundary. A row that violates them (non-positive id, malformed public_code,
+// unknown status) is a data-integrity error surfaced to the caller rather than
+// silently trusted.
 func (rr roomRow) toDomain() (Room, error) {
 	roomID, err := id.NewRoomID(rr.id)
 	if err != nil {
@@ -72,12 +63,16 @@ func (rr roomRow) toDomain() (Room, error) {
 	if err != nil {
 		return Room{}, fmt.Errorf("roomrepo: row public_code: %w", err)
 	}
+	status, err := domain.ParseRoomStatus(rr.status)
+	if err != nil {
+		return Room{}, fmt.Errorf("roomrepo: row status: %w", err)
+	}
 	return Room{
 		ID:          roomID,
 		PublicCode:  code,
 		DisplayName: rr.displayName,
 		CreatedBy:   createdBy,
-		Status:      RoomStatus(rr.status),
+		Status:      status,
 		CreatedAt:   rr.createdAt,
 		UpdatedAt:   rr.updatedAt,
 	}, nil
