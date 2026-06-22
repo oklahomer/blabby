@@ -63,6 +63,12 @@ func (s *roomState) isLoaded() bool {
 	return s.refLoaded
 }
 
+// roomRef returns the cached reference metadata. It is only meaningful once
+// isLoaded reports true; callers guard on that before reading it.
+func (s *roomState) roomRef() domain.RoomRef {
+	return s.ref
+}
+
 // addMember records ref as a new member, keyed by its id. Returns false if the
 // user was already a member; in that case the cache is unchanged (use
 // refreshMember to update an existing member's name).

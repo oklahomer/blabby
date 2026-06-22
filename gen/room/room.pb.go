@@ -71,9 +71,15 @@ func (x *JoinRequest) GetUser() *common.UserRef {
 
 // JoinResponse indicates whether the join operation succeeded.
 // A nil error indicates success; a populated error indicates failure. See ADR-013.
+//
+// `room` is the Room grain's cached reference metadata. It is present whenever the
+// grain is loaded — including the already-member outcome — so the caller can cache
+// the room's public code and display name without a separate lookup. It is absent
+// only when the room itself is absent (ROOM_NOT_FOUND).
 type JoinResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	Room          *common.RoomRef        `protobuf:"bytes,2,opt,name=room,proto3" json:"room,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -111,6 +117,13 @@ func (*JoinResponse) Descriptor() ([]byte, []int) {
 func (x *JoinResponse) GetError() *common.ErrorDetail {
 	if x != nil {
 		return x.Error
+	}
+	return nil
+}
+
+func (x *JoinResponse) GetRoom() *common.RoomRef {
+	if x != nil {
+		return x.Room
 	}
 	return nil
 }
@@ -322,9 +335,10 @@ const file_room_room_proto_rawDesc = "" +
 	"\n" +
 	"\x0froom/room.proto\x12\x04room\x1a\x13common/common.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"2\n" +
 	"\vJoinRequest\x12#\n" +
-	"\x04user\x18\x01 \x01(\v2\x0f.common.UserRefR\x04user\"9\n" +
+	"\x04user\x18\x01 \x01(\v2\x0f.common.UserRefR\x04user\"^\n" +
 	"\fJoinResponse\x12)\n" +
-	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"'\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\x12#\n" +
+	"\x04room\x18\x02 \x01(\v2\x0f.common.RoomRefR\x04room\"'\n" +
 	"\fLeaveRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\":\n" +
 	"\rLeaveResponse\x12)\n" +
@@ -362,26 +376,28 @@ var file_room_room_proto_goTypes = []any{
 	(*PostMessageResponse)(nil),   // 5: room.PostMessageResponse
 	(*common.UserRef)(nil),        // 6: common.UserRef
 	(*common.ErrorDetail)(nil),    // 7: common.ErrorDetail
-	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
+	(*common.RoomRef)(nil),        // 8: common.RoomRef
+	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
 }
 var file_room_room_proto_depIdxs = []int32{
-	6, // 0: room.JoinRequest.user:type_name -> common.UserRef
-	7, // 1: room.JoinResponse.error:type_name -> common.ErrorDetail
-	7, // 2: room.LeaveResponse.error:type_name -> common.ErrorDetail
-	6, // 3: room.PostMessageRequest.user:type_name -> common.UserRef
-	8, // 4: room.PostMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
-	7, // 5: room.PostMessageResponse.error:type_name -> common.ErrorDetail
-	0, // 6: room.RoomGrain.Join:input_type -> room.JoinRequest
-	2, // 7: room.RoomGrain.Leave:input_type -> room.LeaveRequest
-	4, // 8: room.RoomGrain.PostMessage:input_type -> room.PostMessageRequest
-	1, // 9: room.RoomGrain.Join:output_type -> room.JoinResponse
-	3, // 10: room.RoomGrain.Leave:output_type -> room.LeaveResponse
-	5, // 11: room.RoomGrain.PostMessage:output_type -> room.PostMessageResponse
-	9, // [9:12] is the sub-list for method output_type
-	6, // [6:9] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	6,  // 0: room.JoinRequest.user:type_name -> common.UserRef
+	7,  // 1: room.JoinResponse.error:type_name -> common.ErrorDetail
+	8,  // 2: room.JoinResponse.room:type_name -> common.RoomRef
+	7,  // 3: room.LeaveResponse.error:type_name -> common.ErrorDetail
+	6,  // 4: room.PostMessageRequest.user:type_name -> common.UserRef
+	9,  // 5: room.PostMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
+	7,  // 6: room.PostMessageResponse.error:type_name -> common.ErrorDetail
+	0,  // 7: room.RoomGrain.Join:input_type -> room.JoinRequest
+	2,  // 8: room.RoomGrain.Leave:input_type -> room.LeaveRequest
+	4,  // 9: room.RoomGrain.PostMessage:input_type -> room.PostMessageRequest
+	1,  // 10: room.RoomGrain.Join:output_type -> room.JoinResponse
+	3,  // 11: room.RoomGrain.Leave:output_type -> room.LeaveResponse
+	5,  // 12: room.RoomGrain.PostMessage:output_type -> room.PostMessageResponse
+	10, // [10:13] is the sub-list for method output_type
+	7,  // [7:10] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_room_room_proto_init() }

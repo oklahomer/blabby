@@ -24,6 +24,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/middleware"
@@ -256,7 +257,24 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 		}
 	}
 
-	g.state.joinRoom(roomID)
+	// A loaded Room grain returns its RoomRef on both the success and
+	// already-member outcomes, so the User grain caches the room's public code
+	// and display name without a separate lookup. A missing or malformed ref is a
+	// backend contract breach: fail closed rather than cache a degraded entry; a
+	// later retry reconciles via the already-member repair path.
+	roomRef, err := parseRoomRef(roomResp.GetRoom())
+	if err != nil {
+		slog.Error(eventUserRoomResponseInvalid,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"operation", "JoinRoom",
+			"room_id", roomID,
+			"error", err,
+		)
+		return &userpb.JoinRoomResponse{Error: errDetail(errcode.InternalError, "room operation failed")}, nil
+	}
+
+	g.state.joinRoom(roomRef)
 	slog.Info(eventUserRoomJoined,
 		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
@@ -413,20 +431,22 @@ func (g *Grain) NotifyRoomEvent(req *userpb.NotifyRoomEventRequest, ctx cluster.
 	return &userpb.NotifyRoomEventResponse{}, nil
 }
 
-// GetJoinedRooms returns a sorted snapshot of the rooms this user has
-// joined. The list is sorted by room_id for deterministic output.
+// GetJoinedRooms returns the rooms this user has joined as reference metadata
+// (public code, display name, status), sorted by room id for deterministic
+// output. The gateway renders these directly, so it no longer queries the room
+// repository per request.
 func (g *Grain) GetJoinedRooms(_ *userpb.GetJoinedRoomsRequest, ctx cluster.GrainContext) (*userpb.GetJoinedRoomsResponse, error) {
-	roomIDs := g.state.joinedRoomIDs()
+	refs := g.state.joinedRoomRefs()
 	slog.Info(eventUserRoomsQueried,
 		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
-		"room_count", len(roomIDs),
+		"room_count", len(refs),
 	)
-	wireRoomIDs := make([]string, len(roomIDs))
-	for i, r := range roomIDs {
-		wireRoomIDs[i] = r.String()
+	rooms := make([]*commonpb.RoomRef, len(refs))
+	for i, ref := range refs {
+		rooms[i] = protoRoomRef(ref)
 	}
-	return &userpb.GetJoinedRoomsResponse{RoomIds: wireRoomIDs}, nil
+	return &userpb.GetJoinedRoomsResponse{Rooms: rooms}, nil
 }
 
 // fanOut delivers msg to each PID using either the test-injected sender
@@ -464,6 +484,44 @@ func parseRoomError(ctx cluster.GrainContext, operation string, roomID id.RoomID
 		return errcode.InternalError, errDetail(errcode.InternalError, "room operation failed")
 	}
 	return code, errDetail(code, detail.GetMessage())
+}
+
+// parseRoomRef parses the proto RoomRef carried on a Join response into a typed
+// domain.RoomRef at the grain boundary (parse, don't validate). A nil ref, an
+// invalid id or public code, or an unknown status is rejected so the caller can
+// fail closed rather than cache a degraded entry.
+func parseRoomRef(p *commonpb.RoomRef) (domain.RoomRef, error) {
+	roomID, err := id.ParseRoomID(p.GetRoomId())
+	if err != nil {
+		return domain.RoomRef{}, fmt.Errorf("room_id: %w", err)
+	}
+	code, err := id.ParsePublicCode(p.GetPublicCode())
+	if err != nil {
+		return domain.RoomRef{}, fmt.Errorf("public_code: %w", err)
+	}
+	status, err := domain.ParseRoomStatus(p.GetStatus())
+	if err != nil {
+		return domain.RoomRef{}, fmt.Errorf("status: %w", err)
+	}
+	return domain.RoomRef{
+		ID:              roomID,
+		PublicCode:      code,
+		Name:            p.GetName(),
+		Status:          status,
+		MetadataVersion: p.GetMetadataVersion(),
+	}, nil
+}
+
+// protoRoomRef renders a cached domain.RoomRef back onto the wire for
+// GetJoinedRooms. The gateway prefixes the public code (R…) for clients.
+func protoRoomRef(r domain.RoomRef) *commonpb.RoomRef {
+	return &commonpb.RoomRef{
+		RoomId:          r.ID.String(),
+		PublicCode:      r.PublicCode.String(),
+		Name:            r.Name,
+		Status:          string(r.Status),
+		MetadataVersion: r.MetadataVersion,
+	}
 }
 
 // errDetail builds the canonical business-error carrier shared by every

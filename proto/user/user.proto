@@ -119,9 +119,11 @@ message NotifyRoomEventResponse {}
 // GetJoinedRoomsRequest queries which rooms the user has joined.
 message GetJoinedRoomsRequest {}
 
-// GetJoinedRoomsResponse returns the list of room IDs.
+// GetJoinedRoomsResponse returns the user's joined rooms as reference metadata
+// (public code, display name, status) so the gateway renders them without a
+// per-request room lookup.
 message GetJoinedRoomsResponse {
-  repeated string room_ids = 1;
+  repeated common.RoomRef rooms = 1;
 }
 
 // UserGrain defines the User virtual actor service.

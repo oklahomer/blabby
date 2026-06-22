@@ -52,15 +52,24 @@ func seededLoader(refs ...domain.RoomRef) stubRoomLoader {
 	return stubRoomLoader{rooms: m}
 }
 
-// roomRef builds a RoomRef for a decimal RoomID with the given status. The
-// public code is left zero: Chunk 1 caches the ref but does not render it.
+// stubRoomPublicCode is a valid bare 10-symbol Crockford public_code, so a
+// RoomRef built here survives the User grain's boundary parse when the Join flow
+// carries it end to end (fanout_integration_test).
+const stubRoomPublicCode = "G000000004"
+
+// roomRef builds a RoomRef for a decimal RoomID with the given status, including
+// a valid public code so it round-trips through the Join response.
 func roomRef(t *testing.T, raw string, status domain.RoomStatus) domain.RoomRef {
 	t.Helper()
 	rid, err := id.ParseRoomID(raw)
 	if err != nil {
 		t.Fatalf("roomRef(%q): %v", raw, err)
 	}
-	return domain.RoomRef{ID: rid, Name: "Room " + raw, Status: status}
+	code, err := id.ParsePublicCode(stubRoomPublicCode)
+	if err != nil {
+		t.Fatalf("roomRef public code: %v", err)
+	}
+	return domain.RoomRef{ID: rid, PublicCode: code, Name: "Room " + raw, Status: status}
 }
 
 // activeRoomRef builds an active RoomRef for a decimal RoomID, so test files that
@@ -275,6 +284,53 @@ func TestGrain_Join(t *testing.T) {
 		}
 		if got := g.Members(); !reflect.DeepEqual(got, []id.UserID{mustUserID(t, "1")}) {
 			t.Errorf("Members: got %v, want [alice]", got)
+		}
+	})
+}
+
+func TestGrain_Join_CarriesRoomRef(t *testing.T) {
+	t.Run("success carries the cached room ref", func(t *testing.T) {
+		g, _, _ := newGrain(t)
+
+		resp, err := g.Join(graintest.NewJoinRequest("1"), fakeRoomCtx(testRoomID))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		room := resp.GetRoom()
+		if room == nil {
+			t.Fatal("Join response missing room ref")
+		}
+		if room.GetRoomId() != testRoomID || room.GetPublicCode() != stubRoomPublicCode ||
+			room.GetName() != "Room "+testRoomID || room.GetStatus() != "active" {
+			t.Errorf("room ref = %+v, want id=%s code=%s name=Room %s active",
+				room, testRoomID, stubRoomPublicCode, testRoomID)
+		}
+	})
+
+	t.Run("already-member still carries the room ref", func(t *testing.T) {
+		g, _, _ := newGrain(t)
+		mustJoin(t, g, "1")
+
+		resp, err := g.Join(graintest.NewJoinRequest("1"), fakeRoomCtx(testRoomID))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertErrResponse(t, resp.GetError(), 2002, "ROOM_ALREADY_MEMBER")
+		if resp.GetRoom() == nil {
+			t.Error("already-member Join response must still carry the room ref")
+		}
+	})
+
+	t.Run("room-not-found omits the room ref", func(t *testing.T) {
+		g := initGrain(t, seededLoader()) // unseeded → unloaded grain
+
+		resp, err := g.Join(graintest.NewJoinRequest("1"), fakeRoomCtx(testRoomID))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertErrResponse(t, resp.GetError(), 2003, "ROOM_NOT_FOUND")
+		if resp.GetRoom() != nil {
+			t.Errorf("ROOM_NOT_FOUND Join response must omit the room ref, got %+v", resp.GetRoom())
 		}
 	})
 }

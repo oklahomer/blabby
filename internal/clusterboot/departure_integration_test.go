@@ -530,7 +530,11 @@ func getJoinedRoomsEventually(t *testing.T, member *cluster.Cluster, userID stri
 		if err != nil {
 			return err
 		}
-		roomIDs = resp.GetRoomIds()
+		ids := make([]string, len(resp.GetRooms()))
+		for i, room := range resp.GetRooms() {
+			ids[i] = room.GetRoomId()
+		}
+		roomIDs = ids
 		return nil
 	})
 	return roomIDs

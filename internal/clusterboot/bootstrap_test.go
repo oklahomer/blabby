@@ -10,13 +10,27 @@ import (
 	"github.com/oklahomer/blabby/internal/id"
 )
 
+// stubRoomPublicCode is a valid bare 10-symbol Crockford public_code used by the
+// test loader so the Join flow's public-code parse (User grain) succeeds.
+const stubRoomPublicCode = "G000000004"
+
 // activeAnyRoomLoader is a room.RoomLoader that reports every id as an active
 // room, so cluster tests can activate Room grains for arbitrary probed
-// identities (see findIdentityOn) without a database.
+// identities (see findIdentityOn) without a database. It supplies a valid public
+// code so the RoomRef survives the User grain's boundary parse on Join.
 type activeAnyRoomLoader struct{}
 
 func (activeAnyRoomLoader) LoadRoom(_ context.Context, roomID id.RoomID) (domain.RoomRef, error) {
-	return domain.RoomRef{ID: roomID, Status: domain.RoomStatusActive}, nil
+	code, err := id.ParsePublicCode(stubRoomPublicCode)
+	if err != nil {
+		return domain.RoomRef{}, err
+	}
+	return domain.RoomRef{
+		ID:         roomID,
+		PublicCode: code,
+		Name:       "Room " + roomID.String(),
+		Status:     domain.RoomStatusActive,
+	}, nil
 }
 
 // TestBuildConstructsCluster exercises both provider branches of Build. Build

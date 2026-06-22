@@ -41,7 +41,13 @@ func (s *stubRoomGrain) Join(req *roompb.JoinRequest, _ cluster.GrainContext) (*
 	atomic.AddInt64(s.joinCount, 1)
 	name := req.GetUser().GetName()
 	s.joinUserName.Store(&name)
-	return &roompb.JoinResponse{}, nil
+	// A loaded Room grain returns its RoomRef so the User grain can cache it.
+	return &roompb.JoinResponse{Room: &commonpb.RoomRef{
+		RoomId:     "4",
+		PublicCode: "G000000004",
+		Name:       "General",
+		Status:     "active",
+	}}, nil
 }
 func (s *stubRoomGrain) Leave(*roompb.LeaveRequest, cluster.GrainContext) (*roompb.LeaveResponse, error) {
 	atomic.AddInt64(s.leaveCount, 1)
@@ -94,8 +100,8 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJoinedRooms via cluster: %v", err)
 	}
-	if got := listResp.GetRoomIds(); len(got) != 1 || got[0] != "4" {
-		t.Errorf("RoomIds: got %v, want [general]", got)
+	if rooms := listResp.GetRooms(); len(rooms) != 1 || rooms[0].GetRoomId() != "4" || rooms[0].GetName() != "General" {
+		t.Errorf("Rooms: got %v, want one ref for room 4 named General", rooms)
 	}
 
 	// SendMessage — exercises clusterRoomClient.PostMessage and the

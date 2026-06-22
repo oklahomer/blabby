@@ -232,6 +232,10 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 		)
 		return joinErr(errcode.RoomNotFound, "room not found"), nil
 	}
+	// The grain is loaded, so every response below carries the room's RoomRef
+	// (the joiner caches it). Only the ROOM_NOT_FOUND guard above omits it.
+	room := protoRoomRef(g.state.roomRef())
+
 	joiner, err := parseUserRef(req.GetUser())
 	if err != nil {
 		slog.Warn(eventRoomMemberJoinRejected,
@@ -241,7 +245,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 			"reason", errcode.InvalidRequest.Status(),
 			"error", err,
 		)
-		return joinErr(errcode.InvalidRequest, "user id and display name are required"), nil
+		return joinErrWithRoom(errcode.InvalidRequest, "user id and display name are required", room), nil
 	}
 	userID := joiner.ID()
 	if g.state.isMember(userID) {
@@ -251,7 +255,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 			"user_id", userID,
 			"reason", errcode.RoomAlreadyMember.Status(),
 		)
-		return joinErr(errcode.RoomAlreadyMember, "already a member of this room"), nil
+		return joinErrWithRoom(errcode.RoomAlreadyMember, "already a member of this room", room), nil
 	}
 
 	g.state.addMember(joiner)
@@ -270,7 +274,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 	)
 	g.fanOutNotify(ctx, recipients, buildJoinedEvent(ctx.Identity(), joiner), "Join.fanout")
 
-	return &roompb.JoinResponse{}, nil
+	return &roompb.JoinResponse{Room: room}, nil
 }
 
 // Leave removes the user from the room and fans out a LEFT event to the
@@ -446,6 +450,14 @@ func joinErr(code errcode.Code, msg string) *roompb.JoinResponse {
 	return &roompb.JoinResponse{
 		Error: &commonpb.ErrorDetail{Code: code.Int32(), Status: code.Status(), Message: msg},
 	}
+}
+
+// joinErrWithRoom is joinErr plus the room's RoomRef, for rejections issued once
+// the grain is loaded (so the caller can still cache the room metadata).
+func joinErrWithRoom(code errcode.Code, msg string, room *commonpb.RoomRef) *roompb.JoinResponse {
+	resp := joinErr(code, msg)
+	resp.Room = room
+	return resp
 }
 
 func leaveErr(code errcode.Code, msg string) *roompb.LeaveResponse {

@@ -14,6 +14,7 @@ import (
 	"github.com/asynkron/protoactor-go/cluster"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/gateway"
@@ -64,7 +65,14 @@ func (s *stubRoomGrain) Terminate(cluster.GrainContext)      {}
 func (s *stubRoomGrain) ReceiveDefault(cluster.GrainContext) {}
 
 func (s *stubRoomGrain) Join(*roompb.JoinRequest, cluster.GrainContext) (*roompb.JoinResponse, error) {
-	return &roompb.JoinResponse{}, nil
+	// A loaded Room grain returns its RoomRef so the User grain caches it; the
+	// public code renders back as RG000000004 on /rooms/joined.
+	return &roompb.JoinResponse{Room: &commonpb.RoomRef{
+		RoomId:     "4",
+		PublicCode: "G000000004",
+		Name:       "General",
+		Status:     "active",
+	}}, nil
 }
 func (s *stubRoomGrain) Leave(*roompb.LeaveRequest, cluster.GrainContext) (*roompb.LeaveResponse, error) {
 	return &roompb.LeaveResponse{}, nil
