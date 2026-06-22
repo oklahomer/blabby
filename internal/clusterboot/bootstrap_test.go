@@ -1,10 +1,37 @@
 package clusterboot
 
 import (
+	"context"
 	"net"
 	"strconv"
 	"testing"
+
+	"github.com/oklahomer/blabby/internal/domain"
+	"github.com/oklahomer/blabby/internal/id"
 )
+
+// stubRoomPublicCode is a valid bare 10-symbol Crockford public_code used by the
+// test loader so the Join flow's public-code parse (User grain) succeeds.
+const stubRoomPublicCode = "G000000004"
+
+// activeAnyRoomLoader is a room.RoomLoader that reports every id as an active
+// room, so cluster tests can activate Room grains for arbitrary probed
+// identities (see findIdentityOn) without a database. It supplies a valid public
+// code so the RoomRef survives the User grain's boundary parse on Join.
+type activeAnyRoomLoader struct{}
+
+func (activeAnyRoomLoader) LoadRoom(_ context.Context, roomID id.RoomID) (domain.RoomRef, error) {
+	code, err := id.ParsePublicCode(stubRoomPublicCode)
+	if err != nil {
+		return domain.RoomRef{}, err
+	}
+	return domain.RoomRef{
+		ID:         roomID,
+		PublicCode: code,
+		Name:       "Room " + roomID.String(),
+		Status:     domain.RoomStatusActive,
+	}, nil
+}
 
 // TestBuildConstructsCluster exercises both provider branches of Build. Build
 // only constructs the cluster (StartMember/StartClient bind ports later), so it
@@ -31,7 +58,7 @@ func TestBuildConstructsCluster(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := Build(tc.cc, Kinds(nil)...)
+			c := Build(tc.cc, Kinds(nil, activeAnyRoomLoader{})...)
 			if c.ActorSystem == nil {
 				t.Fatal("Build returned a cluster without an actor system")
 			}
@@ -42,7 +69,7 @@ func TestBuildConstructsCluster(t *testing.T) {
 // TestSubscribeTopologyLogging confirms the subscription is established on the
 // built cluster's EventStream.
 func TestSubscribeTopologyLogging(t *testing.T) {
-	c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Kinds(nil)...)
+	c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Kinds(nil, activeAnyRoomLoader{})...)
 
 	sub := SubscribeTopologyLogging(c)
 	if sub == nil {
@@ -52,7 +79,7 @@ func TestSubscribeTopologyLogging(t *testing.T) {
 }
 
 func TestKindsRegistersUserAndRoom(t *testing.T) {
-	kinds := Kinds(nil)
+	kinds := Kinds(nil, activeAnyRoomLoader{})
 
 	got := make(map[string]bool, len(kinds))
 	for _, k := range kinds {

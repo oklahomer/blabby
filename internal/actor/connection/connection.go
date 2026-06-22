@@ -19,6 +19,7 @@ import (
 	"github.com/asynkron/protoactor-go/cluster"
 	"github.com/gorilla/websocket"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/errcode"
@@ -51,7 +52,7 @@ const (
 	eventConnectionWriteError             = "connection.write.error"
 	eventConnectionWriteBackpressure      = "connection.write.backpressure"
 	eventConnectionEventUnknown           = "connection.event.unknown"
-	eventConnectionRoomCodeUnresolved     = "connection.room_code.unresolved"
+	eventConnectionRoomRefInvalid         = "connection.room_ref.invalid"
 	eventConnectionCloseFrameError        = "connection.close_frame.error"
 	eventConnectionReadPumpPanic          = "connection.read_pump.panic"
 	eventConnectionSupervision            = "connection.supervision"
@@ -68,14 +69,6 @@ type UserGrainCaller interface {
 	RegisterConnection(userID string, req *userpb.RegisterConnectionRequest) (*userpb.RegisterConnectionResponse, error)
 }
 
-// RoomCodeResolver maps an internal RoomID — parsed from the decimal id the Room
-// grain fans out — to the opaque public room code (R…) the client sees. The
-// connection translates every outbound frame's room id through it so no internal
-// numeric room id ever crosses the WebSocket.
-type RoomCodeResolver interface {
-	PublicRoomCode(ctx context.Context, roomID id.RoomID) (string, error)
-}
-
 // UserConnection is the actor that owns the meaning of one WebSocket
 // connection. Pumps own transport I/O; this actor owns authentication,
 // behavior transitions, and cluster communication decisions.
@@ -85,7 +78,6 @@ type UserConnection struct {
 	conn       *websocket.Conn
 	auth       auth.Authenticator
 	userClient UserGrainCaller
-	roomCodes  RoomCodeResolver
 
 	userID id.UserID
 
@@ -133,14 +125,6 @@ func WithUserGrainCaller(uc UserGrainCaller) Option {
 	return optionFunc(func(c *userConnectionConfig) { c.userClient = uc })
 }
 
-// WithRoomCodeResolver injects the resolver that translates internal room ids in
-// fan-out messages to the public R… codes sent on the wire. Production wires the
-// gateway's directory-backed resolver; a frame whose room id cannot be resolved is
-// dropped rather than leaking the internal id.
-func WithRoomCodeResolver(r RoomCodeResolver) Option {
-	return optionFunc(func(c *userConnectionConfig) { c.roomCodes = r })
-}
-
 // WithAppHeartbeat enables application-level ping/pong timing for the
 // connection. The actor decides what ping and timeout mean; this option only
 // configures timer ownership in middleware.
@@ -183,7 +167,6 @@ func NewProps(conn *websocket.Conn, a auth.Authenticator, c *cluster.Cluster, op
 				conn:       cfg.conn,
 				auth:       cfg.auth,
 				userClient: cfg.userClient,
-				roomCodes:  cfg.roomCodes,
 				outbound:   make(chan any, outboundBufferSize),
 			}
 			uc.behavior = actor.NewBehavior()
@@ -198,7 +181,6 @@ type userConnectionConfig struct {
 	conn        *websocket.Conn
 	auth        auth.Authenticator
 	userClient  UserGrainCaller
-	roomCodes   RoomCodeResolver
 	authTimeout time.Duration
 	heartbeat   heartbeatConfig
 }
@@ -507,39 +489,31 @@ func (uc *UserConnection) logAuthRejected(ctx actor.Context, reason string, code
 	)
 }
 
-// publicRoomCode parses the internal room id carried by a fan-out message and
-// resolves it to its client-facing R… code. It returns ok=false when the id is
-// unparseable, no resolver is configured, or the id cannot be resolved; the caller
-// drops the frame rather than leak the internal id onto the wire.
-func (uc *UserConnection) publicRoomCode(ctx actor.Context, internalRoomID string) (string, bool) {
-	roomID, err := id.ParseRoomID(internalRoomID)
+// roomCodeFromRef renders the client-facing R… code from the room ref carried by
+// a fan-out message. It returns ok=false when the ref is missing or its public
+// code is unparseable; the caller drops the frame rather than send a malformed or
+// internal-leaking code onto the wire.
+func (uc *UserConnection) roomCodeFromRef(ctx actor.Context, room *commonpb.RoomRef) (string, bool) {
+	if room == nil {
+		slog.Error(eventConnectionRoomRefInvalid,
+			"actor_type", actorType, "pid", ctx.Self().String(),
+			"user_id", uc.userID.String(),
+			"reason", "missing_room_ref")
+		return "", false
+	}
+	code, err := id.ParsePublicCode(room.GetPublicCode())
 	if err != nil {
-		slog.Error(eventConnectionRoomCodeUnresolved,
+		slog.Error(eventConnectionRoomRefInvalid,
 			"actor_type", actorType, "pid", ctx.Self().String(),
-			"user_id", uc.userID.String(), "room_id", internalRoomID,
-			"reason", "unparseable_room_id", "error", err)
+			"user_id", uc.userID.String(), "room_id", room.GetRoomId(),
+			"reason", "unparseable_public_code", "error", err)
 		return "", false
 	}
-	if uc.roomCodes == nil {
-		slog.Error(eventConnectionRoomCodeUnresolved,
-			"actor_type", actorType, "pid", ctx.Self().String(),
-			"user_id", uc.userID.String(), "room_id", internalRoomID,
-			"reason", "resolver_not_configured")
-		return "", false
-	}
-	code, err := uc.roomCodes.PublicRoomCode(context.Background(), roomID)
-	if err != nil {
-		slog.Error(eventConnectionRoomCodeUnresolved,
-			"actor_type", actorType, "pid", ctx.Self().String(),
-			"user_id", uc.userID.String(), "room_id", internalRoomID,
-			"error", err)
-		return "", false
-	}
-	return code, true
+	return code.FormatRoom(), true
 }
 
 func (uc *UserConnection) forwardMessage(ctx actor.Context, req *userpb.ForwardMessageRequest) {
-	roomCode, ok := uc.publicRoomCode(ctx, req.GetRoomId())
+	roomCode, ok := uc.roomCodeFromRef(ctx, req.GetRoom())
 	if !ok {
 		return
 	}
@@ -578,7 +552,7 @@ func (uc *UserConnection) forwardRoomEvent(ctx actor.Context, req *userpb.Notify
 		return
 	}
 
-	roomCode, ok := uc.publicRoomCode(ctx, req.GetRoomId())
+	roomCode, ok := uc.roomCodeFromRef(ctx, req.GetRoom())
 	if !ok {
 		return
 	}

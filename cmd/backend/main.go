@@ -23,51 +23,73 @@ import (
 
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/clusterboot"
+	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/logging"
+	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
 func main() {
 	level := logging.SetupDefault()
 	slog.Info("server.startup", "log_level", level.String())
 
-	cc, err := parseConfig(os.Args[1:])
+	dbCfg, cc, err := parseConfig(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 
-	if err := run(cc); err != nil {
+	if err := run(dbCfg, cc); err != nil {
 		slog.Error("server.fatal", "error", err)
 		os.Exit(1)
 	}
 }
 
-// parseConfig parses the backend's command-line flags — cluster bootstrap only —
-// into a validated clusterboot.Config. It uses a dedicated FlagSet (not the
-// global flag.CommandLine) so it can be driven directly from tests.
-func parseConfig(args []string) (clusterboot.Config, error) {
+// parseConfig parses the backend's command-line flags — database connection and
+// cluster bootstrap — into validated configuration. It uses a dedicated FlagSet
+// (not the global flag.CommandLine) so it can be driven directly from tests; the
+// database flags are registered by postgres on the same FlagSet.
+func parseConfig(args []string) (postgres.Config, clusterboot.Config, error) {
 	fs := flag.NewFlagSet("blabby-backend", flag.ContinueOnError)
+	dbCfg := postgres.BindFlags(fs)
 	clusterCfg := clusterboot.BindFlags(fs, clusterboot.MemberDefaults())
 	if err := fs.Parse(args); err != nil {
-		return clusterboot.Config{}, err
+		return postgres.Config{}, clusterboot.Config{}, err
 	}
-	return clusterCfg()
+	dc, err := dbCfg()
+	if err != nil {
+		return postgres.Config{}, clusterboot.Config{}, err
+	}
+	cc, err := clusterCfg()
+	if err != nil {
+		return postgres.Config{}, clusterboot.Config{}, err
+	}
+	return dc, cc, nil
 }
 
 // run starts the cluster member and blocks until a shutdown signal arrives,
 // then stops the cluster. The backend hosts grains only; there is no HTTP
 // server to drain.
-func run(cc clusterboot.Config) error {
+func run(dbCfg postgres.Config, cc clusterboot.Config) error {
 	for _, w := range cc.Warnings() {
 		slog.Warn("server.cluster.config_warning", "detail", w)
 	}
+
+	// The Room grain hydrates its RoomRef from the room table on activation, so
+	// the backend holds a pool. It fails closed: an unreachable database stops
+	// startup rather than surfacing on the first activation.
+	pool, err := postgres.NewPool(context.Background(), dbCfg)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+	roomLoader := room.NewRoomRepoLoader(pool)
 
 	// The in-memory store backs the User grain's display-name directory. Its
 	// fixed, immutable seed makes every member resolve identical UserRefs, so no
 	// shared store is needed across members.
 	store := auth.NewInMemoryUserStore()
 
-	c := clusterboot.Build(cc, clusterboot.Kinds(store)...)
+	c := clusterboot.Build(cc, clusterboot.Kinds(store, roomLoader)...)
 	defer c.Shutdown(true)
 
 	// Subscribe before StartMember so the initial join topology is not missed.

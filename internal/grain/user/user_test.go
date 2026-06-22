@@ -35,6 +35,22 @@ func mustRoomID(t *testing.T, raw string) id.RoomID {
 	return r
 }
 
+// stubRoomCode is a valid bare 10-symbol Crockford public_code for Join stubs
+// that do not assert on the rendered R… code.
+const stubRoomCode = "G000000004"
+
+// stubRoomRef builds the RoomRef a loaded Room grain returns on Join, so the
+// User grain can parse and cache it. The RoomId mirrors the addressed room; the
+// public code is a fixed valid stand-in.
+func stubRoomRef(roomID string) *commonpb.RoomRef {
+	return &commonpb.RoomRef{
+		RoomId:     roomID,
+		PublicCode: stubRoomCode,
+		Name:       "Room " + roomID,
+		Status:     "active",
+	}
+}
+
 // fakeUserCtx returns a fake grain context with kind="UserGrain", matching
 // what cluster.NewKind("UserGrain", ...) produces in production. Handlers
 // in this package now derive grain_type from ctx.Kind(), so tests have to
@@ -93,7 +109,7 @@ func (f *fakeRoomClient) Join(roomID id.RoomID, req *roompb.JoinRequest) (*roomp
 	if def != nil {
 		return def, nil
 	}
-	return &roompb.JoinResponse{}, nil
+	return &roompb.JoinResponse{Room: stubRoomRef(roomID.String())}, nil
 }
 
 func (f *fakeRoomClient) Leave(roomID id.RoomID, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error) {
@@ -358,8 +374,11 @@ func TestGrain_JoinRoom(t *testing.T) {
 
 	t.Run("already-member response reconciles joined_rooms and succeeds", func(t *testing.T) {
 		h := newGrain(t)
+		// A loaded grain carries its RoomRef even on the already-member outcome,
+		// so the User grain still caches it on the repair path.
 		h.rooms.defaultJoin = &roompb.JoinResponse{
 			Error: &commonpb.ErrorDetail{Code: 2002, Status: "ROOM_ALREADY_MEMBER", Message: "already a member"},
+			Room:  stubRoomRef("4"),
 		}
 
 		resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "4"}, fakeUserCtx("1"))
@@ -628,7 +647,7 @@ func TestGrain_ForwardMessage(t *testing.T) {
 		mustRegister(t, h, actor.NewPID("addr", "conn-b"))
 		mustRegister(t, h, actor.NewPID("addr", "conn-c"))
 
-		req := &userpb.ForwardMessageRequest{RoomId: "4", Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(42))}
+		req := &userpb.ForwardMessageRequest{Room: &commonpb.RoomRef{RoomId: "4"}, Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(42))}
 		resp, err := h.g.ForwardMessage(req, fakeUserCtx("1"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -651,7 +670,7 @@ func TestGrain_ForwardMessage(t *testing.T) {
 	t.Run("with 0 connections returns success and does not call sender", func(t *testing.T) {
 		h := newGrain(t)
 
-		resp, err := h.g.ForwardMessage(&userpb.ForwardMessageRequest{RoomId: "4", Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}}, fakeUserCtx("1"))
+		resp, err := h.g.ForwardMessage(&userpb.ForwardMessageRequest{Room: &commonpb.RoomRef{RoomId: "4"}, Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}}, fakeUserCtx("1"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -674,7 +693,7 @@ func TestGrain_NotifyRoomEvent(t *testing.T) {
 		before := h.g.JoinedRooms()
 
 		req := &userpb.NotifyRoomEventRequest{
-			RoomId:    "4",
+			Room:      &commonpb.RoomRef{RoomId: "4"},
 			User:      &commonpb.UserRef{Id: "2", Name: "Bob Example"},
 			EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 		}
@@ -706,12 +725,12 @@ func TestGrain_GetJoinedRooms(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(resp.GetRoomIds()) != 0 {
-			t.Errorf("RoomIds: got %v, want []", resp.GetRoomIds())
+		if len(resp.GetRooms()) != 0 {
+			t.Errorf("Rooms: got %v, want []", resp.GetRooms())
 		}
 	})
 
-	t.Run("after two joins returns sorted list", func(t *testing.T) {
+	t.Run("after two joins returns cached refs sorted by room id", func(t *testing.T) {
 		h := newGrain(t)
 		_, _ = h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "22"}, fakeUserCtx("1"))
 		_, _ = h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "20"}, fakeUserCtx("1"))
@@ -720,10 +739,38 @@ func TestGrain_GetJoinedRooms(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got, want := resp.GetRoomIds(), []string{"20", "22"}; !reflect.DeepEqual(got, want) {
-			t.Errorf("RoomIds: got %v, want %v", got, want)
+		rooms := resp.GetRooms()
+		gotIDs := make([]string, len(rooms))
+		for i, room := range rooms {
+			gotIDs[i] = room.GetRoomId()
+		}
+		if want := []string{"20", "22"}; !reflect.DeepEqual(gotIDs, want) {
+			t.Errorf("room ids: got %v, want %v", gotIDs, want)
+		}
+		// The refs carry renderable metadata, not just ids.
+		for _, room := range rooms {
+			if room.GetPublicCode() == "" || room.GetName() == "" {
+				t.Errorf("room %q: got empty public_code/name, want populated ref", room.GetRoomId())
+			}
 		}
 	})
+}
+
+func TestGrain_JoinRoom_MissingRoomRefFailsClosed(t *testing.T) {
+	h := newGrain(t)
+	// A loaded grain must return its RoomRef on success; a Join response without
+	// one is a backend contract breach. The User grain fails closed and records
+	// no membership rather than caching a degraded ref.
+	h.rooms.defaultJoin = &roompb.JoinResponse{}
+
+	resp, err := h.g.JoinRoom(&userpb.JoinRoomRequest{RoomId: "4"}, fakeUserCtx("1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertErrResponse(t, resp.GetError(), 5001, "INTERNAL_ERROR")
+	if got := h.g.JoinedRooms(); len(got) != 0 {
+		t.Errorf("JoinedRooms: got %v, want [] (no membership recorded on a malformed ref)", got)
+	}
 }
 
 // --- Multi-device echo (cross-method) ------------------------------------
@@ -751,7 +798,7 @@ func TestGrain_MultiDeviceEcho(t *testing.T) {
 	}
 
 	// 3. Simulate Room grain fan-out back to alice.
-	fwd := &userpb.ForwardMessageRequest{RoomId: "4", Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(7))}
+	fwd := &userpb.ForwardMessageRequest{Room: &commonpb.RoomRef{RoomId: "4"}, Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(7))}
 	_, err = h.g.ForwardMessage(fwd, fakeUserCtx("1"))
 	if err != nil {
 		t.Fatalf("ForwardMessage unexpected error: %v", err)
@@ -818,7 +865,7 @@ func TestGrain_DoesNotLogMessageText(t *testing.T) {
 		h := newGrain(t)
 
 		_, _ = h.g.ForwardMessage(&userpb.ForwardMessageRequest{
-			RoomId: "4", Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: text, Timestamp: timestamppb.New(time.UnixMilli(1)),
+			Room: &commonpb.RoomRef{RoomId: "4"}, Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: text, Timestamp: timestamppb.New(time.UnixMilli(1)),
 		}, fakeUserCtx("1"))
 
 		out := buf.String()

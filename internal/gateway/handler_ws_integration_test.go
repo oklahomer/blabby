@@ -42,7 +42,7 @@ func TestGateway_WebSocket_Integration(t *testing.T) {
 
 	resp, err := userpb.GetUserGrainGrainClient(c, userID).
 		ForwardMessage(&userpb.ForwardMessageRequest{
-			RoomId:    "4",
+			Room:      &commonpb.RoomRef{RoomId: "4", PublicCode: "G000000004"},
 			Sender:    &commonpb.UserRef{Id: "2", Name: "Bob Builder"},
 			Text:      "hello-cluster",
 			Timestamp: timestamppb.New(time.UnixMilli(1700000000000)),

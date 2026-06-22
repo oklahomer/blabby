@@ -14,8 +14,14 @@ message JoinRequest {
 
 // JoinResponse indicates whether the join operation succeeded.
 // A nil error indicates success; a populated error indicates failure. See ADR-013.
+//
+// `room` is the Room grain's cached reference metadata. It is present whenever the
+// grain is loaded — including the already-member outcome — so the caller can cache
+// the room's public code and display name without a separate lookup. It is absent
+// only when the room itself is absent (ROOM_NOT_FOUND).
 message JoinResponse {
   common.ErrorDetail error = 1;
+  common.RoomRef room = 2;
 }
 
 // LeaveRequest is sent when a user wants to leave a room.

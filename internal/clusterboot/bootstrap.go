@@ -23,10 +23,11 @@ const (
 )
 
 // Kinds returns the grain kinds blabby hosts: the User grain (which seeds each
-// activation's display name from dir) and the Room grain. Separated from Build
-// so a test can assert the registered kinds without standing up an actor system.
-func Kinds(dir user.Directory) []*cluster.Kind {
-	return []*cluster.Kind{user.NewKind(dir), room.NewKind()}
+// activation's display name from dir) and the Room grain (which hydrates each
+// activation's RoomRef via loader). Separated from Build so a test can assert
+// the registered kinds without standing up an actor system.
+func Kinds(dir user.Directory, loader room.RoomLoader) []*cluster.Kind {
+	return []*cluster.Kind{user.NewKind(dir), room.NewKind(loader)}
 }
 
 // Build constructs (but does not start) a proto.actor cluster from cc, hosting

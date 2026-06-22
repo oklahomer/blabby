@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/errcode"
 )
@@ -67,7 +68,7 @@ func TestHandleRoomList_DirectoryErrorReturns503(t *testing.T) {
 }
 
 func TestHandleRoomJoined_EmptySliceMarshalsAsArrayNotNull(t *testing.T) {
-	fake := &fakeUserGrainCaller{getJoinedResp: &userpb.GetJoinedRoomsResponse{RoomIds: nil}}
+	fake := &fakeUserGrainCaller{getJoinedResp: &userpb.GetJoinedRoomsResponse{Rooms: nil}}
 	g := gatewayWithFake(fake)
 	rec := serveQuery(t, g, "GET /rooms/joined", "/rooms/joined", "1")
 
@@ -81,10 +82,13 @@ func TestHandleRoomJoined_EmptySliceMarshalsAsArrayNotNull(t *testing.T) {
 }
 
 func TestHandleRoomJoined_PreservesGrainOrderAsCodes(t *testing.T) {
-	// Grain returns internal ids in an arbitrary order; the gateway resolves them
-	// to R… descriptors and must NOT re-sort.
+	// The grain returns refs in an arbitrary order; the gateway renders their
+	// public codes directly (no room-repository lookup) and must NOT re-sort.
 	fake := &fakeUserGrainCaller{getJoinedResp: &userpb.GetJoinedRoomsResponse{
-		RoomIds: []string{"5", "4"},
+		Rooms: []*commonpb.RoomRef{
+			{RoomId: "5", PublicCode: "H000000005", Name: "Random", Status: "active"},
+			{RoomId: "4", PublicCode: "G000000004", Name: "General", Status: "active"},
+		},
 	}}
 	g := gatewayWithFake(fake)
 	rec := serveQuery(t, g, "GET /rooms/joined", "/rooms/joined", "1")
@@ -100,6 +104,21 @@ func TestHandleRoomJoined_PreservesGrainOrderAsCodes(t *testing.T) {
 		resp.Rooms[0].ID != "RH000000005" || resp.Rooms[0].Name != "Random" ||
 		resp.Rooms[1].ID != "RG000000004" || resp.Rooms[1].Name != "General" {
 		t.Errorf("rooms = %+v, want [Random(RH…), General(RG…)] (grain order preserved)", resp.Rooms)
+	}
+}
+
+func TestHandleRoomJoined_MalformedPublicCodeReturns500(t *testing.T) {
+	// The User grain is contracted to return well-formed refs; an unparseable
+	// public code is a server bug, so the gateway fails closed rather than drop
+	// the room silently.
+	fake := &fakeUserGrainCaller{getJoinedResp: &userpb.GetJoinedRoomsResponse{
+		Rooms: []*commonpb.RoomRef{{RoomId: "4", PublicCode: "not-a-code", Name: "General"}},
+	}}
+	g := gatewayWithFake(fake)
+	rec := serveQuery(t, g, "GET /rooms/joined", "/rooms/joined", "1")
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 for a malformed public code", rec.Code)
 	}
 }
 

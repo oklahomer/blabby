@@ -43,7 +43,7 @@ func TestAuthTimeoutAfterAuthenticationIsIgnored(t *testing.T) {
 
 	sess.system.Root.Send(sess.pid, &AuthTimeoutExpired{})
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		RoomId: "4",
+		Room:   &commonpb.RoomRef{RoomId: "4", PublicCode: "G000000004"},
 		Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
 		Text:   "still-connected",
 	})

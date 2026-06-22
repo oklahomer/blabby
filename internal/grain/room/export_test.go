@@ -15,6 +15,10 @@ func (g *Grain) Members() []id.UserID { return g.state.memberIDs() }
 // RecentMessageCount returns the size of the recent-message buffer.
 func (g *Grain) RecentMessageCount() int { return len(g.state.recentMessages) }
 
+// SetLoader injects a RoomLoader for tests; production code uses NewKind. Call
+// before Init so activation hydrates from the stub.
+func (g *Grain) SetLoader(l RoomLoader) { g.loader = l }
+
 // SetNotifier injects a userNotifier for tests; production code uses NewKind.
 func (g *Grain) SetNotifier(n userNotifier) { g.notifier = n }
 

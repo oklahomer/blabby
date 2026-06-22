@@ -10,6 +10,8 @@
 package room
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -22,6 +24,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/middleware"
@@ -41,6 +44,7 @@ const (
 	eventRoomMessagePosted       = "room.message.posted"
 	eventRoomMessagePostRejected = "room.message.post_rejected"
 	eventRoomFanoutSupervision   = "room.fanout.supervision"
+	eventRoomActivationRejected  = "room.activation.rejected"
 )
 
 // passivationTimeout is the receive-timeout the Room kind passivates on. It is
@@ -86,6 +90,7 @@ func (n *clusterUserNotifier) ForwardMessage(userID id.UserID, req *userpb.Forwa
 // events.go).
 type Grain struct {
 	state    roomState
+	loader   RoomLoader
 	notifier userNotifier
 	now      func() time.Time
 	fanout   fanoutDispatcher
@@ -96,11 +101,18 @@ type Grain struct {
 const roomGrainKind = "RoomGrain"
 
 // NewKind registers Room grain with a proto.actor cluster, returning a
-// *cluster.Kind that callers pass to cluster.WithKinds(...). The default
+// *cluster.Kind that callers pass to cluster.WithKinds(...). The loader hydrates
+// each activation's RoomRef from the source of truth; it is injected here so the
+// production path reaches persistence while tests inject a stub. The default
 // userNotifier is built lazily during Init from ctx.Cluster(), avoiding a
 // chicken-and-egg with cluster.New requiring kinds in its config.
-func NewKind() *cluster.Kind {
-	return roompb.NewRoomGrainKind(func() roompb.RoomGrain { return &Grain{} }, passivationTimeout,
+func NewKind(loader RoomLoader) *cluster.Kind {
+	if loader == nil {
+		// Fail at wiring time with a clear message rather than as an opaque nil
+		// interface panic inside the first activation's hydrate.
+		panic("room: nil RoomLoader")
+	}
+	return roompb.NewRoomGrainKind(func() roompb.RoomGrain { return &Grain{loader: loader} }, passivationTimeout,
 		actor.WithReceiverMiddleware(middleware.GrainLogging(roomGrainKind)),
 		// Govern the fan-out worker child: protoactor resolves a child's
 		// supervisor from its parent's props. Unexpected worker panics restart
@@ -110,12 +122,28 @@ func NewKind() *cluster.Kind {
 	)
 }
 
-// Init prepares an empty state for a freshly activated Room grain. When the
-// grain was constructed without an injected notifier (the production path),
-// a clusterUserNotifier is built from ctx.Cluster() so fan-out reaches the
-// real User grain.
+// Init hydrates a freshly activated Room grain from the source of truth, then
+// wires the command-path collaborators — but only for a valid (active) room.
+//
+// Hydration runs first because its outcome decides whether the grain is usable:
+//   - active room → cache the RoomRef and set up the notifier and fan-out child;
+//     the grain serves commands.
+//   - absent or non-active room → leave the grain unloaded and return early; no
+//     collaborators are created because every command short-circuits to
+//     ROOM_NOT_FOUND, and an invalid grain never fans out.
+//   - any other (transient) load error → panic before any child is spawned, so
+//     the activation fails cleanly and the supervisor re-activates the grain on
+//     a later request rather than serving a half-initialized room.
+//
+// When the grain was constructed without an injected notifier (the production
+// path), a clusterUserNotifier is built from ctx.Cluster() so fan-out reaches
+// the real User grain.
 func (g *Grain) Init(ctx cluster.GrainContext) {
 	g.state = newRoomState()
+	if !g.hydrate(ctx) {
+		return
+	}
+
 	if g.now == nil {
 		g.now = time.Now
 	}
@@ -134,6 +162,53 @@ func (g *Grain) Init(ctx cluster.GrainContext) {
 	}
 }
 
+// hydrate loads the room's reference metadata for this activation and reports
+// whether the grain is now usable. The grain identity is the RoomID's decimal
+// form, minted by the cluster; a malformed one is a programmer error upstream,
+// so it leaves the grain unloaded rather than crashing the cluster. A transient
+// load failure panics (see Init for how each outcome maps to grain state).
+func (g *Grain) hydrate(ctx cluster.GrainContext) bool {
+	roomID, err := id.ParseRoomID(ctx.Identity())
+	if err != nil {
+		slog.Error(eventRoomActivationRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"reason", "malformed_identity",
+			"error", err,
+		)
+		return false
+	}
+
+	ref, err := g.loader.LoadRoom(context.Background(), roomID)
+	switch {
+	case err == nil && ref.Status == domain.RoomStatusActive:
+		g.state.loadRoom(ref)
+		return true
+	case errors.Is(err, ErrRoomNotFound):
+		slog.Warn(eventRoomActivationRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"reason", errcode.RoomNotFound.Status(),
+		)
+		return false
+	case err == nil:
+		// A room that exists but is not active (e.g. archived) is addressable by
+		// id but not joinable: leave the grain unloaded so commands are rejected.
+		slog.Warn(eventRoomActivationRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"reason", errcode.RoomNotFound.Status(),
+			"status", string(ref.Status),
+		)
+		return false
+	default:
+		// Transient failure (e.g. database unreachable). Crash the activation so
+		// the supervisor re-activates the grain on a later request rather than
+		// serving a half-initialized room.
+		panic(fmt.Errorf("room: hydrate %s: %w", roomID, err))
+	}
+}
+
 // Terminate is a passivation hook; Phase 1 does not persist state.
 func (g *Grain) Terminate(_ cluster.GrainContext) {}
 
@@ -149,6 +224,20 @@ func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
 // Join adds the user to the room and fans out a JOINED event to every
 // current member (including the joiner — multi-device echo).
 func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb.JoinResponse, error) {
+	if !g.state.isLoaded() {
+		slog.Warn(eventRoomMemberJoinRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"reason", errcode.RoomNotFound.Status(),
+		)
+		return joinErr(errcode.RoomNotFound, "room not found"), nil
+	}
+	// The grain is loaded, so every response below carries the room's RoomRef
+	// (the joiner caches it) and fan-out embeds the same ref. Only the
+	// ROOM_NOT_FOUND guard above omits it.
+	roomRef := g.state.roomRef()
+	room := protoRoomRef(roomRef)
+
 	joiner, err := parseUserRef(req.GetUser())
 	if err != nil {
 		slog.Warn(eventRoomMemberJoinRejected,
@@ -158,7 +247,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 			"reason", errcode.InvalidRequest.Status(),
 			"error", err,
 		)
-		return joinErr(errcode.InvalidRequest, "user id and display name are required"), nil
+		return joinErrWithRoom(errcode.InvalidRequest, "user id and display name are required", room), nil
 	}
 	userID := joiner.ID()
 	if g.state.isMember(userID) {
@@ -168,7 +257,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 			"user_id", userID,
 			"reason", errcode.RoomAlreadyMember.Status(),
 		)
-		return joinErr(errcode.RoomAlreadyMember, "already a member of this room"), nil
+		return joinErrWithRoom(errcode.RoomAlreadyMember, "already a member of this room", room), nil
 	}
 
 	g.state.addMember(joiner)
@@ -185,15 +274,23 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 		"sender_id", userID,
 		"target_count", len(recipients),
 	)
-	g.fanOutNotify(ctx, recipients, buildJoinedEvent(ctx.Identity(), joiner), "Join.fanout")
+	g.fanOutNotify(ctx, recipients, buildJoinedEvent(roomRef, joiner), "Join.fanout")
 
-	return &roompb.JoinResponse{}, nil
+	return &roompb.JoinResponse{Room: room}, nil
 }
 
 // Leave removes the user from the room and fans out a LEFT event to the
 // pre-removal member snapshot (including the leaver, so their connection
 // can update UI state symmetrically with Join).
 func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*roompb.LeaveResponse, error) {
+	if !g.state.isLoaded() {
+		slog.Warn(eventRoomMemberLeaveRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"reason", errcode.RoomNotFound.Status(),
+		)
+		return leaveErr(errcode.RoomNotFound, "room not found"), nil
+	}
 	userID, err := id.ParseUserID(req.GetUserId())
 	if err != nil {
 		slog.Warn(eventRoomMemberLeaveRejected,
@@ -231,7 +328,7 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 		"sender_id", userID,
 		"target_count", len(recipients),
 	)
-	g.fanOutNotify(ctx, recipients, buildLeftEvent(ctx.Identity(), leaver), "Leave.fanout")
+	g.fanOutNotify(ctx, recipients, buildLeftEvent(g.state.roomRef(), leaver), "Leave.fanout")
 
 	return &roompb.LeaveResponse{}, nil
 }
@@ -239,6 +336,14 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 // PostMessage records the message, assigns the server-side timestamp, and
 // fans the message out unconditionally to every current member.
 func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainContext) (*roompb.PostMessageResponse, error) {
+	if !g.state.isLoaded() {
+		slog.Warn(eventRoomMessagePostRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"reason", errcode.RoomNotFound.Status(),
+		)
+		return postErr(errcode.RoomNotFound, "room not found"), nil
+	}
 	sender, err := parseUserRef(req.GetUser())
 	if err != nil {
 		slog.Warn(eventRoomMessagePostRejected,
@@ -297,7 +402,7 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 		"target_count", len(recipients),
 		"text_len", textLen,
 	)
-	payload := buildForwardMessage(ctx.Identity(), sender, req.GetText(), timestamp)
+	payload := buildForwardMessage(g.state.roomRef(), sender, req.GetText(), timestamp)
 	g.fanOutForward(ctx, recipients, payload, "PostMessage.fanout")
 
 	return &roompb.PostMessageResponse{Timestamp: timestamppb.New(timestamp)}, nil
@@ -331,10 +436,10 @@ func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []id.UserID, 
 	})
 }
 
-// parseUserRef parses an inbound proto UserRef into a validated domain
-// UserRef at the grain boundary (parse, don't validate). A nil ref, an
-// invalid id, or an empty name is rejected so handlers can return
-// INVALID_REQUEST.
+// parseUserRef parses an inbound proto UserRef into a validated id.UserRef (the
+// minimal user identity ref: id + display name) at the grain boundary (parse,
+// don't validate). A nil ref, an invalid id, or an empty name is rejected so
+// handlers can return INVALID_REQUEST.
 func parseUserRef(p *commonpb.UserRef) (id.UserRef, error) {
 	userID, err := id.ParseUserID(p.GetId())
 	if err != nil {
@@ -347,6 +452,14 @@ func joinErr(code errcode.Code, msg string) *roompb.JoinResponse {
 	return &roompb.JoinResponse{
 		Error: &commonpb.ErrorDetail{Code: code.Int32(), Status: code.Status(), Message: msg},
 	}
+}
+
+// joinErrWithRoom is joinErr plus the room's RoomRef, for rejections issued once
+// the grain is loaded (so the caller can still cache the room metadata).
+func joinErrWithRoom(code errcode.Code, msg string, room *commonpb.RoomRef) *roompb.JoinResponse {
+	resp := joinErr(code, msg)
+	resp.Room = room
+	return resp
 }
 
 func leaveErr(code errcode.Code, msg string) *roompb.LeaveResponse {

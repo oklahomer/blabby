@@ -12,13 +12,12 @@ import (
 // persistence seed. Setting err makes every method fail, to exercise the 503 path.
 type stubRoomDirectory struct {
 	byCode  map[string]RoomInfo
-	byID    map[id.RoomID]RoomInfo
 	ordered []RoomInfo
 	err     error
 }
 
 func newStubRoomDirectory() *stubRoomDirectory {
-	d := &stubRoomDirectory{byCode: map[string]RoomInfo{}, byID: map[id.RoomID]RoomInfo{}}
+	d := &stubRoomDirectory{byCode: map[string]RoomInfo{}}
 	d.add(4, "G000000004", "General")
 	d.add(5, "H000000005", "Random")
 	return d
@@ -35,7 +34,6 @@ func (d *stubRoomDirectory) add(rawID int64, code, name string) {
 	}
 	info := RoomInfo{ID: rid, Code: c, Name: name}
 	d.byCode[c.String()] = info
-	d.byID[rid] = info
 	d.ordered = append(d.ordered, info)
 }
 
@@ -56,18 +54,5 @@ func (d *stubRoomDirectory) ListActive(_ context.Context) ([]RoomInfo, error) {
 	}
 	out := make([]RoomInfo, len(d.ordered))
 	copy(out, d.ordered)
-	return out, nil
-}
-
-func (d *stubRoomDirectory) Describe(_ context.Context, ids []id.RoomID) ([]RoomInfo, error) {
-	if d.err != nil {
-		return nil, d.err
-	}
-	var out []RoomInfo
-	for _, rid := range ids {
-		if info, ok := d.byID[rid]; ok {
-			out = append(out, info)
-		}
-	}
 	return out, nil
 }

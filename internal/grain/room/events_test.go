@@ -5,13 +5,30 @@ import (
 	"time"
 
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/domain"
+	"github.com/oklahomer/blabby/internal/id"
 )
 
-func TestBuildJoinedEvent(t *testing.T) {
-	got := buildJoinedEvent("general", mustUserRef(t, "1", "Alice"))
+// eventsRoomRef builds the room ref the fan-out builders embed, with a valid id
+// and public code so the assertions can check both round-trip onto the wire.
+func eventsRoomRef(t *testing.T) domain.RoomRef {
+	t.Helper()
+	rid, err := id.ParseRoomID("4")
+	if err != nil {
+		t.Fatalf("room id: %v", err)
+	}
+	code, err := id.ParsePublicCode("G000000004")
+	if err != nil {
+		t.Fatalf("public code: %v", err)
+	}
+	return domain.RoomRef{ID: rid, PublicCode: code, Name: "General", Status: domain.RoomStatusActive}
+}
 
-	if got.GetRoomId() != "general" {
-		t.Errorf("RoomId: got %q, want %q", got.GetRoomId(), "general")
+func TestBuildJoinedEvent(t *testing.T) {
+	got := buildJoinedEvent(eventsRoomRef(t), mustUserRef(t, "1", "Alice"))
+
+	if got.GetRoom().GetRoomId() != "4" || got.GetRoom().GetPublicCode() != "G000000004" {
+		t.Errorf("Room: got %+v, want id=4 code=G000000004", got.GetRoom())
 	}
 	if got.GetUser().GetId() != "1" {
 		t.Errorf("User.Id: got %q, want %q", got.GetUser().GetId(), "1")
@@ -25,10 +42,10 @@ func TestBuildJoinedEvent(t *testing.T) {
 }
 
 func TestBuildLeftEvent(t *testing.T) {
-	got := buildLeftEvent("general", mustUserRef(t, "1", "Alice"))
+	got := buildLeftEvent(eventsRoomRef(t), mustUserRef(t, "1", "Alice"))
 
-	if got.GetRoomId() != "general" {
-		t.Errorf("RoomId: got %q, want %q", got.GetRoomId(), "general")
+	if got.GetRoom().GetRoomId() != "4" || got.GetRoom().GetPublicCode() != "G000000004" {
+		t.Errorf("Room: got %+v, want id=4 code=G000000004", got.GetRoom())
 	}
 	if got.GetUser().GetId() != "1" {
 		t.Errorf("User.Id: got %q, want %q", got.GetUser().GetId(), "1")
@@ -43,10 +60,10 @@ func TestBuildLeftEvent(t *testing.T) {
 
 func TestBuildForwardMessage(t *testing.T) {
 	ts := time.UnixMilli(12345)
-	got := buildForwardMessage("general", mustUserRef(t, "1", "Alice"), "hello", ts)
+	got := buildForwardMessage(eventsRoomRef(t), mustUserRef(t, "1", "Alice"), "hello", ts)
 
-	if got.GetRoomId() != "general" {
-		t.Errorf("RoomId: got %q, want %q", got.GetRoomId(), "general")
+	if got.GetRoom().GetRoomId() != "4" || got.GetRoom().GetPublicCode() != "G000000004" {
+		t.Errorf("Room: got %+v, want id=4 code=G000000004", got.GetRoom())
 	}
 	if got.GetSender().GetId() != "1" {
 		t.Errorf("Sender.Id: got %q, want %q", got.GetSender().GetId(), "1")

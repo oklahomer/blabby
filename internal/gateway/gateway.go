@@ -16,7 +16,6 @@ import (
 type Gateway struct {
 	auth      auth.Authenticator
 	rooms     RoomDirectory
-	roomCodes *roomCodeCache
 	cluster   *cluster.Cluster
 	actorRoot *actor.RootContext
 
@@ -27,15 +26,14 @@ type Gateway struct {
 }
 
 // NewGateway constructs a Gateway from its dependencies: the authenticator, the
-// room directory (which resolves the opaque R… codes to and from internal RoomIDs
-// for both HTTP routes and the WebSocket fan-out via a cached resolver), and the
-// cluster client plus root for grain dispatch. Production wires all of them; a
-// test may pass nil for a dependency the exercised routes do not touch.
+// room directory (which resolves the opaque R… codes to internal RoomIDs for the
+// HTTP routes), and the cluster client plus root for grain dispatch. Production
+// wires all of them; a test may pass nil for a dependency the exercised routes do
+// not touch.
 func NewGateway(authenticator auth.Authenticator, rooms RoomDirectory, c *cluster.Cluster, root *actor.RootContext) *Gateway {
 	return &Gateway{
 		auth:      authenticator,
 		rooms:     rooms,
-		roomCodes: newRoomCodeCache(rooms),
 		cluster:   c,
 		actorRoot: root,
 	}

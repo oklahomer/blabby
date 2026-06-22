@@ -2,6 +2,7 @@ package room_test
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -13,10 +14,73 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/id"
 	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
 )
+
+// testRoomID is the grain identity used across these tests. It must be a valid
+// decimal RoomID because the grain parses its identity on activation.
+const testRoomID = "4"
+
+// stubRoomLoader is an in-memory RoomLoader for tests. A seeded id loads its
+// ref; an unseeded id reports room.ErrRoomNotFound; a non-nil err is returned
+// for every id (to exercise the transient-failure path).
+type stubRoomLoader struct {
+	rooms map[id.RoomID]domain.RoomRef
+	err   error
+}
+
+func (s stubRoomLoader) LoadRoom(_ context.Context, roomID id.RoomID) (domain.RoomRef, error) {
+	if s.err != nil {
+		return domain.RoomRef{}, s.err
+	}
+	ref, ok := s.rooms[roomID]
+	if !ok {
+		return domain.RoomRef{}, room.ErrRoomNotFound
+	}
+	return ref, nil
+}
+
+// seededLoader returns a stubRoomLoader keyed by each ref's ID.
+func seededLoader(refs ...domain.RoomRef) stubRoomLoader {
+	m := make(map[id.RoomID]domain.RoomRef, len(refs))
+	for _, r := range refs {
+		m[r.ID] = r
+	}
+	return stubRoomLoader{rooms: m}
+}
+
+// stubRoomPublicCode is a valid bare 10-symbol Crockford public_code, so a
+// RoomRef built here survives the User grain's boundary parse when the Join flow
+// carries it end to end (fanout_integration_test).
+const stubRoomPublicCode = "G000000004"
+
+// roomRef builds a RoomRef for a decimal RoomID with the given status, including
+// a valid public code so it round-trips through the Join response.
+func roomRef(t *testing.T, raw string, status domain.RoomStatus) domain.RoomRef {
+	t.Helper()
+	rid, err := id.ParseRoomID(raw)
+	if err != nil {
+		t.Fatalf("roomRef(%q): %v", raw, err)
+	}
+	code, err := id.ParsePublicCode(stubRoomPublicCode)
+	if err != nil {
+		t.Fatalf("roomRef public code: %v", err)
+	}
+	return domain.RoomRef{ID: rid, PublicCode: code, Name: "Room " + raw, Status: status}
+}
+
+// activeRoomRef builds an active RoomRef for a decimal RoomID, so test files that
+// only need a joinable room don't reference the domain status enum directly.
+func activeRoomRef(t *testing.T, raw string) domain.RoomRef {
+	t.Helper()
+	return roomRef(t, raw, domain.RoomStatusActive)
+}
+
+// Compile-time guard that stubRoomLoader satisfies room.RoomLoader.
+var _ room.RoomLoader = stubRoomLoader{}
 
 // mustUserID is a test helper that constructs a typed id.UserID, failing
 // the test on any structural error. Used to keep table-driven cases
@@ -72,7 +136,7 @@ type forwardCall struct {
 func (f *fakeNotifier) NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomEventRequest) error {
 	f.notifyCalls = append(f.notifyCalls, notifyCall{
 		UserID:    userID.String(),
-		RoomID:    req.GetRoomId(),
+		RoomID:    req.GetRoom().GetRoomId(),
 		Subject:   userRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()},
 		EventType: req.GetEventType(),
 	})
@@ -85,7 +149,7 @@ func (f *fakeNotifier) NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomE
 func (f *fakeNotifier) ForwardMessage(userID id.UserID, req *userpb.ForwardMessageRequest) error {
 	f.forwardCalls = append(f.forwardCalls, forwardCall{
 		UserID:    userID.String(),
-		RoomID:    req.GetRoomId(),
+		RoomID:    req.GetRoom().GetRoomId(),
 		Sender:    userRef{ID: req.GetSender().GetId(), Name: req.GetSender().GetName()},
 		Text:      req.GetText(),
 		Timestamp: req.GetTimestamp().AsTime(),
@@ -105,21 +169,34 @@ func newGrain(t *testing.T) (*room.Grain, *fakeNotifier, *time.Time) {
 	g := &room.Grain{}
 	notifier := &fakeNotifier{}
 	g.SetNotifier(notifier)
+	g.SetLoader(seededLoader(roomRef(t, testRoomID, domain.RoomStatusActive)))
 	clock := time.UnixMilli(1000)
 	g.SetClock(func() time.Time {
 		clock = clock.Add(time.Millisecond)
 		return clock
 	})
 	g.UseSyncFanout()
-	g.Init(fakeRoomCtx("general"))
+	g.Init(fakeRoomCtx(testRoomID))
 	return g, notifier, &clock
+}
+
+// initGrain builds a grain wired with the given loader and activates it. Used by
+// activation tests that need a non-default load outcome (absent/archived room).
+func initGrain(t *testing.T, loader room.RoomLoader) *room.Grain {
+	t.Helper()
+	g := &room.Grain{}
+	g.SetNotifier(&fakeNotifier{})
+	g.SetLoader(loader)
+	g.UseSyncFanout()
+	g.Init(fakeRoomCtx(testRoomID))
+	return g
 }
 
 func TestGrain_Join(t *testing.T) {
 	t.Run("success — empty room records member and fans out one JOINED event", func(t *testing.T) {
 		g, notifier, _ := newGrain(t)
 
-		resp, err := g.Join(graintest.NewJoinRequestNamed("1", "Alice"), fakeRoomCtx("general"))
+		resp, err := g.Join(graintest.NewJoinRequestNamed("1", "Alice"), fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -134,7 +211,7 @@ func TestGrain_Join(t *testing.T) {
 			t.Fatalf("notifyCalls: got %d, want 1", len(notifier.notifyCalls))
 		}
 		c := notifier.notifyCalls[0]
-		want := notifyCall{UserID: "1", RoomID: "general", Subject: userRef{ID: "1", Name: "Alice"}, EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED}
+		want := notifyCall{UserID: "1", RoomID: testRoomID, Subject: userRef{ID: "1", Name: "Alice"}, EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED}
 		if c != want {
 			t.Errorf("notifyCalls[0]: got %+v, want %+v", c, want)
 		}
@@ -146,7 +223,7 @@ func TestGrain_Join(t *testing.T) {
 		mustJoin(t, g, "2")
 		notifier.notifyCalls = nil // reset before the third join
 
-		resp, err := g.Join(graintest.NewJoinRequest("6"), fakeRoomCtx("general"))
+		resp, err := g.Join(graintest.NewJoinRequest("6"), fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -182,7 +259,7 @@ func TestGrain_Join(t *testing.T) {
 	t.Run("empty user_id returns 4001 with no fan-out", func(t *testing.T) {
 		g, notifier, _ := newGrain(t)
 
-		resp, err := g.Join(graintest.NewJoinRequest(""), fakeRoomCtx("general"))
+		resp, err := g.Join(graintest.NewJoinRequest(""), fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -197,7 +274,7 @@ func TestGrain_Join(t *testing.T) {
 		mustJoin(t, g, "1")
 		notifier.notifyCalls = nil
 
-		resp, err := g.Join(graintest.NewJoinRequest("1"), fakeRoomCtx("general"))
+		resp, err := g.Join(graintest.NewJoinRequest("1"), fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -211,6 +288,53 @@ func TestGrain_Join(t *testing.T) {
 	})
 }
 
+func TestGrain_Join_CarriesRoomRef(t *testing.T) {
+	t.Run("success carries the cached room ref", func(t *testing.T) {
+		g, _, _ := newGrain(t)
+
+		resp, err := g.Join(graintest.NewJoinRequest("1"), fakeRoomCtx(testRoomID))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		room := resp.GetRoom()
+		if room == nil {
+			t.Fatal("Join response missing room ref")
+		}
+		if room.GetRoomId() != testRoomID || room.GetPublicCode() != stubRoomPublicCode ||
+			room.GetName() != "Room "+testRoomID || room.GetStatus() != "active" {
+			t.Errorf("room ref = %+v, want id=%s code=%s name=Room %s active",
+				room, testRoomID, stubRoomPublicCode, testRoomID)
+		}
+	})
+
+	t.Run("already-member still carries the room ref", func(t *testing.T) {
+		g, _, _ := newGrain(t)
+		mustJoin(t, g, "1")
+
+		resp, err := g.Join(graintest.NewJoinRequest("1"), fakeRoomCtx(testRoomID))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertErrResponse(t, resp.GetError(), 2002, "ROOM_ALREADY_MEMBER")
+		if resp.GetRoom() == nil {
+			t.Error("already-member Join response must still carry the room ref")
+		}
+	})
+
+	t.Run("room-not-found omits the room ref", func(t *testing.T) {
+		g := initGrain(t, seededLoader()) // unseeded → unloaded grain
+
+		resp, err := g.Join(graintest.NewJoinRequest("1"), fakeRoomCtx(testRoomID))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertErrResponse(t, resp.GetError(), 2003, "ROOM_NOT_FOUND")
+		if resp.GetRoom() != nil {
+			t.Errorf("ROOM_NOT_FOUND Join response must omit the room ref, got %+v", resp.GetRoom())
+		}
+	})
+}
+
 func TestGrain_Leave(t *testing.T) {
 	t.Run("success — fans out LEFT to pre-removal snapshot including leaver", func(t *testing.T) {
 		g, notifier, _ := newGrain(t)
@@ -218,7 +342,7 @@ func TestGrain_Leave(t *testing.T) {
 		mustJoin(t, g, "2")
 		notifier.notifyCalls = nil
 
-		resp, err := g.Leave(&roompb.LeaveRequest{UserId: "1"}, fakeRoomCtx("general"))
+		resp, err := g.Leave(&roompb.LeaveRequest{UserId: "1"}, fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -248,7 +372,7 @@ func TestGrain_Leave(t *testing.T) {
 		mustJoin(t, g, "1")
 		notifier.notifyCalls = nil
 
-		resp, err := g.Leave(&roompb.LeaveRequest{UserId: ""}, fakeRoomCtx("general"))
+		resp, err := g.Leave(&roompb.LeaveRequest{UserId: ""}, fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -261,7 +385,7 @@ func TestGrain_Leave(t *testing.T) {
 	t.Run("non-member returns 2001 with no fan-out", func(t *testing.T) {
 		g, notifier, _ := newGrain(t)
 
-		resp, err := g.Leave(&roompb.LeaveRequest{UserId: "1"}, fakeRoomCtx("general"))
+		resp, err := g.Leave(&roompb.LeaveRequest{UserId: "1"}, fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -279,7 +403,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		mustJoin(t, g, "2")
 		notifier.forwardCalls = nil
 
-		resp, err := g.PostMessage(graintest.NewPostMessageRequestNamed("1", "Alice", "hello"), fakeRoomCtx("general"))
+		resp, err := g.PostMessage(graintest.NewPostMessageRequestNamed("1", "Alice", "hello"), fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -312,8 +436,8 @@ func TestGrain_PostMessage(t *testing.T) {
 		g, _, _ := newGrain(t)
 		mustJoin(t, g, "1")
 
-		resp1, _ := g.PostMessage(graintest.NewPostMessageRequest("1", "one"), fakeRoomCtx("general"))
-		resp2, _ := g.PostMessage(graintest.NewPostMessageRequest("1", "two"), fakeRoomCtx("general"))
+		resp1, _ := g.PostMessage(graintest.NewPostMessageRequest("1", "one"), fakeRoomCtx(testRoomID))
+		resp2, _ := g.PostMessage(graintest.NewPostMessageRequest("1", "two"), fakeRoomCtx(testRoomID))
 
 		ts1 := resp1.GetTimestamp().AsTime()
 		ts2 := resp2.GetTimestamp().AsTime()
@@ -330,7 +454,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		mustJoin(t, g, "1")
 		notifier.forwardCalls = nil
 
-		resp, err := g.PostMessage(graintest.NewPostMessageRequest("", "hi"), fakeRoomCtx("general"))
+		resp, err := g.PostMessage(graintest.NewPostMessageRequest("", "hi"), fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -348,7 +472,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		mustJoin(t, g, "1")
 		notifier.forwardCalls = nil
 
-		resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", ""), fakeRoomCtx("general"))
+		resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", ""), fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -363,7 +487,7 @@ func TestGrain_PostMessage(t *testing.T) {
 		mustJoin(t, g, "1")
 		notifier.forwardCalls = nil
 
-		resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", "  \t\n"), fakeRoomCtx("general"))
+		resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", "  \t\n"), fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -376,7 +500,7 @@ func TestGrain_PostMessage(t *testing.T) {
 	t.Run("non-member sender returns 2001 with no fan-out and no state mutation", func(t *testing.T) {
 		g, notifier, _ := newGrain(t)
 
-		resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", "hi"), fakeRoomCtx("general"))
+		resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", "hi"), fakeRoomCtx(testRoomID))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -402,7 +526,7 @@ func TestGrain_FanOutErrorIsLoggedNotFatal(t *testing.T) {
 		return nil
 	}
 
-	resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", "hello"), fakeRoomCtx("general"))
+	resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", "hello"), fakeRoomCtx(testRoomID))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -417,12 +541,13 @@ func TestGrain_FanOutErrorIsLoggedNotFatal(t *testing.T) {
 func TestGrain_Init_DefaultsClockWhenAbsent(t *testing.T) {
 	g := &room.Grain{}
 	g.SetNotifier(&fakeNotifier{})
+	g.SetLoader(seededLoader(roomRef(t, testRoomID, domain.RoomStatusActive)))
 	g.UseSyncFanout()
-	g.Init(fakeRoomCtx("general"))
+	g.Init(fakeRoomCtx(testRoomID))
 
 	mustJoin(t, g, "1")
 
-	resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", "hi"), fakeRoomCtx("general"))
+	resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", "hi"), fakeRoomCtx(testRoomID))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -432,6 +557,53 @@ func TestGrain_Init_DefaultsClockWhenAbsent(t *testing.T) {
 	if ts := resp.GetTimestamp(); ts == nil || ts.AsTime().IsZero() {
 		t.Errorf("expected default clock to assign a non-zero timestamp, got %v", ts)
 	}
+}
+
+func TestGrain_Activation_InvalidRoomRejectsCommands(t *testing.T) {
+	cases := []struct {
+		name   string
+		loader room.RoomLoader
+	}{
+		{"absent room", seededLoader()},
+		{"archived room", seededLoader(roomRef(t, testRoomID, domain.RoomStatusArchived))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := initGrain(t, tc.loader)
+
+			joinResp, err := g.Join(graintest.NewJoinRequest("1"), fakeRoomCtx(testRoomID))
+			if err != nil {
+				t.Fatalf("Join transport error: %v", err)
+			}
+			assertErrResponse(t, joinResp.GetError(), 2003, "ROOM_NOT_FOUND")
+
+			leaveResp, err := g.Leave(&roompb.LeaveRequest{UserId: "1"}, fakeRoomCtx(testRoomID))
+			if err != nil {
+				t.Fatalf("Leave transport error: %v", err)
+			}
+			assertErrResponse(t, leaveResp.GetError(), 2003, "ROOM_NOT_FOUND")
+
+			postResp, err := g.PostMessage(graintest.NewPostMessageRequest("1", "hi"), fakeRoomCtx(testRoomID))
+			if err != nil {
+				t.Fatalf("PostMessage transport error: %v", err)
+			}
+			assertErrResponse(t, postResp.GetError(), 2003, "ROOM_NOT_FOUND")
+		})
+	}
+}
+
+func TestGrain_Activation_PanicsOnTransientLoadError(t *testing.T) {
+	g := &room.Grain{}
+	g.SetNotifier(&fakeNotifier{})
+	g.SetLoader(stubRoomLoader{err: errFake("db unreachable")})
+	g.UseSyncFanout()
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("Init: expected panic on a transient load error so the supervisor re-activates")
+		}
+	}()
+	g.Init(fakeRoomCtx(testRoomID))
 }
 
 // Note: lifecycle logs (grain.activated / grain.passivated) are emitted by
@@ -453,10 +625,19 @@ func TestGrain_ReceiveDefault_LogsUnhandled(t *testing.T) {
 }
 
 func TestGrain_NewKind_ReturnsRegisteredKind(t *testing.T) {
-	k := room.NewKind()
+	k := room.NewKind(seededLoader())
 	if k == nil {
 		t.Fatal("NewKind: got nil, want non-nil *cluster.Kind")
 	}
+}
+
+func TestGrain_NewKind_PanicsOnNilLoader(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("NewKind(nil): expected a wiring-time panic, got none")
+		}
+	}()
+	room.NewKind(nil)
 }
 
 func TestGrain_FanOutNotifyError_LoggedNotFatal(t *testing.T) {
@@ -465,7 +646,7 @@ func TestGrain_FanOutNotifyError_LoggedNotFatal(t *testing.T) {
 	notifier.notifyCalls = nil
 	notifier.notifyErrFn = func(string) error { return errFake("downstream user grain unreachable") }
 
-	resp, err := g.Join(graintest.NewJoinRequest("2"), fakeRoomCtx("general"))
+	resp, err := g.Join(graintest.NewJoinRequest("2"), fakeRoomCtx(testRoomID))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -511,7 +692,7 @@ func TestGrain_DomainLogsCarryEnvelopeAttrs(t *testing.T) {
 
 func mustJoin(t *testing.T, g *room.Grain, userID string) {
 	t.Helper()
-	resp, err := g.Join(graintest.NewJoinRequest(userID), fakeRoomCtx("general"))
+	resp, err := g.Join(graintest.NewJoinRequest(userID), fakeRoomCtx(testRoomID))
 	if err != nil {
 		t.Fatalf("Join(%q) unexpected error: %v", userID, err)
 	}

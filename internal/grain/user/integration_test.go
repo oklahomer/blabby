@@ -41,7 +41,13 @@ func (s *stubRoomGrain) Join(req *roompb.JoinRequest, _ cluster.GrainContext) (*
 	atomic.AddInt64(s.joinCount, 1)
 	name := req.GetUser().GetName()
 	s.joinUserName.Store(&name)
-	return &roompb.JoinResponse{}, nil
+	// A loaded Room grain returns its RoomRef so the User grain can cache it.
+	return &roompb.JoinResponse{Room: &commonpb.RoomRef{
+		RoomId:     "4",
+		PublicCode: "G000000004",
+		Name:       "General",
+		Status:     "active",
+	}}, nil
 }
 func (s *stubRoomGrain) Leave(*roompb.LeaveRequest, cluster.GrainContext) (*roompb.LeaveResponse, error) {
 	atomic.AddInt64(s.leaveCount, 1)
@@ -94,8 +100,8 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJoinedRooms via cluster: %v", err)
 	}
-	if got := listResp.GetRoomIds(); len(got) != 1 || got[0] != "4" {
-		t.Errorf("RoomIds: got %v, want [general]", got)
+	if rooms := listResp.GetRooms(); len(rooms) != 1 || rooms[0].GetRoomId() != "4" || rooms[0].GetName() != "General" {
+		t.Errorf("Rooms: got %v, want one ref for room 4 named General", rooms)
 	}
 
 	// SendMessage — exercises clusterRoomClient.PostMessage and the
@@ -151,14 +157,15 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 		t.Fatalf("RegisterConnection: error code=%d", ed.GetCode())
 	}
 
+	room := &commonpb.RoomRef{RoomId: "4", PublicCode: "G000000004", Name: "General", Status: "active"}
 	if _, err := uc.ForwardMessage(&userpb.ForwardMessageRequest{
-		RoomId: "4", Sender: &commonpb.UserRef{Id: userID, Name: seededDisplayName}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
+		Room: room, Sender: &commonpb.UserRef{Id: userID, Name: seededDisplayName}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
 	}); err != nil {
 		t.Fatalf("ForwardMessage via cluster: %v", err)
 	}
 
 	if _, err := uc.NotifyRoomEvent(&userpb.NotifyRoomEventRequest{
-		RoomId: "4", User: &commonpb.UserRef{Id: "2", Name: "Bob Example"}, EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
+		Room: room, User: &commonpb.UserRef{Id: "2", Name: "Bob Example"}, EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	}); err != nil {
 		t.Fatalf("NotifyRoomEvent via cluster: %v", err)
 	}

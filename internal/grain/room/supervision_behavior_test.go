@@ -12,6 +12,7 @@ import (
 
 	"github.com/asynkron/protoactor-go/actor"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/id"
 )
@@ -87,7 +88,7 @@ func notifyJob(t *testing.T) *fanoutNotify {
 	}
 	return &fanoutNotify{
 		recipients: []id.UserID{uid},
-		payload:    &userpb.NotifyRoomEventRequest{RoomId: "general"},
+		payload:    &userpb.NotifyRoomEventRequest{Room: &commonpb.RoomRef{RoomId: "general"}},
 		msgType:    "Join.fanout",
 		grainKind:  roomGrainKind,
 		grainID:    "general",

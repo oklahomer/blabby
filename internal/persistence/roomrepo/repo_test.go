@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
@@ -150,7 +151,7 @@ func TestCreate_Success(t *testing.T) {
 	if room.DisplayName != "General" {
 		t.Errorf("DisplayName = %q, want General", room.DisplayName)
 	}
-	if room.Status != RoomStatusActive {
+	if room.Status != domain.RoomStatusActive {
 		t.Errorf("Status = %q, want active", room.Status)
 	}
 	if room.CreatedBy.Int64() != 1 {
@@ -282,6 +283,62 @@ func TestFindByPublicCode_Success(t *testing.T) {
 	}
 	if room.ID.Int64() != 42 || room.PublicCode.String() != code.String() {
 		t.Errorf("room = %+v", room)
+	}
+}
+
+func TestFindByID_Success(t *testing.T) {
+	var gotSQL string
+	fq := &fakeQuerier{queryRow: func(sql string, args ...any) pgx.Row {
+		gotSQL = sql
+		if args[0].(int64) != 42 {
+			t.Errorf("lookup arg = %v, want 42", args[0])
+		}
+		return fakeRow{scan: func(dest ...any) error {
+			return assignAll(dest, roomValues(42, "G000000042", "General", 1, "active"))
+		}}
+	}}
+
+	room, err := New(nil).FindByID(context.Background(), fq, mustRoomID(t, 42))
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if room.ID.Int64() != 42 || room.Status != domain.RoomStatusActive {
+		t.Errorf("room = %+v", room)
+	}
+	// FindByID loads regardless of status, so unlike the active-only lookups it
+	// must not carry the active filter.
+	if strings.Contains(gotSQL, "status = 'active'") {
+		t.Errorf("FindByID SQL must not filter on active status: %s", gotSQL)
+	}
+}
+
+func TestFindByID_ReturnsArchivedRoom(t *testing.T) {
+	// The differentiator from FindByPublicCode/ListByIDs: an archived room is
+	// surfaced (not hidden) so the Room grain can see it and reject commands with
+	// ROOM_NOT_FOUND rather than treating it as never having existed.
+	fq := &fakeQuerier{queryRow: func(sql string, args ...any) pgx.Row {
+		return fakeRow{scan: func(dest ...any) error {
+			return assignAll(dest, roomValues(7, "G000000007", "Archived", 1, "archived"))
+		}}
+	}}
+
+	room, err := New(nil).FindByID(context.Background(), fq, mustRoomID(t, 7))
+	if err != nil {
+		t.Fatalf("FindByID(archived): got err %v, want the archived room", err)
+	}
+	if room.Status != domain.RoomStatusArchived {
+		t.Errorf("Status = %q, want archived", room.Status)
+	}
+}
+
+func TestFindByID_NotFound(t *testing.T) {
+	fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
+		return fakeRow{scan: func(...any) error { return pgx.ErrNoRows }}
+	}}
+
+	_, err := New(nil).FindByID(context.Background(), fq, mustRoomID(t, 99))
+	if !errors.Is(err, ErrRoomNotFound) {
+		t.Fatalf("FindByID(missing): got %v, want ErrRoomNotFound", err)
 	}
 }
 

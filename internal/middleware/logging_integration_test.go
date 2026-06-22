@@ -2,6 +2,7 @@ package middleware_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"strings"
@@ -13,10 +14,20 @@ import (
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
+	"github.com/oklahomer/blabby/internal/id"
 	clustertest "github.com/oklahomer/blabby/internal/testutil/cluster"
 )
+
+// activeRoomLoader reports every id as an active room so the Room grain can
+// activate without a database in this trace test.
+type activeRoomLoader struct{}
+
+func (activeRoomLoader) LoadRoom(_ context.Context, roomID id.RoomID) (domain.RoomRef, error) {
+	return domain.RoomRef{ID: roomID, Status: domain.RoomStatusActive}, nil
+}
 
 // syncBuffer is a goroutine-safe *bytes.Buffer wrapper. The slog handler
 // is called from any actor mailbox goroutine, and the integration test
@@ -58,7 +69,7 @@ func (s *syncBuffer) String() string {
 func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 	// Cross-grain fan-out can activate several fresh identities, so use a longer
 	// request timeout than the single-grain test default.
-	c := clustertest.StartWithTimeout(t, 10*time.Second, room.NewKind(), user.NewKind(nil))
+	c := clustertest.StartWithTimeout(t, 10*time.Second, room.NewKind(activeRoomLoader{}), user.NewKind(nil))
 	captureBuf := &syncBuffer{}
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(captureBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))

@@ -252,7 +252,7 @@ func startTestMembers(t *testing.T, count int) ([]*testMember, string) {
 		}
 
 		member := &testMember{
-			cluster:    Build(cc, Kinds(nil)...),
+			cluster:    Build(cc, Kinds(nil, activeAnyRoomLoader{})...),
 			topologies: make(chan *cluster.ClusterTopology, 16),
 		}
 		member.loggingSub = SubscribeTopologyLogging(member.cluster)
@@ -513,7 +513,7 @@ func sendMessage(member *cluster.Cluster, userID, roomID, text string) error {
 func forwardMessage(member *cluster.Cluster, userID, text string) error {
 	_, err := userpb.GetUserGrainGrainClient(member, userID).
 		ForwardMessage(&userpb.ForwardMessageRequest{
-			RoomId:    "4",
+			Room:      &commonpb.RoomRef{RoomId: "4", PublicCode: "G000000004"},
 			Sender:    &commonpb.UserRef{Id: "2", Name: "Sender"},
 			Text:      text,
 			Timestamp: timestamppb.New(time.UnixMilli(1)),
@@ -530,7 +530,11 @@ func getJoinedRoomsEventually(t *testing.T, member *cluster.Cluster, userID stri
 		if err != nil {
 			return err
 		}
-		roomIDs = resp.GetRoomIds()
+		ids := make([]string, len(resp.GetRooms()))
+		for i, room := range resp.GetRooms() {
+			ids[i] = room.GetRoomId()
+		}
+		roomIDs = ids
 		return nil
 	})
 	return roomIDs
@@ -558,12 +562,12 @@ func assertRoomEvent(
 	t.Helper()
 	select {
 	case notification := <-probe.notifications:
-		if notification.GetRoomId() != wantRoomID ||
+		if notification.GetRoom().GetRoomId() != wantRoomID ||
 			notification.GetUser().GetId() != wantUserID ||
 			notification.GetEventType() != wantType {
 			t.Fatalf(
 				"connection room event = {room_id:%q user_id:%q type:%s}, want {room_id:%q user_id:%q type:%s}",
-				notification.GetRoomId(),
+				notification.GetRoom().GetRoomId(),
 				notification.GetUser().GetId(),
 				notification.GetEventType(),
 				wantRoomID,

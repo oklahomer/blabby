@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/id"
 )
@@ -47,10 +48,10 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRoomJoined returns the rooms the authenticated user has joined, as R…
-// descriptors. The User grain reports internal ids; the gateway resolves them to
-// public codes + names via the directory, preserving the grain's order and
-// dropping any room that is no longer active. The slice is explicitly initialised
-// so an empty result marshals as `[]`, never `null`.
+// descriptors rendered directly from the reference metadata the User grain
+// caches — no per-request room-repository lookup. The grain's order is preserved.
+// The slice is explicitly initialised so an empty result marshals as `[]`, never
+// `null`.
 func (g *Gateway) handleRoomJoined(w http.ResponseWriter, r *http.Request) {
 	userID, ok := authenticatedUserID(w, r, endpointRoomJoined)
 	if !ok {
@@ -67,41 +68,34 @@ func (g *Gateway) handleRoomJoined(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	joinedIDs, err := parseRoomIDs(resp.GetRoomIds())
+	descriptors, err := descriptorsFromRefs(resp.GetRooms())
 	if err != nil {
-		// The User grain is contracted to return internal decimal ids; an
-		// unparseable one is a server-side bug, so fail closed rather than let a
-		// room silently vanish from the user's list.
+		// The User grain is contracted to return well-formed room refs; an
+		// unparseable public code is a server-side bug, so fail closed rather than
+		// let a room silently vanish from the user's list.
 		slog.Error("room handler internal error",
 			"endpoint", endpointRoomJoined, "method", r.Method,
 			"user_id", userID, "error", err)
 		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("failed to read joined rooms"))
 		return
 	}
-	infos, err := g.rooms.Describe(r.Context(), joinedIDs)
-	if err != nil {
-		slog.Warn("room handler transport error",
-			"endpoint", endpointRoomJoined, "method", r.Method,
-			"user_id", userID, "outcome", outcomeTransportError)
-		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to resolve joined rooms"))
-		return
-	}
 
 	logRoomExit(endpointRoomJoined, r.Method, userID, id.RoomID{}, outcomeOK, 0)
-	writeJSON(w, http.StatusOK, roomListResponse{Rooms: toDescriptors(infos)})
+	writeJSON(w, http.StatusOK, roomListResponse{Rooms: descriptors})
 }
 
-// parseRoomIDs converts the grain's internal decimal room ids into typed RoomIDs.
-// An unparseable value is a grain contract violation; it returns an error so the
-// caller can fail closed rather than silently drop the room.
-func parseRoomIDs(raw []string) ([]id.RoomID, error) {
-	out := make([]id.RoomID, len(raw))
-	for i, s := range raw {
-		roomID, err := id.ParseRoomID(s)
+// descriptorsFromRefs renders cached room refs as their client-facing R…
+// descriptors. An unparseable public code is a grain contract violation; it
+// returns an error so the caller can fail closed rather than silently drop the
+// room. The slice is explicitly initialised so an empty result marshals as `[]`.
+func descriptorsFromRefs(refs []*commonpb.RoomRef) ([]roomDescriptor, error) {
+	out := make([]roomDescriptor, len(refs))
+	for i, ref := range refs {
+		code, err := id.ParsePublicCode(ref.GetPublicCode())
 		if err != nil {
-			return nil, fmt.Errorf("user grain returned an unparseable room id %q: %w", s, err)
+			return nil, fmt.Errorf("user grain returned an unparseable room public_code %q: %w", ref.GetPublicCode(), err)
 		}
-		out[i] = roomID
+		out[i] = roomDescriptor{ID: code.FormatRoom(), Name: ref.GetName()}
 	}
 	return out, nil
 }

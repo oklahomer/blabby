@@ -46,11 +46,9 @@ func withUserContext(t *testing.T, req *http.Request, userID string) *http.Reque
 // guard does not fire; the fields are typed pointers and remain unused
 // because the seam intercepts the call before any cluster method runs.
 func gatewayWithFake(fake userGrainCaller) *Gateway {
-	dir := newStubRoomDirectory()
 	return &Gateway{
 		auth:      &stubAuthenticator{},
-		rooms:     dir,
-		roomCodes: newRoomCodeCache(dir),
+		rooms:     newStubRoomDirectory(),
 		cluster:   sentinelCluster(),
 		actorRoot: sentinelActorRoot(),
 		userGrain: func(id.UserID) userGrainCaller { return fake },

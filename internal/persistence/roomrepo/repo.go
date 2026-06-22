@@ -12,9 +12,11 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
-// ErrRoomNotFound is returned when no active room matches a lookup. An archived
-// room is reported as not found, matching the gateway's ROOM_NOT_FOUND contract:
-// an inactive room is not addressable.
+// ErrRoomNotFound is returned when a lookup matches no room. The active-only
+// lookups (FindByPublicCode, ListByIDs) also report an archived room as not
+// found, matching the gateway's ROOM_NOT_FOUND contract: an inactive room is not
+// addressable by its public code. FindByID, which loads regardless of status,
+// returns it only when no row carries the id at all.
 var ErrRoomNotFound = errors.New("roomrepo: room not found")
 
 // ErrPublicCodeCollision reports that a minted public_code collided with an
@@ -115,6 +117,25 @@ func (r *Repo) FindByPublicCode(ctx context.Context, q postgres.Querier, code id
 	}
 	if err != nil {
 		return Room{}, fmt.Errorf("roomrepo: find by public_code: %w", err)
+	}
+	return room, nil
+}
+
+const findByIDSQL = `SELECT ` + roomColumns + ` FROM room WHERE id = $1`
+
+// FindByID loads a room by its internal RoomID regardless of status, so the Room
+// grain can hydrate its own metadata on activation and see an archived room (to
+// reject commands) rather than treating it as never having existed. It returns
+// ErrRoomNotFound only when no row carries the id. This is distinct from
+// FindByPublicCode, which is active-only because an archived room is not
+// addressable by its public code.
+func (r *Repo) FindByID(ctx context.Context, q postgres.Querier, roomID id.RoomID) (Room, error) {
+	room, err := scanRoom(q.QueryRow(ctx, findByIDSQL, roomID.Int64()))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Room{}, ErrRoomNotFound
+	}
+	if err != nil {
+		return Room{}, fmt.Errorf("roomrepo: find by id: %w", err)
 	}
 	return room, nil
 }

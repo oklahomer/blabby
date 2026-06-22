@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -82,34 +81,11 @@ type session struct {
 	system *actor.ActorSystem
 }
 
-// identityRoomCodes returns the id's decimal string unchanged (no translation), so
-// tests asserting on a numeric room id see it pass through. It is the default
-// resolver in startSession.
-type identityRoomCodes struct{}
-
-func (identityRoomCodes) PublicRoomCode(_ context.Context, roomID id.RoomID) (string, error) {
-	return roomID.String(), nil
-}
-
-// stubRoomCodes maps RoomIDs to fixed public codes and errors for any id not in
-// the map, exercising the translation and drop-on-unresolved paths.
-type stubRoomCodes struct{ codes map[id.RoomID]string }
-
-func (s stubRoomCodes) PublicRoomCode(_ context.Context, roomID id.RoomID) (string, error) {
-	if code, ok := s.codes[roomID]; ok {
-		return code, nil
-	}
-	return "", fmt.Errorf("stub: unknown room id %s", roomID)
-}
-
-// mustRoomID builds a RoomID for test fixtures, failing on an invalid value.
-func mustRoomID(t *testing.T, v int64) id.RoomID {
-	t.Helper()
-	r, err := id.NewRoomID(v)
-	if err != nil {
-		t.Fatalf("NewRoomID(%d): %v", v, err)
-	}
-	return r
+// fanoutRoom is the room ref test fan-out messages carry. Its bare public code
+// renders as RG000000004 on the wire, so assertions check that the connection
+// emits the public code and never the internal room id.
+func fanoutRoom() *commonpb.RoomRef {
+	return &commonpb.RoomRef{RoomId: "4", PublicCode: "G000000004"}
 }
 
 func startSession(t *testing.T, authStub *stubAuthenticator, grainStub UserGrainCaller, opts ...Option) *session {
@@ -126,7 +102,6 @@ func startSession(t *testing.T, authStub *stubAuthenticator, grainStub UserGrain
 		}
 		fullOpts := append([]Option{
 			WithUserGrainCaller(grainStub),
-			WithRoomCodeResolver(identityRoomCodes{}),
 		}, opts...)
 		props := NewProps(c, authStub, nil, fullOpts...)
 		pidCh <- system.Root.Spawn(props)
@@ -450,7 +425,7 @@ func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {
 
 	when := time.UnixMilli(1700000000000)
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		RoomId: "4", Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
+		Room: fanoutRoom(), Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
 		Text: "hello", Timestamp: timestamppb.New(when),
 	})
 
@@ -458,7 +433,7 @@ func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {
 	if got["type"] != "message" {
 		t.Errorf("type: got %v, want message", got["type"])
 	}
-	if got["room_id"] != "4" || got["text"] != "hello" {
+	if got["room_id"] != "RG000000004" || got["text"] != "hello" {
 		t.Errorf("payload mismatch: %v", got)
 	}
 	if sender := userObject(t, got, "sender"); sender["id"] != "bob" || sender["name"] != "Bob Builder" {
@@ -469,20 +444,19 @@ func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {
 	}
 }
 
-// TestForwardMessage_TranslatesRoomIDToPublicCode proves the connection replaces
-// the internal room id from the grain with the opaque public code before it
-// reaches the wire, so no internal numeric room id crosses the WebSocket.
-func TestForwardMessage_TranslatesRoomIDToPublicCode(t *testing.T) {
+// TestForwardMessage_RendersPublicCodeFromRef proves the connection renders the
+// room's opaque public code from the ref the grain fans out, so no internal
+// numeric room id crosses the WebSocket.
+func TestForwardMessage_RendersPublicCodeFromRef(t *testing.T) {
 	authStub := &stubAuthenticator{validateFn: func(_ context.Context, _ string) (*auth.Claims, error) {
 		return aliceClaims(), nil
 	}}
-	sess := startSession(t, authStub, &recordingGrainCaller{},
-		WithRoomCodeResolver(stubRoomCodes{codes: map[id.RoomID]string{mustRoomID(t, 4): "RG000000004"}}))
+	sess := startSession(t, authStub, &recordingGrainCaller{})
 	writeAuthFrame(t, sess.client, "tok")
 	_ = readJSON(t, sess.client) // auth_ok
 
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		RoomId: "4", Sender: &commonpb.UserRef{Id: "2", Name: "Bob"},
+		Room: fanoutRoom(), Sender: &commonpb.UserRef{Id: "2", Name: "Bob"},
 		Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(1)),
 	})
 
@@ -491,7 +465,35 @@ func TestForwardMessage_TranslatesRoomIDToPublicCode(t *testing.T) {
 		t.Fatalf("type: got %v, want message", got["type"])
 	}
 	if got["room_id"] != "RG000000004" {
-		t.Errorf("room_id: got %v, want RG000000004 (internal id 4 translated to its public code)", got["room_id"])
+		t.Errorf("room_id: got %v, want RG000000004 (public code rendered from the ref)", got["room_id"])
+	}
+}
+
+// TestForwardMessage_InvalidPublicCodeDropsFrame proves a fan-out message whose
+// room ref carries an unparseable public code is dropped rather than rendered, so
+// a malformed code never reaches the wire. A valid frame sent afterwards still
+// arrives, confirming only the bad frame was dropped.
+func TestForwardMessage_InvalidPublicCodeDropsFrame(t *testing.T) {
+	authStub := &stubAuthenticator{validateFn: func(_ context.Context, _ string) (*auth.Claims, error) {
+		return aliceClaims(), nil
+	}}
+	sess := startSession(t, authStub, &recordingGrainCaller{})
+	writeAuthFrame(t, sess.client, "tok")
+	_ = readJSON(t, sess.client) // auth_ok
+
+	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
+		Room:   &commonpb.RoomRef{RoomId: "4", PublicCode: "not-a-code"},
+		Sender: &commonpb.UserRef{Id: "2", Name: "Bob"},
+		Text:   "dropped", Timestamp: timestamppb.New(time.UnixMilli(1)),
+	})
+	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
+		Room: fanoutRoom(), Sender: &commonpb.UserRef{Id: "2", Name: "Bob"},
+		Text: "delivered", Timestamp: timestamppb.New(time.UnixMilli(2)),
+	})
+
+	got := readJSON(t, sess.client)
+	if got["text"] != "delivered" {
+		t.Errorf("expected only the valid frame to arrive, got %v", got)
 	}
 }
 
@@ -516,7 +518,7 @@ func TestRoomEvent_JoinedAndLeftSerialise(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "4", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		Room: fanoutRoom(), User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	})
 	joined := readJSON(t, sess.client)
@@ -528,7 +530,7 @@ func TestRoomEvent_JoinedAndLeftSerialise(t *testing.T) {
 	}
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "4", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		Room: fanoutRoom(), User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT,
 	})
 	left := readJSON(t, sess.client)
@@ -549,14 +551,14 @@ func TestRoomEvent_UnspecifiedDoesNotCloseSession(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "4", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		Room: fanoutRoom(), User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_UNSPECIFIED,
 	})
 
 	// Push a known event afterwards. If the unknown event killed the session
 	// we'd never see this frame.
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		RoomId: "4", User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		Room: fanoutRoom(), User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	})
 	if got := readJSON(t, sess.client); got["type"] != "joined" {
@@ -660,7 +662,7 @@ func TestLogs_MessageBodyIsNeverLogged(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		RoomId: "4", Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
+		Room: fanoutRoom(), Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
 		Text:      secretBody,
 		Timestamp: timestamppb.New(time.UnixMilli(1)),
 	})

@@ -66,14 +66,14 @@ func TestRoomGrain_Integration_FanOutThroughCluster(t *testing.T) {
 			forwardCount: &forwardCount,
 		}
 	}, time.Minute)
-	roomKind := room.NewKind()
+	roomKind := room.NewKind(seededLoader(activeRoomRef(t, testRoomID)))
 
 	c := clustertest.Start(t, roomKind, userKind)
 
 	// Single-member topology settles within the cluster request timeout
 	// (configured in clustertest.Start). The Request calls below will
 	// retry internally until the topology is ready.
-	roomClient := roompb.GetRoomGrainGrainClient(c, "general")
+	roomClient := roompb.GetRoomGrainGrainClient(c, testRoomID)
 
 	joinResp, err := roomClient.Join(graintest.NewJoinRequest("1"))
 	if err != nil {
