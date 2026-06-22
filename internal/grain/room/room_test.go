@@ -136,7 +136,7 @@ type forwardCall struct {
 func (f *fakeNotifier) NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomEventRequest) error {
 	f.notifyCalls = append(f.notifyCalls, notifyCall{
 		UserID:    userID.String(),
-		RoomID:    req.GetRoomId(),
+		RoomID:    req.GetRoom().GetRoomId(),
 		Subject:   userRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()},
 		EventType: req.GetEventType(),
 	})
@@ -149,7 +149,7 @@ func (f *fakeNotifier) NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomE
 func (f *fakeNotifier) ForwardMessage(userID id.UserID, req *userpb.ForwardMessageRequest) error {
 	f.forwardCalls = append(f.forwardCalls, forwardCall{
 		UserID:    userID.String(),
-		RoomID:    req.GetRoomId(),
+		RoomID:    req.GetRoom().GetRoomId(),
 		Sender:    userRef{ID: req.GetSender().GetId(), Name: req.GetSender().GetName()},
 		Text:      req.GetText(),
 		Timestamp: req.GetTimestamp().AsTime(),

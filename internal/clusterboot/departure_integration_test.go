@@ -513,7 +513,7 @@ func sendMessage(member *cluster.Cluster, userID, roomID, text string) error {
 func forwardMessage(member *cluster.Cluster, userID, text string) error {
 	_, err := userpb.GetUserGrainGrainClient(member, userID).
 		ForwardMessage(&userpb.ForwardMessageRequest{
-			RoomId:    "4",
+			Room:      &commonpb.RoomRef{RoomId: "4", PublicCode: "G000000004"},
 			Sender:    &commonpb.UserRef{Id: "2", Name: "Sender"},
 			Text:      text,
 			Timestamp: timestamppb.New(time.UnixMilli(1)),
@@ -562,12 +562,12 @@ func assertRoomEvent(
 	t.Helper()
 	select {
 	case notification := <-probe.notifications:
-		if notification.GetRoomId() != wantRoomID ||
+		if notification.GetRoom().GetRoomId() != wantRoomID ||
 			notification.GetUser().GetId() != wantUserID ||
 			notification.GetEventType() != wantType {
 			t.Fatalf(
 				"connection room event = {room_id:%q user_id:%q type:%s}, want {room_id:%q user_id:%q type:%s}",
-				notification.GetRoomId(),
+				notification.GetRoom().GetRoomId(),
 				notification.GetUser().GetId(),
 				notification.GetEventType(),
 				wantRoomID,

@@ -401,7 +401,7 @@ func (g *Grain) ForwardMessage(req *userpb.ForwardMessageRequest, ctx cluster.Gr
 		"grain_id", ctx.Identity(),
 		"msg_type", "ForwardMessage.fanout",
 		"sender_id", req.GetSender().GetId(),
-		"room_id", req.GetRoomId(),
+		"room_id", req.GetRoom().GetRoomId(),
 		"target_count", len(pids),
 		"text_len", len(req.GetText()),
 	)
@@ -422,7 +422,7 @@ func (g *Grain) NotifyRoomEvent(req *userpb.NotifyRoomEventRequest, ctx cluster.
 		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
 		"msg_type", "NotifyRoomEvent.fanout",
-		"room_id", req.GetRoomId(),
+		"room_id", req.GetRoom().GetRoomId(),
 		"event_user_id", req.GetUser().GetId(),
 		"event_type", req.GetEventType().String(),
 		"target_count", len(pids),

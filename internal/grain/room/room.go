@@ -233,8 +233,10 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 		return joinErr(errcode.RoomNotFound, "room not found"), nil
 	}
 	// The grain is loaded, so every response below carries the room's RoomRef
-	// (the joiner caches it). Only the ROOM_NOT_FOUND guard above omits it.
-	room := protoRoomRef(g.state.roomRef())
+	// (the joiner caches it) and fan-out embeds the same ref. Only the
+	// ROOM_NOT_FOUND guard above omits it.
+	roomRef := g.state.roomRef()
+	room := protoRoomRef(roomRef)
 
 	joiner, err := parseUserRef(req.GetUser())
 	if err != nil {
@@ -272,7 +274,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 		"sender_id", userID,
 		"target_count", len(recipients),
 	)
-	g.fanOutNotify(ctx, recipients, buildJoinedEvent(ctx.Identity(), joiner), "Join.fanout")
+	g.fanOutNotify(ctx, recipients, buildJoinedEvent(roomRef, joiner), "Join.fanout")
 
 	return &roompb.JoinResponse{Room: room}, nil
 }
@@ -326,7 +328,7 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 		"sender_id", userID,
 		"target_count", len(recipients),
 	)
-	g.fanOutNotify(ctx, recipients, buildLeftEvent(ctx.Identity(), leaver), "Leave.fanout")
+	g.fanOutNotify(ctx, recipients, buildLeftEvent(g.state.roomRef(), leaver), "Leave.fanout")
 
 	return &roompb.LeaveResponse{}, nil
 }
@@ -400,7 +402,7 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 		"target_count", len(recipients),
 		"text_len", textLen,
 	)
-	payload := buildForwardMessage(ctx.Identity(), sender, req.GetText(), timestamp)
+	payload := buildForwardMessage(g.state.roomRef(), sender, req.GetText(), timestamp)
 	g.fanOutForward(ctx, recipients, payload, "PostMessage.fanout")
 
 	return &roompb.PostMessageResponse{Timestamp: timestamppb.New(timestamp)}, nil

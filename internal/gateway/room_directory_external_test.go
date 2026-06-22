@@ -14,12 +14,11 @@ import (
 // without a database.
 type stubRoomDirectory struct {
 	byCode  map[string]gateway.RoomInfo
-	byID    map[id.RoomID]gateway.RoomInfo
 	ordered []gateway.RoomInfo
 }
 
 func newStubRoomDirectory() *stubRoomDirectory {
-	d := &stubRoomDirectory{byCode: map[string]gateway.RoomInfo{}, byID: map[id.RoomID]gateway.RoomInfo{}}
+	d := &stubRoomDirectory{byCode: map[string]gateway.RoomInfo{}}
 	d.add(4, "G000000004", "General")
 	d.add(5, "H000000005", "Random")
 	return d
@@ -36,7 +35,6 @@ func (d *stubRoomDirectory) add(rawID int64, code, name string) {
 	}
 	info := gateway.RoomInfo{ID: rid, Code: c, Name: name}
 	d.byCode[c.String()] = info
-	d.byID[rid] = info
 	d.ordered = append(d.ordered, info)
 }
 
@@ -51,15 +49,5 @@ func (d *stubRoomDirectory) Resolve(_ context.Context, code id.PublicCode) (id.R
 func (d *stubRoomDirectory) ListActive(_ context.Context) ([]gateway.RoomInfo, error) {
 	out := make([]gateway.RoomInfo, len(d.ordered))
 	copy(out, d.ordered)
-	return out, nil
-}
-
-func (d *stubRoomDirectory) Describe(_ context.Context, ids []id.RoomID) ([]gateway.RoomInfo, error) {
-	var out []gateway.RoomInfo
-	for _, rid := range ids {
-		if info, ok := d.byID[rid]; ok {
-			out = append(out, info)
-		}
-	}
 	return out, nil
 }

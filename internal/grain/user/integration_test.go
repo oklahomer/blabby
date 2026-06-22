@@ -157,14 +157,15 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 		t.Fatalf("RegisterConnection: error code=%d", ed.GetCode())
 	}
 
+	room := &commonpb.RoomRef{RoomId: "4", PublicCode: "G000000004", Name: "General", Status: "active"}
 	if _, err := uc.ForwardMessage(&userpb.ForwardMessageRequest{
-		RoomId: "4", Sender: &commonpb.UserRef{Id: userID, Name: seededDisplayName}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
+		Room: room, Sender: &commonpb.UserRef{Id: userID, Name: seededDisplayName}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(1)),
 	}); err != nil {
 		t.Fatalf("ForwardMessage via cluster: %v", err)
 	}
 
 	if _, err := uc.NotifyRoomEvent(&userpb.NotifyRoomEventRequest{
-		RoomId: "4", User: &commonpb.UserRef{Id: "2", Name: "Bob Example"}, EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
+		Room: room, User: &commonpb.UserRef{Id: "2", Name: "Bob Example"}, EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	}); err != nil {
 		t.Fatalf("NotifyRoomEvent via cluster: %v", err)
 	}

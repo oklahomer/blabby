@@ -124,17 +124,17 @@ func TestFanout_SelfEcho_NoDeadlock_AndDelivers(t *testing.T) {
 	})
 
 	notify, _ := probe.firstNotify()
-	if notify.GetRoomId() != roomID || notify.GetEventType() != userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED {
+	if notify.GetRoom().GetRoomId() != roomID || notify.GetEventType() != userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED {
 		t.Errorf("notify: got room=%q type=%v, want room=%q JOINED",
-			notify.GetRoomId(), notify.GetEventType(), roomID)
+			notify.GetRoom().GetRoomId(), notify.GetEventType(), roomID)
 	}
 	if got := notify.GetUser().GetName(); got != displayName {
 		t.Errorf("JOINED user name: got %q, want %q (the directory-seeded name must reach the connection)", got, displayName)
 	}
 	forward, _ := probe.firstForward()
-	if forward.GetRoomId() != roomID || forward.GetText() != "hello" {
+	if forward.GetRoom().GetRoomId() != roomID || forward.GetText() != "hello" {
 		t.Errorf("forward: got room=%q text=%q, want room=%q text=%q",
-			forward.GetRoomId(), forward.GetText(), roomID, "hello")
+			forward.GetRoom().GetRoomId(), forward.GetText(), roomID, "hello")
 	}
 	if got := forward.GetSender().GetName(); got != displayName {
 		t.Errorf("forwarded sender name: got %q, want %q (the directory-seeded name must reach the connection)", got, displayName)

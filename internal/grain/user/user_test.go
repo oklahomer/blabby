@@ -647,7 +647,7 @@ func TestGrain_ForwardMessage(t *testing.T) {
 		mustRegister(t, h, actor.NewPID("addr", "conn-b"))
 		mustRegister(t, h, actor.NewPID("addr", "conn-c"))
 
-		req := &userpb.ForwardMessageRequest{RoomId: "4", Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(42))}
+		req := &userpb.ForwardMessageRequest{Room: &commonpb.RoomRef{RoomId: "4"}, Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(42))}
 		resp, err := h.g.ForwardMessage(req, fakeUserCtx("1"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -670,7 +670,7 @@ func TestGrain_ForwardMessage(t *testing.T) {
 	t.Run("with 0 connections returns success and does not call sender", func(t *testing.T) {
 		h := newGrain(t)
 
-		resp, err := h.g.ForwardMessage(&userpb.ForwardMessageRequest{RoomId: "4", Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}}, fakeUserCtx("1"))
+		resp, err := h.g.ForwardMessage(&userpb.ForwardMessageRequest{Room: &commonpb.RoomRef{RoomId: "4"}, Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}}, fakeUserCtx("1"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -693,7 +693,7 @@ func TestGrain_NotifyRoomEvent(t *testing.T) {
 		before := h.g.JoinedRooms()
 
 		req := &userpb.NotifyRoomEventRequest{
-			RoomId:    "4",
+			Room:      &commonpb.RoomRef{RoomId: "4"},
 			User:      &commonpb.UserRef{Id: "2", Name: "Bob Example"},
 			EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 		}
@@ -798,7 +798,7 @@ func TestGrain_MultiDeviceEcho(t *testing.T) {
 	}
 
 	// 3. Simulate Room grain fan-out back to alice.
-	fwd := &userpb.ForwardMessageRequest{RoomId: "4", Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(7))}
+	fwd := &userpb.ForwardMessageRequest{Room: &commonpb.RoomRef{RoomId: "4"}, Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: "hi", Timestamp: timestamppb.New(time.UnixMilli(7))}
 	_, err = h.g.ForwardMessage(fwd, fakeUserCtx("1"))
 	if err != nil {
 		t.Fatalf("ForwardMessage unexpected error: %v", err)
@@ -865,7 +865,7 @@ func TestGrain_DoesNotLogMessageText(t *testing.T) {
 		h := newGrain(t)
 
 		_, _ = h.g.ForwardMessage(&userpb.ForwardMessageRequest{
-			RoomId: "4", Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: text, Timestamp: timestamppb.New(time.UnixMilli(1)),
+			Room: &commonpb.RoomRef{RoomId: "4"}, Sender: &commonpb.UserRef{Id: "1", Name: "Alice Example"}, Text: text, Timestamp: timestamppb.New(time.UnixMilli(1)),
 		}, fakeUserCtx("1"))
 
 		out := buf.String()
