@@ -10,6 +10,11 @@ services:
       - "--discovery-port=6330"
       - "--advertised-host=backend:8090"
       - "--seeds=backend:6330"
+    environment:
+      BLABBY_DATABASE_URL: "postgres://${POSTGRES_USER:-blabby}:${POSTGRES_PASSWORD:-blabby}@postgres:5432/${POSTGRES_DB:-blabby}?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # API tier: a cluster client serving HTTP/WebSocket. Advertised hosts are the
   # compose service names (reachable on the compose network), not loopback, so
@@ -17,7 +22,12 @@ services:
   gateway:
     image: blabby
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      BLABBY_DATABASE_URL: "postgres://${POSTGRES_USER:-blabby}:${POSTGRES_PASSWORD:-blabby}@postgres:5432/${POSTGRES_DB:-blabby}?sslmode=disable"
     command:
       - /blabby-gateway
       - "--listen=0.0.0.0:8080"
@@ -30,11 +40,11 @@ services:
       - "${SERVER_PORT:-8080}:8080"
 
   # Persistent storage: PostgreSQL with the PGroonga extension for CJK-aware
-  # full-text search. The app tiers do not depend on this service yet — Phase 1
-  # in-memory behavior is unchanged — it is provisioned here so `make up` brings
-  # up a ready database for local development. On a fresh volume the entrypoint
-  # runs the mounted schema.sql (which creates the PGroonga extension); use
-  # `make db-reset` to re-provision after editing the schema.
+  # full-text search. The backend and gateway connect to it via
+  # BLABBY_DATABASE_URL and wait for its healthcheck before starting. On a fresh
+  # volume the entrypoint runs the mounted schema.sql (which creates the PGroonga
+  # extension and applies the dev seed); use `make db-reset` to re-provision after
+  # editing the schema.
   postgres:
     image: groonga/pgroonga:4.0.6-alpine-17
     environment:
