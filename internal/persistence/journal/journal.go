@@ -1,0 +1,72 @@
+package journal
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence/postgres"
+)
+
+// IDSource mints the next Snowflake id for an event. It is the same one-method
+// contract roomrepo uses, satisfied by the worker-lease Manager, which mints only
+// while it holds an unexpired lease (fail-closed).
+type IDSource interface {
+	Next() (int64, error)
+}
+
+// Journal appends to and reads the event table. Its methods take a
+// postgres.Querier (pool or tx) per call, so the Room grain can append a
+// membership event inside the same transaction as the room_membership write.
+type Journal struct {
+	ids IDSource
+}
+
+// New returns a Journal that mints event ids from ids.
+func New(ids IDSource) *Journal { return &Journal{ids: ids} }
+
+const appendMembershipSQL = `
+INSERT INTO event (id, room_id, type, user_id, occurred_at, payload)
+VALUES ($1, $2, $3::event_type, $4, now(), $5)
+RETURNING occurred_at`
+
+// AppendMembership appends a member_joined / member_left event for actor in
+// roomID and returns the new event's id and server-assigned occurred_at. The id
+// is minted from the Snowflake source; occurred_at is the DB clock (display-only —
+// the timeline orders by id). client_key is left null: system events are not
+// deduplicated.
+//
+// The caller runs this inside the same transaction as the authoritative
+// room_membership change, so the row and its derived timeline event commit (or
+// roll back) together.
+func (j *Journal) AppendMembership(ctx context.Context, q postgres.Querier, roomID id.RoomID, actor id.UserRef, kind MemberEventKind) (id.EventID, time.Time, error) {
+	eventType, err := kind.eventType()
+	if err != nil {
+		return id.EventID{}, time.Time{}, err
+	}
+
+	rawID, err := j.ids.Next()
+	if err != nil {
+		return id.EventID{}, time.Time{}, fmt.Errorf("journal: mint event id: %w", err)
+	}
+	eventID, err := id.NewEventID(rawID)
+	if err != nil {
+		return id.EventID{}, time.Time{}, fmt.Errorf("journal: mint event id: %w", err)
+	}
+
+	payload, err := json.Marshal(memberEventPayload{DisplayName: actor.Name()})
+	if err != nil {
+		return id.EventID{}, time.Time{}, fmt.Errorf("journal: marshal payload: %w", err)
+	}
+
+	var occurredAt time.Time
+	err = q.QueryRow(ctx, appendMembershipSQL,
+		eventID.Int64(), roomID.Int64(), eventType, actor.ID().Int64(), payload,
+	).Scan(&occurredAt)
+	if err != nil {
+		return id.EventID{}, time.Time{}, fmt.Errorf("journal: append membership: %w", err)
+	}
+	return eventID, occurredAt, nil
+}
