@@ -37,14 +37,15 @@ import (
 // grain.unhandled) live in internal/middleware as exported constants and
 // are referenced via middleware.EventXxx.
 const (
-	eventRoomMemberJoined        = "room.member.joined"
-	eventRoomMemberJoinRejected  = "room.member.join_rejected"
-	eventRoomMemberLeft          = "room.member.left"
-	eventRoomMemberLeaveRejected = "room.member.leave_rejected"
-	eventRoomMessagePosted       = "room.message.posted"
-	eventRoomMessagePostRejected = "room.message.post_rejected"
-	eventRoomFanoutSupervision   = "room.fanout.supervision"
-	eventRoomActivationRejected  = "room.activation.rejected"
+	eventRoomMemberJoined          = "room.member.joined"
+	eventRoomMemberJoinRejected    = "room.member.join_rejected"
+	eventRoomMemberLeft            = "room.member.left"
+	eventRoomMemberLeaveRejected   = "room.member.leave_rejected"
+	eventRoomMessagePosted         = "room.message.posted"
+	eventRoomMessagePostRejected   = "room.message.post_rejected"
+	eventRoomFanoutSupervision     = "room.fanout.supervision"
+	eventRoomActivationRejected    = "room.activation.rejected"
+	eventRoomMembershipWriteFailed = "room.membership.write_failed"
 )
 
 // passivationTimeout is the receive-timeout the Room kind passivates on. It is
@@ -89,16 +90,34 @@ func (n *clusterUserNotifier) ForwardMessage(userID id.UserID, req *userpb.Forwa
 // proto boundaries (PostMessage's response and buildForwardMessage in
 // events.go).
 type Grain struct {
-	state    roomState
-	loader   RoomLoader
-	notifier userNotifier
-	now      func() time.Time
-	fanout   fanoutDispatcher
+	state      roomState
+	loader     RoomLoader
+	membership MembershipStore
+	notifier   userNotifier
+	now        func() time.Time
+	fanout     fanoutDispatcher
 }
 
 // roomGrainKind is the cluster kind name registered by the generated
 // NewRoomGrainKind. The log envelopes below must agree with it.
 const roomGrainKind = "RoomGrain"
+
+// Option configures a Room kind built by NewKind.
+type Option func(*kindConfig)
+
+// kindConfig collects the per-kind collaborators captured into each activation's
+// Grain by NewKind's producer.
+type kindConfig struct {
+	loader     RoomLoader
+	membership MembershipStore
+}
+
+// WithMembership injects the DB-authoritative membership store. Production wires
+// it (via clusterboot); a grain built without it keeps membership in memory only
+// (no durability), which is the behavior unit tests rely on unless they opt in.
+func WithMembership(store MembershipStore) Option {
+	return func(c *kindConfig) { c.membership = store }
+}
 
 // NewKind registers Room grain with a proto.actor cluster, returning a
 // *cluster.Kind that callers pass to cluster.WithKinds(...). The loader hydrates
@@ -106,13 +125,19 @@ const roomGrainKind = "RoomGrain"
 // production path reaches persistence while tests inject a stub. The default
 // userNotifier is built lazily during Init from ctx.Cluster(), avoiding a
 // chicken-and-egg with cluster.New requiring kinds in its config.
-func NewKind(loader RoomLoader) *cluster.Kind {
+func NewKind(loader RoomLoader, opts ...Option) *cluster.Kind {
 	if loader == nil {
 		// Fail at wiring time with a clear message rather than as an opaque nil
 		// interface panic inside the first activation's hydrate.
 		panic("room: nil RoomLoader")
 	}
-	return roompb.NewRoomGrainKind(func() roompb.RoomGrain { return &Grain{loader: loader} }, passivationTimeout,
+	cfg := kindConfig{loader: loader}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return roompb.NewRoomGrainKind(func() roompb.RoomGrain {
+		return &Grain{loader: cfg.loader, membership: cfg.membership}
+	}, passivationTimeout,
 		actor.WithReceiverMiddleware(middleware.GrainLogging(roomGrainKind)),
 		// Govern the fan-out worker child: protoactor resolves a child's
 		// supervisor from its parent's props. Unexpected worker panics restart
@@ -143,6 +168,10 @@ func (g *Grain) Init(ctx cluster.GrainContext) {
 	if !g.hydrate(ctx) {
 		return
 	}
+	// Seed the member cache from the source of truth before any collaborators
+	// are created, so a transient load failure panics the activation (re-tried
+	// by the supervisor) rather than serving a room with a partial member set.
+	g.loadMembers()
 
 	if g.now == nil {
 		g.now = time.Now
@@ -209,7 +238,27 @@ func (g *Grain) hydrate(ctx cluster.GrainContext) bool {
 	}
 }
 
-// Terminate is a passivation hook; Phase 1 does not persist state.
+// loadMembers seeds the in-memory member cache from DB-authoritative membership
+// on activation, so it survives passivation / node loss. A transient load
+// failure panics (like hydrate) so the supervisor re-activates rather than
+// serving a room with an incomplete roster. With no membership store wired
+// (tests exercising only in-memory behavior) it is a no-op.
+func (g *Grain) loadMembers() {
+	if g.membership == nil {
+		return
+	}
+	roomID := g.state.roomRef().ID
+	members, err := g.membership.LoadMembers(context.Background(), roomID)
+	if err != nil {
+		panic(fmt.Errorf("room: load members %s: %w", roomID, err))
+	}
+	for _, ref := range members {
+		g.state.addMember(ref)
+	}
+}
+
+// Terminate is a passivation hook; membership is DB-authoritative and reloaded
+// on the next activation, so there is nothing to flush here.
 func (g *Grain) Terminate(_ cluster.GrainContext) {}
 
 // ReceiveDefault logs unexpected messages without crashing the grain.
@@ -260,6 +309,14 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 		return joinErrWithRoom(errcode.RoomAlreadyMember, "already a member of this room", room), nil
 	}
 
+	// Persist the transition (membership row + member_joined event, one txn)
+	// before touching in-memory state or fanning out, so a durable-write failure
+	// leaves no cache/timeline drift (fail-closed).
+	evt, err := g.recordJoin(ctx, joiner)
+	if err != nil {
+		return joinErrWithRoom(errcode.InternalError, "failed to record membership", room), nil
+	}
+
 	g.state.addMember(joiner)
 	recipients := g.state.memberIDs()
 	slog.Info(eventRoomMemberJoined,
@@ -274,7 +331,7 @@ func (g *Grain) Join(req *roompb.JoinRequest, ctx cluster.GrainContext) (*roompb
 		"sender_id", userID,
 		"target_count", len(recipients),
 	)
-	g.fanOutNotify(ctx, recipients, buildJoinedEvent(roomRef, joiner), "Join.fanout")
+	g.fanOutNotify(ctx, recipients, buildJoinedEvent(roomRef, joiner, evt), "Join.fanout")
 
 	return &roompb.JoinResponse{Room: room}, nil
 }
@@ -312,6 +369,13 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 		return leaveErr(errcode.RoomNotMember, "not a member of this room"), nil
 	}
 
+	// Persist the transition (row delete + member_left event, one txn) before
+	// mutating in-memory state or fanning out (fail-closed).
+	evt, err := g.recordLeave(ctx, leaver)
+	if err != nil {
+		return leaveErr(errcode.InternalError, "failed to record membership"), nil
+	}
+
 	// Snapshot before removal so the leaver also receives the LEFT event;
 	// leaver carries the cached display name for labeling.
 	recipients := g.state.memberIDs()
@@ -328,9 +392,50 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 		"sender_id", userID,
 		"target_count", len(recipients),
 	)
-	g.fanOutNotify(ctx, recipients, buildLeftEvent(g.state.roomRef(), leaver), "Leave.fanout")
+	g.fanOutNotify(ctx, recipients, buildLeftEvent(g.state.roomRef(), leaver, evt), "Leave.fanout")
 
 	return &roompb.LeaveResponse{}, nil
+}
+
+// recordJoin durably persists a join (membership row + member_joined event in one
+// transaction) and returns the event identity for fan-out. With no membership
+// store wired it is a no-op returning a zero event; production always wires one.
+func (g *Grain) recordJoin(ctx cluster.GrainContext, joiner id.UserRef) (MembershipEvent, error) {
+	if g.membership == nil {
+		return MembershipEvent{}, nil
+	}
+	evt, err := g.membership.RecordJoin(context.Background(), g.state.roomRef().ID, joiner)
+	if err != nil {
+		slog.Error(eventRoomMembershipWriteFailed,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"user_id", joiner.ID(),
+			"transition", "join",
+			"error", err,
+		)
+		return MembershipEvent{}, err
+	}
+	return evt, nil
+}
+
+// recordLeave is recordJoin's mirror: it persists the row delete and member_left
+// event in one transaction.
+func (g *Grain) recordLeave(ctx cluster.GrainContext, leaver id.UserRef) (MembershipEvent, error) {
+	if g.membership == nil {
+		return MembershipEvent{}, nil
+	}
+	evt, err := g.membership.RecordLeave(context.Background(), g.state.roomRef().ID, leaver)
+	if err != nil {
+		slog.Error(eventRoomMembershipWriteFailed,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"user_id", leaver.ID(),
+			"transition", "leave",
+			"error", err,
+		)
+		return MembershipEvent{}, err
+	}
+	return evt, nil
 }
 
 // PostMessage records the message, assigns the server-side timestamp, and

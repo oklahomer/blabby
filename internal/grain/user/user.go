@@ -12,6 +12,7 @@
 package user
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -78,6 +79,11 @@ type Grain struct {
 	// (read-only) on every command this grain routes to a Room grain.
 	directory Directory
 	self      *commonpb.UserRef
+
+	// joinedLoader hydrates the joined-rooms cache from DB-authoritative
+	// membership on activation. Left nil in tests that only exercise in-memory
+	// cache maintenance; production injects it via NewKind.
+	joinedLoader JoinedRoomLoader
 }
 
 // Directory resolves a user's profile (a UserRef of id + display name) from
@@ -94,15 +100,36 @@ type Directory interface {
 	Resolve(userID id.UserID) (id.UserRef, error)
 }
 
+// Option configures a User kind built by NewKind.
+type Option func(*kindConfig)
+
+// kindConfig collects the per-kind collaborators captured into each activation's
+// Grain by NewKind's producer.
+type kindConfig struct {
+	dir          Directory
+	joinedLoader JoinedRoomLoader
+}
+
+// WithJoinedRooms injects the joined-rooms loader. Production wires it (via
+// clusterboot); a grain built without it keeps the joined set in memory only,
+// rebuilt from the user's own commands rather than hydrated on activation.
+func WithJoinedRooms(loader JoinedRoomLoader) Option {
+	return func(c *kindConfig) { c.joinedLoader = loader }
+}
+
 // NewKind registers User grain with a proto.actor cluster, returning a
 // *cluster.Kind that callers pass to cluster.WithKinds(...). The dir argument
 // is the directory each activation seeds its display name from. The default
 // roomClient is built lazily during Init from ctx.Cluster(), avoiding a
 // chicken-and-egg with cluster.New requiring kinds in its config.
-func NewKind(dir Directory) *cluster.Kind {
+func NewKind(dir Directory, opts ...Option) *cluster.Kind {
+	cfg := kindConfig{dir: dir}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	return userpb.NewUserGrainKind(
 		func() userpb.UserGrain {
-			return &Grain{directory: dir}
+			return &Grain{directory: cfg.dir, joinedLoader: cfg.joinedLoader}
 		},
 		passivationTimeout,
 		actor.WithReceiverMiddleware(middleware.GrainLogging("UserGrain")),
@@ -112,13 +139,39 @@ func NewKind(dir Directory) *cluster.Kind {
 // Init prepares an empty state for a freshly activated User grain. When the
 // grain was constructed without an injected roomClient (the production path),
 // a clusterRoomClient is built from ctx.Cluster() so command routing reaches
-// the real Room grain.
+// the real Room grain. The joined-rooms cache is then hydrated from
+// DB-authoritative membership so it survives passivation / node loss.
 func (g *Grain) Init(ctx cluster.GrainContext) {
 	g.state = newUserState()
 	if g.rooms == nil {
 		g.rooms = newClusterRoomClient(ctx.Cluster())
 	}
 	g.self = g.resolveSelf(ctx)
+	g.hydrateJoinedRooms(ctx)
+}
+
+// hydrateJoinedRooms seeds the joined-rooms cache from the source of truth on
+// activation. A transient load failure panics (fail-closed) so the supervisor
+// re-activates rather than serving a stale joined set; a malformed identity
+// degrades to an empty set (the grain still routes commands). With no loader
+// wired (tests exercising only in-memory cache maintenance) it is a no-op.
+func (g *Grain) hydrateJoinedRooms(ctx cluster.GrainContext) {
+	if g.joinedLoader == nil {
+		return
+	}
+	userID, err := id.ParseUserID(ctx.Identity())
+	if err != nil {
+		slog.Warn(eventUserProfileSeedFailed,
+			"grain_type", ctx.Kind(), "grain_id", ctx.Identity(), "reason", "invalid_identity")
+		return
+	}
+	refs, err := g.joinedLoader.ListJoinedRooms(context.Background(), userID)
+	if err != nil {
+		panic(fmt.Errorf("user: hydrate joined rooms %s: %w", userID, err))
+	}
+	for _, ref := range refs {
+		g.state.joinRoom(ref)
+	}
 }
 
 // resolveSelf builds the grain's own UserRef once at activation, seeding the

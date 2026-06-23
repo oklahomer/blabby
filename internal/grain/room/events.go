@@ -14,23 +14,38 @@ import (
 // buildJoinedEvent shapes the NotifyRoomEvent payload sent to every current
 // member when a user joins. room carries the room's reference metadata (the
 // connection renders its public code); joiner carries the subject's id and
-// display name.
-func buildJoinedEvent(room domain.RoomRef, joiner id.UserRef) *userpb.NotifyRoomEventRequest {
-	return &userpb.NotifyRoomEventRequest{
+// display name; evt carries the durable event's id and timestamp.
+func buildJoinedEvent(room domain.RoomRef, joiner id.UserRef, evt MembershipEvent) *userpb.NotifyRoomEventRequest {
+	req := &userpb.NotifyRoomEventRequest{
 		Room:      protoRoomRef(room),
 		User:      protoUserRef(joiner),
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	}
+	applyMembershipEvent(req, evt)
+	return req
 }
 
 // buildLeftEvent shapes the NotifyRoomEvent payload sent to every member of
 // the pre-removal snapshot when a user leaves.
-func buildLeftEvent(room domain.RoomRef, leaver id.UserRef) *userpb.NotifyRoomEventRequest {
-	return &userpb.NotifyRoomEventRequest{
+func buildLeftEvent(room domain.RoomRef, leaver id.UserRef, evt MembershipEvent) *userpb.NotifyRoomEventRequest {
+	req := &userpb.NotifyRoomEventRequest{
 		Room:      protoRoomRef(room),
 		User:      protoUserRef(leaver),
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT,
 	}
+	applyMembershipEvent(req, evt)
+	return req
+}
+
+// applyMembershipEvent stamps the durable event's id and timestamp onto the
+// fan-out payload. A zero event (no membership store wired) leaves the fields
+// unset rather than emitting a placeholder "0" id.
+func applyMembershipEvent(req *userpb.NotifyRoomEventRequest, evt MembershipEvent) {
+	if evt.IsZero() {
+		return
+	}
+	req.EventId = evt.ID.String()
+	req.Timestamp = timestamppb.New(evt.OccurredAt)
 }
 
 // buildForwardMessage shapes the ForwardMessage payload sent to every
