@@ -7,6 +7,26 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # Postgres with PGroonga, mirroring docker-compose, so the database-gated
+    # integration tests (persistence repos + the multi-member membership-durability
+    # test) run in CI rather than being skipped. The schema is applied by a step
+    # below, since a service container cannot mount an init script.
+    services:
+      postgres:
+        image: groonga/pgroonga:4.0.6-alpine-17
+        env:
+          POSTGRES_USER: blabby
+          POSTGRES_PASSWORD: blabby
+          POSTGRES_DB: blabby
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U blabby -d blabby"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      BLABBY_DATABASE_URL: postgres://blabby:blabby@localhost:5432/blabby?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +62,9 @@ jobs:
 
       - name: Spec lint
         run: make spec-lint
+
+      - name: Load database schema
+        run: psql "$BLABBY_DATABASE_URL" -f internal/persistence/schema.sql
 
       - name: Test
         run: make test
