@@ -23,8 +23,8 @@ const (
 	// inputs sit comfortably on one row each.
 	modalWidth = 50
 
-	// maxMailAddressBytes mirrors the server's mail-address byte cap
-	// (internal/gateway/handler.go maxMailAddressBytes). The textinput's
+	// maxMailAddressBytes mirrors the domain mail-address byte cap
+	// (internal/domain.MaxMailAddressBytes). The textinput's
 	// CharLimit counts runes, not bytes, so we re-check by byte length
 	// at submit to keep multi-byte addresses from being rejected only
 	// after the HTTP round-trip.
