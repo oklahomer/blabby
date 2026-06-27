@@ -2,14 +2,20 @@
 // hosting the User and Room grains. It serves no HTTP — the gateway
 // (cmd/gateway) fronts clients and calls these grains across the cluster.
 //
+// It requires a reachable PostgreSQL: grains hydrate room/membership state from
+// it on activation, and the backend acquires a worker-id lease at startup to mint
+// event ids — so it fails fast if the database is down. The connection defaults to
+// the local dev DSN; override with --db-dsn or BLABBY_DATABASE_URL. Start one with
+// `docker compose up -d postgres` (see README / docker-compose.yml).
+//
 // Run with
 //
 //	go run ./cmd/backend
 //
-// and it joins as a single self-contained member with zero external
-// dependencies. Supplying one or more discovery --seeds forms a multi-node
-// cluster; multi-node mode additionally requires an explicit, peer-reachable
-// --advertised-host and a fixed --cluster-port. See docs/multi-node-cluster.md.
+// and it joins as a single member. Supplying one or more discovery --seeds forms a
+// multi-node cluster; multi-node mode additionally requires an explicit,
+// peer-reachable --advertised-host and a fixed --cluster-port. See
+// docs/multi-node-cluster.md.
 package main
 
 import (
