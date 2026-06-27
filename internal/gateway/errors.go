@@ -21,13 +21,14 @@ func httpStatus(code errcode.Code) int {
 		return http.StatusUnauthorized
 	case errcode.RoomNotMember:
 		return http.StatusForbidden
-	case errcode.RoomAlreadyMember:
+	case errcode.RoomAlreadyMember, errcode.EmailAlreadyRegistered, errcode.HandleAlreadyTaken:
 		return http.StatusConflict
 	case errcode.RoomNotFound:
 		return http.StatusNotFound
-	case errcode.RateLimitExceeded:
+	case errcode.RateLimitExceeded, errcode.VerificationRateLimited:
 		return http.StatusTooManyRequests
-	case errcode.InvalidRequest, errcode.MissingField:
+	case errcode.InvalidRequest, errcode.MissingField, errcode.InvalidEmail, errcode.WeakPassword,
+		errcode.VerificationInvalid:
 		return http.StatusBadRequest
 	case errcode.PayloadTooLarge:
 		return http.StatusRequestEntityTooLarge

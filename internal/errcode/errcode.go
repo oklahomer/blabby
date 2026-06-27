@@ -28,20 +28,27 @@ var (
 )
 
 // The error taxonomy. Ranges group related failures: 1xxx authentication,
-// 2xxx room/membership, 3xxx rate limiting, 4xxx validation, 5xxx system.
+// 2xxx room/membership, 3xxx rate limiting, 4xxx validation, 5xxx system,
+// 6xxx account/registration.
 const (
-	AuthInvalidToken   Code = 1001
-	AuthExpiredToken   Code = 1002
-	AuthMissingToken   Code = 1003
-	RoomNotMember      Code = 2001
-	RoomAlreadyMember  Code = 2002
-	RoomNotFound       Code = 2003
-	RateLimitExceeded  Code = 3001
-	InvalidRequest     Code = 4001
-	MissingField       Code = 4002
-	PayloadTooLarge    Code = 4003
-	InternalError      Code = 5001
-	ServiceUnavailable Code = 5002
+	AuthInvalidToken        Code = 1001
+	AuthExpiredToken        Code = 1002
+	AuthMissingToken        Code = 1003
+	RoomNotMember           Code = 2001
+	RoomAlreadyMember       Code = 2002
+	RoomNotFound            Code = 2003
+	RateLimitExceeded       Code = 3001
+	VerificationRateLimited Code = 3002
+	InvalidRequest          Code = 4001
+	MissingField            Code = 4002
+	PayloadTooLarge         Code = 4003
+	InvalidEmail            Code = 4004
+	WeakPassword            Code = 4005
+	InternalError           Code = 5001
+	ServiceUnavailable      Code = 5002
+	EmailAlreadyRegistered  Code = 6001
+	HandleAlreadyTaken      Code = 6002
+	VerificationInvalid     Code = 6003
 )
 
 // status returns the canonical status string and whether c is recognized.
@@ -63,16 +70,28 @@ func (c Code) status() (string, bool) {
 		return "ROOM_NOT_FOUND", true
 	case RateLimitExceeded:
 		return "RATE_LIMIT_EXCEEDED", true
+	case VerificationRateLimited:
+		return "VERIFICATION_RATE_LIMITED", true
 	case InvalidRequest:
 		return "INVALID_REQUEST", true
 	case MissingField:
 		return "MISSING_FIELD", true
 	case PayloadTooLarge:
 		return "PAYLOAD_TOO_LARGE", true
+	case InvalidEmail:
+		return "INVALID_EMAIL", true
+	case WeakPassword:
+		return "WEAK_PASSWORD", true
 	case InternalError:
 		return "INTERNAL_ERROR", true
 	case ServiceUnavailable:
 		return "SERVICE_UNAVAILABLE", true
+	case EmailAlreadyRegistered:
+		return "EMAIL_ALREADY_REGISTERED", true
+	case HandleAlreadyTaken:
+		return "HANDLE_ALREADY_TAKEN", true
+	case VerificationInvalid:
+		return "VERIFICATION_INVALID", true
 	default:
 		return "", false
 	}
