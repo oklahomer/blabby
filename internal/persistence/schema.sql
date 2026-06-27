@@ -46,7 +46,10 @@ END $$;
 -- account, including seeds, carries a real hash.
 CREATE TABLE IF NOT EXISTS service_user (
     id            BIGINT      PRIMARY KEY,
-    public_code   TEXT        NOT NULL UNIQUE,
+    -- The UNIQUE constraint is named explicitly so userrepo's collision
+    -- classifier (publicCodeConstraint) cannot drift from Postgres's implicit
+    -- naming.
+    public_code   TEXT        NOT NULL CONSTRAINT service_user_public_code_key UNIQUE,
     mail_address  TEXT        NOT NULL UNIQUE,
     handle        TEXT        NOT NULL,
     handle_norm   TEXT        NOT NULL UNIQUE,
