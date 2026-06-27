@@ -27,14 +27,25 @@ var ErrUserNotFound = errors.New("userrepo: user not found")
 // that a couple of caller retries always suffice).
 var ErrPublicCodeCollision = errors.New("userrepo: public_code collision")
 
+// ErrMailAddressTaken and ErrHandleTaken report that a Create collided with an
+// existing account's email or handle. Unlike a public_code collision they are not
+// recoverable by retrying — the caller (registration) maps them to the
+// EMAIL_ALREADY_REGISTERED / HANDLE_ALREADY_TAKEN responses.
+var (
+	ErrMailAddressTaken = errors.New("userrepo: mail address already registered")
+	ErrHandleTaken      = errors.New("userrepo: handle already taken")
+)
+
 // uniqueViolation is the SQLSTATE Postgres raises when an INSERT collides with a
-// UNIQUE constraint. publicCodeConstraint names the specific constraint on
-// service_user.public_code (declared explicitly in schema.sql), so only a code
-// clash — not, say, a duplicate email or handle — is classified as a recoverable
-// public_code collision.
+// UNIQUE constraint. The constraint names are declared explicitly in schema.sql,
+// so classifying a violation by name (not by Postgres's implicit naming) maps each
+// duplicate to its specific sentinel — a recoverable public_code clash, or a taken
+// email/handle.
 const (
-	uniqueViolation      = "23505"
-	publicCodeConstraint = "service_user_public_code_key"
+	uniqueViolation       = "23505"
+	publicCodeConstraint  = "service_user_public_code_key"
+	mailAddressConstraint = "service_user_mail_address_key"
+	handleNormConstraint  = "service_user_handle_norm_key"
 )
 
 // userColumns is the fixed projection scanUser expects, in order. status is cast
@@ -61,12 +72,11 @@ func New(ids IDSource) *Repo {
 }
 
 // CreateParams carries the caller-supplied fields of a new account. The UserID and
-// public_code are minted by Create, not supplied. The caller normalizes
-// MailAddress and HandleNorm before calling; the repo stores them verbatim.
+// public_code are minted by Create, not supplied. MailAddress and Handle are
+// already parsed domain values; Create derives the storage strings from them.
 type CreateParams struct {
-	MailAddress  string
-	Handle       string
-	HandleNorm   string
+	MailAddress  domain.MailAddress
+	Handle       domain.Handle
 	DisplayName  string
 	PasswordHash []byte
 	Status       domain.UserStatus
@@ -82,8 +92,9 @@ RETURNING ` + userColumns
 // reported as [ErrPublicCodeCollision] so the caller can re-run the operation (or
 // its enclosing transaction) with a freshly minted code. Retrying in place would
 // be unsafe inside a caller's transaction, where the failed INSERT aborts the
-// transaction until it is rolled back. Any other unique violation — a duplicate
-// email, handle, or minted UserID — is returned as a hard error.
+// transaction until it is rolled back. A duplicate email or handle is reported as
+// [ErrMailAddressTaken] / [ErrHandleTaken]; any other violation (e.g. a duplicate
+// minted UserID on the primary key) is a hard error.
 func (r *Repo) Create(ctx context.Context, q postgres.Querier, params CreateParams) (User, error) {
 	rawID, err := r.ids.Next()
 	if err != nil {
@@ -99,35 +110,31 @@ func (r *Repo) Create(ctx context.Context, q postgres.Querier, params CreatePara
 	}
 
 	user, err := scanUser(q.QueryRow(ctx, insertSQL,
-		userID.Int64(), code.String(), params.MailAddress, params.Handle,
-		params.HandleNorm, params.DisplayName, params.PasswordHash, string(params.Status)))
-	switch {
-	case err == nil:
-		return user, nil
-	case isPublicCodeCollision(err):
-		return User{}, ErrPublicCodeCollision
-	default:
-		return User{}, fmt.Errorf("userrepo: create: %w", err)
+		userID.Int64(), code.String(), params.MailAddress.String(), params.Handle.Display(),
+		params.Handle.Normalized(), params.DisplayName, params.PasswordHash, string(params.Status)))
+	if err != nil {
+		return User{}, classifyCreateError(err)
 	}
+	return user, nil
 }
 
 const findByEmailSQL = `SELECT ` + userColumns + ` FROM service_user WHERE mail_address = $1`
 
-// FindByEmail resolves a normalized email to its account, regardless of status, so
+// FindByEmail resolves an email to its account, regardless of status, so
 // login can verify credentials (and surface a pending-account hint) and
 // registration can detect a duplicate. It returns ErrUserNotFound when no row
-// carries the email. The caller must pass the same normalization used at insert.
-func (r *Repo) FindByEmail(ctx context.Context, q postgres.Querier, mail string) (User, error) {
-	return r.findOne(ctx, q, findByEmailSQL, mail)
+// carries the email.
+func (r *Repo) FindByEmail(ctx context.Context, q postgres.Querier, mail domain.MailAddress) (User, error) {
+	return r.findOne(ctx, q, findByEmailSQL, mail.String())
 }
 
 const findByHandleNormSQL = `SELECT ` + userColumns + ` FROM service_user WHERE handle_norm = $1`
 
-// FindByHandleNorm resolves a normalized handle to its account, regardless of
-// status — the registration duplicate-handle check. It returns ErrUserNotFound
-// when the handle is free.
-func (r *Repo) FindByHandleNorm(ctx context.Context, q postgres.Querier, handleNorm string) (User, error) {
-	return r.findOne(ctx, q, findByHandleNormSQL, handleNorm)
+// FindByHandle resolves a handle to its account, regardless of status — the
+// registration duplicate-handle check. It returns ErrUserNotFound when the handle
+// is free.
+func (r *Repo) FindByHandle(ctx context.Context, q postgres.Querier, handle domain.Handle) (User, error) {
+	return r.findOne(ctx, q, findByHandleNormSQL, handle.Normalized())
 }
 
 const findByIDSQL = `SELECT ` + userColumns + ` FROM service_user WHERE id = $1`
@@ -206,11 +213,22 @@ func (r *Repo) SetPasswordHash(ctx context.Context, q postgres.Querier, userID i
 	return nil
 }
 
-// isPublicCodeCollision reports whether err is (or wraps) a Postgres
-// unique_violation on the public_code constraint specifically. Any other unique
-// violation (a duplicate email, handle, or primary-key clash) is a different fault
-// and must not be retried as a code collision.
-func isPublicCodeCollision(err error) bool {
+// classifyCreateError maps a failed Create INSERT to the sentinel for the specific
+// UNIQUE constraint it violated — a recoverable public_code collision, a taken
+// email, or a taken handle — by inspecting the constraint name. Any other error
+// (including a primary-key clash on a duplicate minted UserID) is wrapped as a hard
+// error so it is never mistaken for a recoverable or expected duplicate.
+func classifyCreateError(err error) error {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == publicCodeConstraint
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+		switch pgErr.ConstraintName {
+		case publicCodeConstraint:
+			return ErrPublicCodeCollision
+		case mailAddressConstraint:
+			return ErrMailAddressTaken
+		case handleNormConstraint:
+			return ErrHandleTaken
+		}
+	}
+	return fmt.Errorf("userrepo: create: %w", err)
 }

@@ -38,14 +38,13 @@ func TestUserRepoIntegration(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM service_user WHERE id = $1", rawID)
 	})
-	mail := fmt.Sprintf("itest-%d@example.com", rawID)
-	handleNorm := fmt.Sprintf("itest_%d", rawID)
+	mail := mustMailAddress(t, fmt.Sprintf("itest-%d@example.com", rawID))
+	handle := mustHandle(t, fmt.Sprintf("itest_%d", rawID))
 
 	repo := New(&stubIDSource{id: rawID})
 	created, err := repo.Create(ctx, pool, CreateParams{
 		MailAddress:  mail,
-		Handle:       handleNorm,
-		HandleNorm:   handleNorm,
+		Handle:       handle,
 		DisplayName:  "Integration User",
 		PasswordHash: []byte("$2a$12$integration.placeholder.hash"),
 		Status:       domain.UserStatusPending,
@@ -71,12 +70,12 @@ func TestUserRepoIntegration(t *testing.T) {
 	if byEmail.ID != created.ID {
 		t.Fatalf("FindByEmail id = %d, want %d", byEmail.ID.Int64(), created.ID.Int64())
 	}
-	byHandle, err := repo.FindByHandleNorm(ctx, pool, handleNorm)
+	byHandle, err := repo.FindByHandle(ctx, pool, handle)
 	if err != nil {
-		t.Fatalf("FindByHandleNorm: %v", err)
+		t.Fatalf("FindByHandle: %v", err)
 	}
 	if byHandle.ID != created.ID {
-		t.Fatalf("FindByHandleNorm id = %d, want %d", byHandle.ID.Int64(), created.ID.Int64())
+		t.Fatalf("FindByHandle id = %d, want %d", byHandle.ID.Int64(), created.ID.Int64())
 	}
 	byID, err := repo.FindByID(ctx, pool, created.ID)
 	if err != nil {
@@ -108,7 +107,7 @@ func TestUserRepoIntegration(t *testing.T) {
 	}
 
 	// The seed account is loginable by email and carries its fixed id.
-	alice, err := repo.FindByEmail(ctx, pool, "alice@example.com")
+	alice, err := repo.FindByEmail(ctx, pool, mustMailAddress(t, "alice@example.com"))
 	if err != nil {
 		t.Fatalf("FindByEmail(seed alice): %v", err)
 	}
@@ -121,7 +120,7 @@ func TestUserRepoIntegration(t *testing.T) {
 	if _, err := repo.ResolveByPublicCode(ctx, pool, other); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("ResolveByPublicCode(unknown) err = %v, want ErrUserNotFound", err)
 	}
-	if _, err := repo.FindByEmail(ctx, pool, "nobody@example.com"); !errors.Is(err, ErrUserNotFound) {
+	if _, err := repo.FindByEmail(ctx, pool, mustMailAddress(t, "nobody@example.com")); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("FindByEmail(unknown) err = %v, want ErrUserNotFound", err)
 	}
 }

@@ -77,7 +77,7 @@ func (d *UserRepoDirectory) VerifyCredentials(ctx context.Context, mailAddress, 
 		return auth.VerifiedUser{}, auth.ErrInvalidCredentials
 	}
 
-	user, err := d.repo.FindByEmail(ctx, d.pool, addr.String())
+	user, err := d.repo.FindByEmail(ctx, d.pool, addr)
 	if errors.Is(err, userrepo.ErrUserNotFound) {
 		// Compare against the dummy hash so a missing account is not faster to
 		// reject than a wrong password. The result is intentionally discarded.

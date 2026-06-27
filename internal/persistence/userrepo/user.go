@@ -27,9 +27,8 @@ import (
 type User struct {
 	ID           id.UserID
 	PublicCode   id.PublicCode
-	MailAddress  string
-	Handle       string
-	HandleNorm   string
+	MailAddress  domain.MailAddress
+	Handle       domain.Handle
 	DisplayName  string
 	PasswordHash []byte
 	Status       domain.UserStatus
@@ -55,10 +54,9 @@ type userRow struct {
 	updatedAt    time.Time
 }
 
-// toDomain parses a raw row into a User, enforcing the id and status invariants at
-// the boundary. A row that violates them (non-positive id, malformed public_code,
-// unknown status) is a data-integrity error surfaced to the caller rather than
-// silently trusted.
+// toDomain parses a raw row into a User, enforcing row invariants at the boundary.
+// A row that violates them is a data-integrity error surfaced to the caller rather
+// than silently trusted.
 func (ur userRow) toDomain() (User, error) {
 	userID, err := id.NewUserID(ur.id)
 	if err != nil {
@@ -72,12 +70,22 @@ func (ur userRow) toDomain() (User, error) {
 	if err != nil {
 		return User{}, fmt.Errorf("userrepo: row status: %w", err)
 	}
+	mail, err := domain.NewMailAddress(ur.mailAddress)
+	if err != nil {
+		return User{}, fmt.Errorf("userrepo: row mail_address: %w", err)
+	}
+	handle, err := domain.NewHandle(ur.handle)
+	if err != nil {
+		return User{}, fmt.Errorf("userrepo: row handle: %w", err)
+	}
+	if ur.handleNorm != handle.Normalized() {
+		return User{}, fmt.Errorf("userrepo: row handle_norm: got %q, want %q", ur.handleNorm, handle.Normalized())
+	}
 	return User{
 		ID:           userID,
 		PublicCode:   code,
-		MailAddress:  ur.mailAddress,
-		Handle:       ur.handle,
-		HandleNorm:   ur.handleNorm,
+		MailAddress:  mail,
+		Handle:       handle,
 		DisplayName:  ur.displayName,
 		PasswordHash: ur.passwordHash,
 		Status:       status,
