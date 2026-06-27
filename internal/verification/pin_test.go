@@ -76,6 +76,12 @@ func TestHash_RejectsZeroValue(t *testing.T) {
 	}
 }
 
+func TestHash_RejectsNonCanonicalValue(t *testing.T) {
+	if _, err := (PIN{value: " 123456 "}).Hash(); !errors.Is(err, ErrInvalidPIN) {
+		t.Fatalf("non-canonical Hash err = %v, want ErrInvalidPIN", err)
+	}
+}
+
 func TestHash_Cost(t *testing.T) {
 	pin, err := NewPIN()
 	if err != nil {

@@ -55,13 +55,8 @@ func NewPIN() (PIN, error) {
 // challenge; matching a PIN against a hash is [Verify]'s job.
 func ParsePIN(raw string) (PIN, error) {
 	trimmed := strings.TrimSpace(raw)
-	if len(trimmed) != pinDigits {
-		return PIN{}, ErrInvalidPIN
-	}
-	for _, r := range trimmed {
-		if r < '0' || r > '9' {
-			return PIN{}, ErrInvalidPIN
-		}
+	if err := validatePINDigits(trimmed); err != nil {
+		return PIN{}, err
 	}
 	return PIN{value: trimmed}, nil
 }
@@ -69,10 +64,29 @@ func ParsePIN(raw string) (PIN, error) {
 // String returns the canonical zero-padded digits. The zero value returns "".
 func (p PIN) String() string { return p.value }
 
+// validate rejects zero-value and otherwise non-canonical PINs. It is the single
+// guard the credential-touching operations (Hash and the senders) share, so a
+// PIN{} can never be hashed, logged, or emailed.
+func (p PIN) validate() error {
+	return validatePINDigits(p.value)
+}
+
+func validatePINDigits(value string) error {
+	if len(value) != pinDigits {
+		return ErrInvalidPIN
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return ErrInvalidPIN
+		}
+	}
+	return nil
+}
+
 // Hash returns a bcrypt hash of the PIN for storage at rest, so a database dump
 // never exposes the plaintext PIN.
 func (p PIN) Hash() ([]byte, error) {
-	if _, err := ParsePIN(p.value); err != nil {
+	if err := p.validate(); err != nil {
 		return nil, err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(p.value), pinHashCost)
