@@ -95,7 +95,7 @@ func run(dbCfg postgres.Config, cc clusterboot.Config) error {
 	// timeline event whose id is a Snowflake. The worker-lease manager acquires a
 	// fenced worker id at boot (from the worker_lease table on this same pool) and
 	// mints only while it holds the lease, so two members never share a worker id.
-	leaseManager, err := workerlease.NewManager(workerlease.NewRepo(pool), leaseOwner())
+	leaseManager, err := workerlease.NewManager(workerlease.NewRepo(pool), workerlease.HostPIDOwner())
 	if err != nil {
 		return fmt.Errorf("build worker-lease manager: %w", err)
 	}
@@ -134,16 +134,4 @@ func run(dbCfg postgres.Config, cc clusterboot.Config) error {
 	<-ctx.Done()
 	slog.Info("server.shutdown", "reason", "signal")
 	return nil
-}
-
-// leaseOwner identifies this process in the worker_lease table for observability.
-// It is not load-bearing for correctness — the per-lease fencing token, not the
-// owner, is what keeps two processes from sharing a worker id — so a best-effort
-// hostname/pid is enough.
-func leaseOwner() string {
-	host, err := os.Hostname()
-	if err != nil || host == "" {
-		host = "unknown"
-	}
-	return fmt.Sprintf("%s/%d", host, os.Getpid())
 }
