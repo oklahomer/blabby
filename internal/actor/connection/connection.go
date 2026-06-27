@@ -400,6 +400,9 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*id.U
 		if errors.Is(err, auth.ErrTokenExpired) {
 			return nil, &authRejectionError{Code: errcode.AuthExpiredToken, Message: "token has expired", Reason: "expired"}
 		}
+		if errors.Is(err, auth.ErrIdentityUnavailable) {
+			return nil, &authRejectionError{Code: errcode.ServiceUnavailable, Message: "authentication temporarily unavailable", Reason: "unavailable"}
+		}
 		return nil, &authRejectionError{Code: errcode.AuthInvalidToken, Message: "invalid token", Reason: "invalid"}
 	}
 

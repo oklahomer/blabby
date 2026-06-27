@@ -27,7 +27,6 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
-	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
@@ -327,7 +326,7 @@ func newDatabaseDeps(t *testing.T, pool *pgxpool.Pool, member int) GrainDeps {
 	t.Cleanup(manager.Stop)
 
 	return GrainDeps{
-		Directory:   auth.NewInMemoryUserStore(),
+		Directory:   user.NewRepoDirectory(pool),
 		RoomLoader:  room.NewRoomRepoLoader(pool),
 		Membership:  room.NewMembershipStore(pool, manager),
 		JoinedRooms: user.NewJoinedRoomLoader(pool),

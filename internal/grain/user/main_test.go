@@ -1,6 +1,7 @@
 package user_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -61,7 +62,7 @@ const seededDisplayName = "Alice Example"
 // assert the seeded name flows into the Room grain.
 type fakeDirectory struct{}
 
-func (fakeDirectory) Resolve(uid id.UserID) (id.UserRef, error) {
+func (fakeDirectory) Resolve(_ context.Context, uid id.UserID) (id.UserRef, error) {
 	return id.NewUserRef(uid, seededDisplayName)
 }
 

@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	maxLoginBodyBytes = 1 << 20 // 1 MB
-	maxUsernameBytes  = 64
-	maxPasswordBytes  = 256
+	maxLoginBodyBytes   = 1 << 20 // 1 MB
+	maxMailAddressBytes = 254     // RFC 5321 maximum email length
+	maxPasswordBytes    = 256
 )
 
 // endpointLogin is the mux pattern for handleLogin. Defined alongside
@@ -22,10 +22,12 @@ const (
 // string the handler is registered under.
 const endpointLogin = "POST /login"
 
-// LoginRequest is the JSON payload accepted by POST /login.
+// LoginRequest is the JSON payload accepted by POST /login. Login identity is the
+// account's email; the issued token carries the user's U… public_code, never the
+// internal numeric id.
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	MailAddress string `json:"mail_address"`
+	Password    string `json:"password"`
 }
 
 // LoginResponse is the JSON payload returned for a successful login.
@@ -49,26 +51,32 @@ func (g *Gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Password) == "" {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("username and password are required"))
+	if strings.TrimSpace(req.MailAddress) == "" || strings.TrimSpace(req.Password) == "" {
+		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("mail address and password are required"))
 		return
 	}
-	if len(req.Username) > maxUsernameBytes || len(req.Password) > maxPasswordBytes {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("username or password exceeds maximum length"))
+	if len(req.MailAddress) > maxMailAddressBytes || len(req.Password) > maxPasswordBytes {
+		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("mail address or password exceeds maximum length"))
 		return
 	}
 
 	result, err := g.auth.Authenticate(r.Context(), auth.AuthParams{
-		Username: req.Username,
-		Password: req.Password,
+		MailAddress: req.MailAddress,
+		Password:    req.Password,
 	})
 	if err != nil {
-		// Log server-side so operators can distinguish bad credentials from
-		// infrastructure failures. Never log the username or password.
-		slog.Warn("login authentication failed", "error", err.Error())
-		// All authentication failures are reported as invalid credentials to
-		// prevent user enumeration.
-		WriteErrorResponse(w, http.StatusUnauthorized, ErrAuthInvalidToken("invalid credentials"))
+		// A credential rejection (unknown email, wrong password, non-active
+		// account) is reported uniformly as invalid credentials to prevent user
+		// enumeration. An infrastructure failure (e.g. the account store is
+		// unreachable) is a 500, not a misleading 401. Never log the mail address
+		// or password.
+		if errors.Is(err, auth.ErrInvalidCredentials) {
+			slog.Warn("login rejected", "reason", "invalid_credentials")
+			WriteErrorResponse(w, http.StatusUnauthorized, ErrAuthInvalidToken("invalid credentials"))
+			return
+		}
+		slog.Error("login authentication error", "error", err.Error())
+		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("authentication unavailable"))
 		return
 	}
 	if result == nil || result.Token == "" {

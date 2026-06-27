@@ -128,6 +128,17 @@ func TestAuthMiddleware(t *testing.T) {
 			wantDownstream: false,
 		},
 		{
+			name:       "identity-unavailable sentinel returns 503 with code 5002",
+			setHeader:  true,
+			authHeader: "Bearer valid-but-backend-down",
+			validateTokenFn: func(ctx context.Context, token string) (*auth.Claims, error) {
+				return nil, fmt.Errorf("%w: db unreachable", auth.ErrIdentityUnavailable)
+			},
+			wantStatus:     http.StatusServiceUnavailable,
+			wantErrorCode:  errcode.ServiceUnavailable,
+			wantDownstream: false,
+		},
+		{
 			name:       "generic non-sentinel error falls back to code 1001",
 			setHeader:  true,
 			authHeader: "Bearer bogus",

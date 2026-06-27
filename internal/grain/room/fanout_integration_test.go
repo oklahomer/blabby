@@ -1,6 +1,7 @@
 package room_test
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ import (
 // real grains to the connection.
 type stubDirectory struct{ name string }
 
-func (d stubDirectory) Resolve(uid id.UserID) (id.UserRef, error) {
+func (d stubDirectory) Resolve(_ context.Context, uid id.UserID) (id.UserRef, error) {
 	return id.NewUserRef(uid, d.name)
 }
 

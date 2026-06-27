@@ -19,11 +19,13 @@ const bearerPrefix = "Bearer "
 // next. Failures are returned via the gateway error envelope:
 //   - missing/malformed Authorization header → 401 / 1003 (AUTH_MISSING_TOKEN)
 //   - expired token → 401 / 1002 (AUTH_EXPIRED_TOKEN)
+//   - identity backend unavailable → 503 / 5002 (SERVICE_UNAVAILABLE)
 //   - any other validation failure → 401 / 1001 (AUTH_INVALID_TOKEN)
 //
 // The token, the Authorization header value, and the underlying authenticator
 // error string are never written to logs — only a coarse reason classification
-// (missing_or_malformed_header / expired / invalid) and request metadata.
+// (missing_or_malformed_header / expired / identity_unavailable / invalid) and
+// request metadata.
 func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := extractBearerToken(r.Header.Get("Authorization"))
@@ -51,6 +53,18 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 				)
 				WriteErrorResponse(w, http.StatusUnauthorized,
 					ErrAuthExpiredToken("token has expired"))
+			case errors.Is(err, auth.ErrIdentityUnavailable):
+				// The token is well-formed but its identity could not be resolved
+				// because the account backend is unavailable. Answer 503 (retry) so
+				// a transient outage does not force clients to discard valid tokens.
+				slog.Error("auth middleware: identity backend unavailable",
+					"method", r.Method,
+					"path", r.URL.Path,
+					"reason", "identity_unavailable",
+					"remote_addr", r.RemoteAddr,
+				)
+				WriteErrorResponse(w, http.StatusServiceUnavailable,
+					ErrServiceUnavailable("authentication temporarily unavailable"))
 			default:
 				slog.Warn("auth middleware rejected request",
 					"method", r.Method,
