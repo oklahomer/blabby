@@ -12,12 +12,12 @@
 // httptest.Server.
 package api
 
-// LoginRequest mirrors internal/gateway/handler.go LoginRequest. The
-// server treats both fields as required and trims whitespace before
-// authenticating.
+// LoginRequest mirrors internal/gateway/handler.go LoginRequest. Login identity
+// is the account email; the server treats both fields as required and trims
+// whitespace before authenticating.
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	MailAddress string `json:"mail_address"`
+	Password    string `json:"password"`
 }
 
 // LoginResponse mirrors internal/gateway/handler.go LoginResponse for

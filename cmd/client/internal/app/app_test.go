@@ -181,14 +181,14 @@ func TestHappyPathOpensChromeWithProfilePopulated(t *testing.T) {
 		return strings.Contains(string(out), "Sign in to blabby")
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
 
-	typeText(tm, "rina")
+	typeText(tm, "rina@example.com")
 	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
 	typeText(tm, "hunter2")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
 
 	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 		s := string(out)
-		return strings.Contains(s, "u-rina-1") && strings.Contains(s, "rina")
+		return strings.Contains(s, "u-rina-1") && strings.Contains(s, "rina@example.com")
 	}, teatest.WithCheckInterval(100*time.Millisecond), teatest.WithDuration(5*time.Second))
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -229,7 +229,7 @@ func TestLoginRejectedShowsInlineError(t *testing.T) {
 		return strings.Contains(string(out), "Sign in to blabby")
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
 
-	typeText(tm, "rina")
+	typeText(tm, "rina@example.com")
 	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
 	typeText(tm, "wrong")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
@@ -260,7 +260,7 @@ func TestWSAuthErrorClosesAndRefocusesPassword(t *testing.T) {
 		return strings.Contains(string(out), "Sign in to blabby")
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
 
-	typeText(tm, "rina")
+	typeText(tm, "rina@example.com")
 	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
 	typeText(tm, "hunter2")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
@@ -272,8 +272,8 @@ func TestWSAuthErrorClosesAndRefocusesPassword(t *testing.T) {
 	// After rejection: send a marker keystroke and verify that
 	//   (a) password is the focused field (EchoPassword masks it),
 	//   (b) the marker never leaks verbatim into any frame.
-	// If the test regresses to focusing the username, the literal
-	// 'Z' would render in the username row and this would catch it.
+	// If the test regresses to focusing the email, the literal
+	// 'Z' would render in the email row and this would catch it.
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Z'}})
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))

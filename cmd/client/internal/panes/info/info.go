@@ -11,14 +11,14 @@ import (
 	"github.com/oklahomer/blabby/cmd/client/internal/ui"
 )
 
-// State holds the values the Info pane renders. Username and UserID
+// State holds the values the Info pane renders. Email and UserID
 // are blank pre-auth and populated when the WS handshake completes;
 // Server is set from the --server flag at launch.
 type State struct {
-	Username string
-	UserID   string
-	Server   string
-	Now      time.Time
+	Email  string
+	UserID string
+	Server string
+	Now    time.Time
 }
 
 // View renders Profile (User / ID / Server) and Time (clock + date)
@@ -30,7 +30,7 @@ func View(s State, _ bool, _, _ int) string {
 		lipgloss.Left,
 		ui.Title().Render("Profile"),
 		"──────",
-		ui.Label().Render("User:   ")+s.Username,
+		ui.Label().Render("Email:  ")+s.Email,
 		ui.Label().Render("ID:     ")+s.UserID,
 		ui.Label().Render("Server: ")+s.Server,
 	)

@@ -23,15 +23,15 @@ const (
 	// inputs sit comfortably on one row each.
 	modalWidth = 50
 
-	// maxUsernameBytes mirrors the server's username byte cap
-	// (internal/gateway/handler.go maxUsernameBytes). The textinput's
+	// maxMailAddressBytes mirrors the server's mail-address byte cap
+	// (internal/gateway/handler.go maxMailAddressBytes). The textinput's
 	// CharLimit counts runes, not bytes, so we re-check by byte length
-	// at submit to keep multi-byte usernames from being rejected only
+	// at submit to keep multi-byte addresses from being rejected only
 	// after the HTTP round-trip.
-	maxUsernameBytes = 64
-	maxPasswordBytes = 256
+	maxMailAddressBytes = 254
+	maxPasswordBytes    = 256
 
-	usernameSlot = 0
+	emailSlot    = 0
 	passwordSlot = 1
 )
 
@@ -52,7 +52,7 @@ const (
 // root Model wires in api.LoginCmd; injecting it via a function
 // pointer (rather than reaching into api directly) keeps the login
 // package free of HTTP concerns and trivially unit-testable.
-type Submitter func(username, password string) tea.Cmd
+type Submitter func(email, password string) tea.Cmd
 
 // Model is the login modal state. It satisfies modal.Modal.
 type Model struct {
@@ -65,22 +65,22 @@ type Model struct {
 	submit   Submitter
 }
 
-// New constructs a Model with the username field focused and the
+// New constructs a Model with the email field focused and the
 // password field masked. submit is invoked when the user presses
 // enter with both fields non-empty. server is rendered into the
-// "Cannot reach server at {server}" headline (AC #12) so the user
-// sees which endpoint the client could not reach.
+// "Cannot reach server at {server}" headline so the user sees which
+// endpoint the client could not reach.
 func New(submit Submitter, server string) Model {
-	username := textinput.New()
-	username.Placeholder = "username"
-	username.Prompt = ""
-	username.Width = modalWidth - 14
+	email := textinput.New()
+	email.Placeholder = "email"
+	email.Prompt = ""
+	email.Width = modalWidth - 14
 	// CharLimit is a rune count; the server enforces a byte cap of
-	// maxUsernameBytes. We allow the user to type up to that many
-	// runes here (so single-byte usernames feel natural) and re-check
-	// by bytes at submit.
-	username.CharLimit = maxUsernameBytes
-	username.Focus()
+	// maxMailAddressBytes. We allow the user to type up to that many
+	// runes here (so short addresses feel natural) and re-check by
+	// bytes at submit.
+	email.CharLimit = maxMailAddressBytes
+	email.Focus()
 
 	password := textinput.New()
 	password.Placeholder = "password"
@@ -91,8 +91,8 @@ func New(submit Submitter, server string) Model {
 	password.EchoCharacter = '*'
 
 	return Model{
-		inputs:  [2]textinput.Model{username, password},
-		focused: usernameSlot,
+		inputs:  [2]textinput.Model{email, password},
+		focused: emailSlot,
 		server:  server,
 		submit:  submit,
 	}
@@ -140,7 +140,7 @@ func (m Model) View(_, _ int) string {
 	body := []string{
 		title,
 		"",
-		ui.Label().Render("Username:  ") + m.inputs[usernameSlot].View(),
+		ui.Label().Render("Email:     ") + m.inputs[emailSlot].View(),
 		ui.Label().Render("Password:  ") + m.inputs[passwordSlot].View(),
 	}
 
@@ -181,24 +181,24 @@ func (m Model) SetConnecting() Model {
 // headline and detail rows. Use this for entry points that bypass
 // the api.* transport messages (e.g., re-opening the modal after a
 // WebSocket disconnect with a custom "Connection lost" headline).
-// The username field is always preserved; the password is cleared
+// The email field is always preserved; the password is cleared
 // and refocused so the user can retype it directly.
 func (m Model) ShowError(headline, detail string) Model {
 	m.phase = phaseIdle
 	m.headline = headline
 	m.detail = detail
 	m.inputs[passwordSlot].SetValue("")
-	m.inputs[usernameSlot].Blur()
+	m.inputs[emailSlot].Blur()
 	m.inputs[passwordSlot].Focus()
 	m.focused = passwordSlot
 	return m
 }
 
-// PrefillUsername populates the username field. Used when re-opening
-// the modal after a session drop so the user does not have to retype
-// the username they were just signed in as.
-func (m Model) PrefillUsername(username string) Model {
-	m.inputs[usernameSlot].SetValue(username)
+// PrefillEmail populates the email field. Used when re-opening the
+// modal after a session drop so the user does not have to retype the
+// email they were just signed in as.
+func (m Model) PrefillEmail(email string) Model {
+	m.inputs[emailSlot].SetValue(email)
 	return m
 }
 
@@ -227,25 +227,25 @@ func (m Model) handleKey(k tea.KeyMsg) (modal.Modal, tea.Cmd) {
 	case "shift+tab", "up":
 		return m.shiftFocus(-1), nil
 	case "enter":
-		username := strings.TrimSpace(m.inputs[usernameSlot].Value())
+		email := strings.TrimSpace(m.inputs[emailSlot].Value())
 		password := m.inputs[passwordSlot].Value()
-		if username == "" || password == "" {
-			m.headline = "Username and password are required"
+		if email == "" || password == "" {
+			m.headline = "Email and password are required"
 			m.detail = ""
 			return m, nil
 		}
 		// Server enforces byte limits; re-check here so multi-byte
 		// runes surface a friendlier error than the round-tripped
 		// "Invalid request".
-		if len(username) > maxUsernameBytes || len(password) > maxPasswordBytes {
-			m.headline = "Username or password is too long"
+		if len(email) > maxMailAddressBytes || len(password) > maxPasswordBytes {
+			m.headline = "Email or password is too long"
 			m.detail = ""
 			return m, nil
 		}
 		m.phase = phaseSigningIn
 		m.headline = ""
 		m.detail = ""
-		return m, m.submit(username, password)
+		return m, m.submit(email, password)
 	}
 
 	updated, cmd := m.inputs[m.focused].Update(k)
@@ -271,8 +271,8 @@ func (m Model) shiftFocus(delta int) Model {
 // handleRejection puts the modal back into editable mode with the
 // supplied error text, clears the password field, and focuses
 // password so the user can retype. Keeps whatever the user had
-// typed in the username field — they just had a bad password or a
-// transient transport error and shouldn't have to retype the user.
+// typed in the email field — they just had a bad password or a
+// transient transport error and shouldn't have to retype the email.
 func (m Model) handleRejection(headline, detail string) Model {
 	return m.ShowError(headline, detail)
 }

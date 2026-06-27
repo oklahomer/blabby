@@ -56,7 +56,7 @@ func Error() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(ColorError)
 }
 
-// Label returns the style used for labelled rows (User:, ID:, Server:).
+// Label returns the style used for labelled rows.
 func Label() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(ColorAccent)
 }

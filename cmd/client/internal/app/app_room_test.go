@@ -171,7 +171,7 @@ func driveLogin(t *testing.T, tm *teatest.TestModel) {
 	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 		return strings.Contains(string(out), "Sign in to blabby")
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
-	typeText(tm, "rina")
+	typeText(tm, "rina@example.com")
 	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
 	typeText(tm, "hunter2")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
@@ -215,7 +215,7 @@ func TestRoomSearchHappyPathJoinFlow(t *testing.T) {
 		// After the modal closes, the Rooms pane renders "› General"
 		// (the cursor row, resolved from the in-session name cache)
 		// and the Main pane title also reads "General". Wait for both.
-		return strings.Contains(s, "› General") && strings.Contains(s, "rina")
+		return strings.Contains(s, "› General") && strings.Contains(s, "rina@example.com")
 	}, teatest.WithCheckInterval(100*time.Millisecond), teatest.WithDuration(5*time.Second))
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})

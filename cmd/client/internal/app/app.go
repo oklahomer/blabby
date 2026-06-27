@@ -47,7 +47,7 @@ type Model struct {
 
 	// session state populated after the WS handshake succeeds
 	token             string
-	username          string
+	email             string
 	userID            string
 	conn              *websocket.Conn
 	sessionGeneration api.SessionGeneration
@@ -119,8 +119,8 @@ func (m Model) Init() tea.Cmd {
 // HTTP login Cmd into the modal without leaking server-URL state
 // across packages.
 func (m Model) loginSubmitter() login.Submitter {
-	return func(username, password string) tea.Cmd {
-		return api.LoginCmd(m.httpClient, m.server.String(), username, password, api.DefaultLoginTimeout)
+	return func(email, password string) tea.Cmd {
+		return api.LoginCmd(m.httpClient, m.server.String(), email, password, api.DefaultLoginTimeout)
 	}
 }
 
@@ -174,7 +174,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case api.LoginSucceeded:
 		m.token = v.Token
-		m.username = v.Username
+		m.email = v.Email
 		m.sessionGeneration++
 		nextModal, _ := m.advanceLoginToConnecting()
 		m.modal = nextModal
@@ -201,7 +201,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.conn = v.Conn
 		m.userID = v.UserID
-		m.infoState.Username = m.username
+		m.infoState.Email = m.email
 		m.infoState.UserID = m.userID
 		m.modal = nil
 		m.focus = focusRooms
@@ -385,12 +385,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.Generation != m.sessionGeneration {
 			return m, nil
 		}
-		previousUsername := m.username
+		previousEmail := m.email
 		m.conn = nil
 		m.token = ""
-		m.username = ""
+		m.email = ""
 		m.userID = ""
-		m.infoState.Username = ""
+		m.infoState.Email = ""
 		m.infoState.UserID = ""
 		m.activeRoomID = ""
 		m.nameForID = nil
@@ -400,7 +400,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages = nil
 		m.composer = textinput.Model{}
 		m.mainError = ""
-		m.modal = m.openLoginModalWithError("Connection lost — please sign in again", previousUsername)
+		m.modal = m.openLoginModalWithError("Connection lost — please sign in again", previousEmail)
 		return m, m.modal.Init()
 
 	case tea.QuitMsg:
@@ -518,16 +518,16 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleSessionExpiry discards the current JWT, closes the WebSocket
 // with a normal-closure frame, and reopens the login modal with the
-// "Session expired" headline and the prior username pre-filled. Mirrors
+// "Session expired" headline and the prior email pre-filled. Mirrors
 // the WSDisconnected recovery path.
 func (m Model) handleSessionExpiry() (tea.Model, tea.Cmd) {
-	previousUsername := m.username
+	previousEmail := m.email
 	api.CloseGracefully(m.conn)
 	m.conn = nil
 	m.token = ""
-	m.username = ""
+	m.email = ""
 	m.userID = ""
-	m.infoState.Username = ""
+	m.infoState.Email = ""
 	m.infoState.UserID = ""
 	m.activeRoomID = ""
 	m.nameForID = nil
@@ -537,7 +537,7 @@ func (m Model) handleSessionExpiry() (tea.Model, tea.Cmd) {
 	m.messages = nil
 	m.composer = textinput.Model{}
 	m.mainError = ""
-	m.modal = m.openLoginModalWithError("Session expired — please sign in again", previousUsername)
+	m.modal = m.openLoginModalWithError("Session expired — please sign in again", previousEmail)
 	return m, m.modal.Init()
 }
 
@@ -595,13 +595,13 @@ func (m Model) advanceLoginToConnecting() (modal.Modal, tea.Cmd) {
 }
 
 // openLoginModalWithError opens a fresh login modal with the given
-// headline pre-populated and the username field pre-filled from the
+// headline pre-populated and the email field pre-filled from the
 // last-known session. Used when the WS connection drops and the
 // user has to re-authenticate from scratch.
-func (m Model) openLoginModalWithError(headline string, prefillUsername string) modal.Modal {
+func (m Model) openLoginModalWithError(headline, prefillEmail string) modal.Modal {
 	base := login.New(m.loginSubmitter(), m.server.String())
-	if prefillUsername != "" {
-		base = base.PrefillUsername(prefillUsername)
+	if prefillEmail != "" {
+		base = base.PrefillEmail(prefillEmail)
 	}
 	return base.ShowError(headline, "")
 }

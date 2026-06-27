@@ -73,7 +73,7 @@ func TestUpdateFocusInterpretedOnlyWhenNoModal(t *testing.T) {
 
 func TestUpdateLoginSucceededAdvancesToConnecting(t *testing.T) {
 	m := makeModel(t)
-	next, cmd := m.Update(api.LoginSucceeded{Token: "fake.jwt.tok", Username: "rina"})
+	next, cmd := m.Update(api.LoginSucceeded{Token: "fake.jwt.tok", Email: "rina@example.com"})
 	if cmd == nil {
 		t.Fatal("expected DialAndAuthCmd to fire")
 	}
@@ -81,8 +81,8 @@ func TestUpdateLoginSucceededAdvancesToConnecting(t *testing.T) {
 	if got.token != "fake.jwt.tok" {
 		t.Fatalf("token not retained: %q", got.token)
 	}
-	if got.username != "rina" {
-		t.Fatalf("username not retained: %q", got.username)
+	if got.email != "rina@example.com" {
+		t.Fatalf("email not retained: %q", got.email)
 	}
 	if got.sessionGeneration != 1 {
 		t.Fatalf("sessionGeneration = %d, want 1", got.sessionGeneration)
@@ -115,9 +115,9 @@ func TestUpdateWSDisconnectedReopensLoginModal(t *testing.T) {
 	m.width, m.height = 100, 30
 	m.modal = nil
 	m.token = "fake.jwt"
-	m.username = "rina"
+	m.email = "rina@example.com"
 	m.userID = "u-rina-1"
-	m.infoState.Username = "rina"
+	m.infoState.Email = "rina@example.com"
 	m.infoState.UserID = "u-rina-1"
 	m.connected = true
 	m.messages = map[string][]mainview.Message{"general": {{Sender: "alice", Text: "hi"}}}
@@ -129,10 +129,10 @@ func TestUpdateWSDisconnectedReopensLoginModal(t *testing.T) {
 	if got.modal == nil {
 		t.Fatal("expected login modal re-opened")
 	}
-	if got.token != "" || got.username != "" || got.userID != "" {
+	if got.token != "" || got.email != "" || got.userID != "" {
 		t.Fatal("expected session cleared")
 	}
-	if got.infoState.Username != "" || got.infoState.UserID != "" {
+	if got.infoState.Email != "" || got.infoState.UserID != "" {
 		t.Fatal("expected Profile cleared")
 	}
 	// The passive status indicator and the chat surface must reset on a
@@ -249,7 +249,7 @@ func TestUpdateRoomsLoadFailedUnauthorizedTriggersSessionExpiry(t *testing.T) {
 	m.modal = nil
 	m.token = "fake.jwt"
 	m.conn = &websocket.Conn{}
-	m.username = "rina"
+	m.email = "rina@example.com"
 
 	next, cmd := m.Update(api.RoomsLoadFailed{HTTPStatus: http.StatusUnauthorized})
 	got := next.(Model)
@@ -270,7 +270,7 @@ func TestUpdateRoomJoinFailedUnauthorizedTriggersSessionExpiry(t *testing.T) {
 	m.modal = nil
 	m.token = "fake.jwt"
 	m.conn = &websocket.Conn{}
-	m.username = "rina"
+	m.email = "rina@example.com"
 
 	next, cmd := m.Update(api.RoomJoinFailed{HTTPStatus: http.StatusUnauthorized})
 	got := next.(Model)
@@ -344,7 +344,7 @@ func TestUpdateJoinedRoomsLoadFailedUnauthorizedReopensLogin(t *testing.T) {
 	m.modal = nil
 	m.width, m.height = 100, 30
 	m.token = "fake.jwt"
-	m.username = "rina"
+	m.email = "rina@example.com"
 	m.userID = "u-rina-1"
 
 	next, cmd := m.Update(api.JoinedRoomsLoadFailed{HTTPStatus: 401, Status: "AUTH_EXPIRED_TOKEN"})
@@ -663,8 +663,8 @@ func TestUpdateWSDisconnectedFromOldGenerationDropped(t *testing.T) {
 	m := chatReadyModel(t)
 	m.width, m.height = 100, 30
 	m.sessionGeneration = 2
-	m.username = "rina"
-	m.infoState.Username = "rina"
+	m.email = "rina@example.com"
+	m.infoState.Email = "rina@example.com"
 	m.messages["general"] = []mainview.Message{{Sender: "alice", Text: "current"}}
 	m.mainError = "current session error"
 
@@ -727,7 +727,7 @@ func TestUpdateSendMessageCompletionAfterDisconnectAndReloginDropped(t *testing.
 	oldGeneration := m.sessionGeneration
 
 	afterDisconnect, _ := m.Update(api.WSDisconnected{Err: errors.New("lost"), Generation: oldGeneration})
-	afterLogin, _ := afterDisconnect.(Model).Update(api.LoginSucceeded{Token: "new.jwt", Username: "rina"})
+	afterLogin, _ := afterDisconnect.(Model).Update(api.LoginSucceeded{Token: "new.jwt", Email: "rina@example.com"})
 	current := afterLogin.(Model)
 	current.modal = nil
 	current.conn = &websocket.Conn{}
@@ -758,7 +758,7 @@ func TestUpdateSendMessageCompletionAfterDisconnectAndReloginDropped(t *testing.
 func TestUpdateWSAuthSucceededMarksConnectedAndInitsChat(t *testing.T) {
 	m := makeModel(t)
 	m.token = "fake.jwt"
-	m.username = "rina"
+	m.email = "rina@example.com"
 	next, _ := m.Update(api.WSAuthSucceeded{UserID: "u-rina-1"})
 	got := next.(Model)
 	if !got.connected {
