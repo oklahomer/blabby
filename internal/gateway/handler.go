@@ -9,12 +9,12 @@ import (
 	"strings"
 
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/domain"
 )
 
 const (
-	maxLoginBodyBytes   = 1 << 20 // 1 MB
-	maxMailAddressBytes = 254     // RFC 5321 maximum email length
-	maxPasswordBytes    = 256
+	maxLoginBodyBytes = 1 << 20 // 1 MB
+	maxPasswordBytes  = 256
 )
 
 // endpointLogin is the mux pattern for handleLogin. Defined alongside
@@ -55,7 +55,7 @@ func (g *Gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("mail address and password are required"))
 		return
 	}
-	if len(req.MailAddress) > maxMailAddressBytes || len(req.Password) > maxPasswordBytes {
+	if len(req.MailAddress) > domain.MaxMailAddressBytes || len(req.Password) > maxPasswordBytes {
 		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("mail address or password exceeds maximum length"))
 		return
 	}

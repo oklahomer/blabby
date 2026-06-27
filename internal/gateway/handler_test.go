@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/errcode"
 )
 
@@ -117,7 +118,7 @@ func TestHandleLogin(t *testing.T) {
 		},
 		{
 			name:          "mail address over length cap returns 400",
-			body:          `{"mail_address":"` + strings.Repeat("a", maxMailAddressBytes+1) + `","password":"secret"}`,
+			body:          `{"mail_address":"` + strings.Repeat("a", domain.MaxMailAddressBytes+1) + `","password":"secret"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errcode.InvalidRequest,

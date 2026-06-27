@@ -446,11 +446,17 @@ components:
             - ROOM_ALREADY_MEMBER
             - ROOM_NOT_FOUND
             - RATE_LIMIT_EXCEEDED
+            - VERIFICATION_RATE_LIMITED
             - INVALID_REQUEST
             - MISSING_FIELD
             - PAYLOAD_TOO_LARGE
+            - INVALID_EMAIL
+            - WEAK_PASSWORD
             - INTERNAL_ERROR
             - SERVICE_UNAVAILABLE
+            - EMAIL_ALREADY_REGISTERED
+            - HANDLE_ALREADY_TAKEN
+            - VERIFICATION_INVALID
         message:
           type: string
           description: A human-readable, client-safe explanation. Never leaks internal detail.

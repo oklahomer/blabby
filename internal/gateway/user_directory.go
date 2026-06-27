@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/oklahomer/blabby/internal/auth"
@@ -15,10 +15,17 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence/userrepo"
 )
 
-// dummyHashPassword is hashed once at construction to seed the timing-equalizer
-// (see NewUserRepoDirectory). Its value is irrelevant — only the cost of
-// comparing against it matters.
+// dummyHashPassword is lazily hashed once to seed the timing-equalizer. Its
+// value is irrelevant — only the cost of comparing against it matters.
 const dummyHashPassword = "blabby-timing-equalizer"
+
+var dummyPasswordHash = sync.OnceValue(func() []byte {
+	hash, err := auth.HashPassword(dummyHashPassword)
+	if err != nil {
+		panic(fmt.Sprintf("gateway: precompute dummy password hash: %v", err))
+	}
+	return hash
+})
 
 // authDBTimeout bounds a single account lookup. It is owned here (the callee), per
 // the auth.Authenticator contract that an IO-bound implementation enforces its own
@@ -48,11 +55,7 @@ var (
 // unknown email spends the same time as one for a known email with a wrong
 // password, denying a timing oracle for account enumeration.
 func NewUserRepoDirectory(pool postgres.Querier) *UserRepoDirectory {
-	dummy, err := auth.HashPassword(dummyHashPassword)
-	if err != nil {
-		panic(fmt.Sprintf("gateway: precompute dummy password hash: %v", err))
-	}
-	return &UserRepoDirectory{repo: userrepo.New(nil), pool: pool, dummyHash: dummy}
+	return &UserRepoDirectory{repo: userrepo.New(nil), pool: pool, dummyHash: dummyPasswordHash()}
 }
 
 // VerifyCredentials looks up the account by normalized email and checks the
@@ -65,7 +68,16 @@ func (d *UserRepoDirectory) VerifyCredentials(ctx context.Context, mailAddress, 
 	ctx, cancel := context.WithTimeout(ctx, authDBTimeout)
 	defer cancel()
 
-	user, err := d.repo.FindByEmail(ctx, d.pool, normalizeEmail(mailAddress))
+	addr, err := domain.NewMailAddress(mailAddress)
+	if err != nil {
+		// A malformed address can match no account. Reject as invalid credentials
+		// (not a distinct error) so login never reveals whether an address is
+		// well-formed-but-unknown vs. malformed; spend the dummy-hash time too.
+		_ = auth.VerifyPassword(d.dummyHash, password)
+		return auth.VerifiedUser{}, auth.ErrInvalidCredentials
+	}
+
+	user, err := d.repo.FindByEmail(ctx, d.pool, addr.String())
 	if errors.Is(err, userrepo.ErrUserNotFound) {
 		// Compare against the dummy hash so a missing account is not faster to
 		// reject than a wrong password. The result is intentionally discarded.
@@ -123,11 +135,4 @@ func (d *UserRepoDirectory) rehashPassword(ctx context.Context, userID id.UserID
 	if err := d.repo.SetPasswordHash(ctx, d.pool, userID, hash); err != nil {
 		slog.Warn("password rehash: store failed", "user_id", userID, "error", err)
 	}
-}
-
-// normalizeEmail lowercases and trims a login email so it matches the normalized
-// mail_address stored at registration. Registration formalizes this via a
-// MailAddress value type; login mirrors the same trim+lowercase until then.
-func normalizeEmail(raw string) string {
-	return strings.ToLower(strings.TrimSpace(raw))
 }
