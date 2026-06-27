@@ -91,13 +91,13 @@ func (s *membershipStore) LoadMembers(ctx context.Context, roomID id.RoomID) ([]
 func (s *membershipStore) RecordJoin(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error) {
 	// Grain-initiated joins are ordinary members; owner seeding is the gateway's
 	// room-creation path, and role mutation belongs to a later phase.
-	return s.record(ctx, roomID, actor, journal.MemberJoined, func(q postgres.Querier) error {
+	return s.record(ctx, roomID, actor, journal.MemberJoined, func(ctx context.Context, q postgres.Querier) error {
 		return s.repo.Add(ctx, q, roomID, actor, domain.MembershipRoleMember)
 	})
 }
 
 func (s *membershipStore) RecordLeave(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error) {
-	return s.record(ctx, roomID, actor, journal.MemberLeft, func(q postgres.Querier) error {
+	return s.record(ctx, roomID, actor, journal.MemberLeft, func(ctx context.Context, q postgres.Querier) error {
 		return s.repo.Remove(ctx, q, roomID, actor.ID())
 	})
 }
@@ -105,19 +105,22 @@ func (s *membershipStore) RecordLeave(ctx context.Context, roomID id.RoomID, act
 // record runs mutate and the journal append in one transaction, returning the
 // appended event's identity. The row write and its derived event commit (or roll
 // back) together; on any error nothing is written and a zero event is returned.
+// mutate receives the timeout-bounded context so the row write — the lock-taking
+// statement most likely to block — is bounded by membershipOpTimeout like the
+// append, not left on the caller's (deadline-less) context.
 func (s *membershipStore) record(
 	ctx context.Context,
 	roomID id.RoomID,
 	actor id.UserRef,
 	kind journal.MemberEventKind,
-	mutate func(postgres.Querier) error,
+	mutate func(context.Context, postgres.Querier) error,
 ) (MembershipEvent, error) {
 	ctx, cancel := context.WithTimeout(ctx, membershipOpTimeout)
 	defer cancel()
 
 	var evt MembershipEvent
 	err := s.tx.WithinTx(ctx, func(q postgres.Querier) error {
-		if err := mutate(q); err != nil {
+		if err := mutate(ctx, q); err != nil {
 			return err
 		}
 		eventID, occurredAt, err := s.journal.AppendMembership(ctx, q, roomID, actor, kind)
