@@ -34,6 +34,7 @@ import (
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/logging"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
+	"github.com/oklahomer/blabby/internal/persistence/workerlease"
 )
 
 const (
@@ -174,6 +175,21 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	}
 	defer pool.Close()
 	roomDir := gateway.NewRoomRepoDirectory(pool)
+
+	// The gateway is a Snowflake id-minting tier alongside the backend: account
+	// registration, fronted by the gateway, mints a new UserID and public_code.
+	// The worker-lease manager acquires a fenced worker id at boot from the
+	// worker_lease table on this same pool and mints only while it holds the
+	// lease, so the gateway and backend never share a worker id. Stop is deferred
+	// after pool.Close so releasing the lease (which uses the pool) runs first.
+	leaseManager, err := workerlease.NewManager(workerlease.NewRepo(pool), workerlease.HostPIDOwner())
+	if err != nil {
+		return fmt.Errorf("build worker-lease manager: %w", err)
+	}
+	if err := leaseManager.Start(context.Background()); err != nil {
+		return fmt.Errorf("acquire worker lease: %w", err)
+	}
+	defer leaseManager.Stop()
 
 	// The in-memory store backs credential lookup for login and token issue.
 	// The gateway never resolves display names — that is the User grain's job —
