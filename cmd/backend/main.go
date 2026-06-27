@@ -2,14 +2,20 @@
 // hosting the User and Room grains. It serves no HTTP — the gateway
 // (cmd/gateway) fronts clients and calls these grains across the cluster.
 //
+// It requires a reachable PostgreSQL: grains hydrate room/membership state from
+// it on activation, and the backend acquires a worker-id lease at startup to mint
+// event ids — so it fails fast if the database is down. The connection defaults to
+// the local dev DSN; override with --db-dsn or BLABBY_DATABASE_URL. Start one with
+// `docker compose up -d postgres` (see README / docker-compose.yml).
+//
 // Run with
 //
 //	go run ./cmd/backend
 //
-// and it joins as a single self-contained member with zero external
-// dependencies. Supplying one or more discovery --seeds forms a multi-node
-// cluster; multi-node mode additionally requires an explicit, peer-reachable
-// --advertised-host and a fixed --cluster-port. See docs/multi-node-cluster.md.
+// and it joins as a single member. Supplying one or more discovery --seeds forms a
+// multi-node cluster; multi-node mode additionally requires an explicit,
+// peer-reachable --advertised-host and a fixed --cluster-port. See
+// docs/multi-node-cluster.md.
 package main
 
 import (
@@ -24,8 +30,10 @@ import (
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/clusterboot"
 	"github.com/oklahomer/blabby/internal/grain/room"
+	"github.com/oklahomer/blabby/internal/grain/user"
 	"github.com/oklahomer/blabby/internal/logging"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
+	"github.com/oklahomer/blabby/internal/persistence/workerlease"
 )
 
 func main() {
@@ -74,22 +82,41 @@ func run(dbCfg postgres.Config, cc clusterboot.Config) error {
 		slog.Warn("server.cluster.config_warning", "detail", w)
 	}
 
-	// The Room grain hydrates its RoomRef from the room table on activation, so
-	// the backend holds a pool. It fails closed: an unreachable database stops
+	// The grains hydrate room/membership state from the database on activation,
+	// so the backend holds a pool. It fails closed: an unreachable database stops
 	// startup rather than surfacing on the first activation.
 	pool, err := postgres.NewPool(context.Background(), dbCfg)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
-	roomLoader := room.NewRoomRepoLoader(pool)
+
+	// The backend is now an id-minting node: a membership transition appends a
+	// timeline event whose id is a Snowflake. The worker-lease manager acquires a
+	// fenced worker id at boot (from the worker_lease table on this same pool) and
+	// mints only while it holds the lease, so two members never share a worker id.
+	leaseManager, err := workerlease.NewManager(workerlease.NewRepo(pool), leaseOwner())
+	if err != nil {
+		return fmt.Errorf("build worker-lease manager: %w", err)
+	}
+	if err := leaseManager.Start(context.Background()); err != nil {
+		return fmt.Errorf("acquire worker lease: %w", err)
+	}
+	defer leaseManager.Stop()
 
 	// The in-memory store backs the User grain's display-name directory. Its
 	// fixed, immutable seed makes every member resolve identical UserRefs, so no
 	// shared store is needed across members.
 	store := auth.NewInMemoryUserStore()
 
-	c := clusterboot.Build(cc, clusterboot.Kinds(store, roomLoader)...)
+	deps := clusterboot.GrainDeps{
+		Directory:   store,
+		RoomLoader:  room.NewRoomRepoLoader(pool),
+		Membership:  room.NewMembershipStore(pool, leaseManager),
+		JoinedRooms: user.NewJoinedRoomLoader(pool),
+	}
+
+	c := clusterboot.Build(cc, clusterboot.Kinds(deps)...)
 	defer c.Shutdown(true)
 
 	// Subscribe before StartMember so the initial join topology is not missed.
@@ -107,4 +134,16 @@ func run(dbCfg postgres.Config, cc clusterboot.Config) error {
 	<-ctx.Done()
 	slog.Info("server.shutdown", "reason", "signal")
 	return nil
+}
+
+// leaseOwner identifies this process in the worker_lease table for observability.
+// It is not load-bearing for correctness — the per-lease fencing token, not the
+// owner, is what keeps two processes from sharing a worker id — so a best-effort
+// hostname/pid is enough.
+func leaseOwner() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+	return fmt.Sprintf("%s/%d", host, os.Getpid())
 }

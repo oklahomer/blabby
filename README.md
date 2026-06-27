@@ -7,7 +7,7 @@ What makes it worth a look:
 - **Grain-per-entity modelling.** Each user and each room is a virtual actor with single-threaded state — no locks, no shared mutable maps. Commands route through a user's own grain to room grains.
 - **A clean client contract.** HTTP for commands and queries, a WebSocket for the real-time event stream, JSON on the wire, JWT for identity.
 - **Decisions written down.** Non-obvious choices live in [Architecture Decision Records](docs/adr/), each with context and consequences.
-- **Clone-and-run.** Generated protobuf code is committed, there are no external dependencies (no database, broker, or cache), and a terminal client ships in the same module.
+- **Clone-and-run.** Generated protobuf code is committed and a terminal client ships in the same module; the only runtime dependency is PostgreSQL, started with a single `docker compose up -d postgres` — no broker, no cache.
 
 ## Architecture
 
@@ -60,15 +60,21 @@ DOCS_PORT=9081 ASYNCAPI_PORT=9082 make docs-preview
 
 ## Quick Start
 
-**Requirements:** Go 1.26 or newer. Nothing else — no database or external services.
+**Requirements:** Go 1.26 or newer, plus Docker — the backend and gateway read durable room and membership state from PostgreSQL (with the PGroonga extension), so a database must be running.
 
-**1. Start the backend** (the grain tier — joins the cluster as a member):
+**1. Start PostgreSQL** (the `postgres` service applies the schema and dev seed on its first run; the binaries default to its connection string):
+
+```bash
+docker compose up -d postgres
+```
+
+**2. Start the backend** (the grain tier — joins the cluster as a member):
 
 ```bash
 go run ./cmd/backend
 ```
 
-**2. In another terminal, start the gateway** (HTTP + WebSocket on `:8080`, joins as a cluster client):
+**3. In another terminal, start the gateway** (HTTP + WebSocket on `:8080`, joins as a cluster client):
 
 ```bash
 go run ./cmd/gateway
@@ -76,13 +82,13 @@ go run ./cmd/gateway
 
 It defaults to joining a local backend on `127.0.0.1:6330` and logs a one-time loopback advertised-host warning — expected for a same-host run. Override `--seeds`, `--advertised-host`, and `--cluster-port` for a real cluster ([details](docs/multi-node-cluster.md)).
 
-**3. In a third terminal, start the client:**
+**4. In a third terminal, start the client:**
 
 ```bash
 go run ./cmd/client --server http://localhost:8080
 ```
 
-**4. Log in and chat.** The client opens a three-pane workspace with a centered sign-in modal. Sign in with one of the built-in development accounts:
+**5. Log in and chat.** The client opens a three-pane workspace with a centered sign-in modal. Sign in with one of the built-in development accounts:
 
 | Username | Password |
 |----------|-----------|

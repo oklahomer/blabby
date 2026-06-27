@@ -105,6 +105,7 @@ func fakeRoomCtx(identity string, opts ...graintest.FakeGrainContextOption) clus
 // fakeNotifier records every fan-out call, in order, for assertion.
 type fakeNotifier struct {
 	notifyCalls  []notifyCall
+	notifyReqs   []*userpb.NotifyRoomEventRequest
 	forwardCalls []forwardCall
 	notifyErrFn  func(userID string) error
 	forwardErrFn func(userID string) error
@@ -140,6 +141,7 @@ func (f *fakeNotifier) NotifyRoomEvent(userID id.UserID, req *userpb.NotifyRoomE
 		Subject:   userRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()},
 		EventType: req.GetEventType(),
 	})
+	f.notifyReqs = append(f.notifyReqs, req)
 	if f.notifyErrFn != nil {
 		return f.notifyErrFn(userID.String())
 	}

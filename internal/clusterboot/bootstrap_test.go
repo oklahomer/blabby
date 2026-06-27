@@ -58,7 +58,7 @@ func TestBuildConstructsCluster(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := Build(tc.cc, Kinds(nil, activeAnyRoomLoader{})...)
+			c := Build(tc.cc, Kinds(GrainDeps{RoomLoader: activeAnyRoomLoader{}})...)
 			if c.ActorSystem == nil {
 				t.Fatal("Build returned a cluster without an actor system")
 			}
@@ -69,7 +69,7 @@ func TestBuildConstructsCluster(t *testing.T) {
 // TestSubscribeTopologyLogging confirms the subscription is established on the
 // built cluster's EventStream.
 func TestSubscribeTopologyLogging(t *testing.T) {
-	c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Kinds(nil, activeAnyRoomLoader{})...)
+	c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Kinds(GrainDeps{RoomLoader: activeAnyRoomLoader{}})...)
 
 	sub := SubscribeTopologyLogging(c)
 	if sub == nil {
@@ -79,7 +79,7 @@ func TestSubscribeTopologyLogging(t *testing.T) {
 }
 
 func TestKindsRegistersUserAndRoom(t *testing.T) {
-	kinds := Kinds(nil, activeAnyRoomLoader{})
+	kinds := Kinds(GrainDeps{RoomLoader: activeAnyRoomLoader{}})
 
 	got := make(map[string]bool, len(kinds))
 	for _, k := range kinds {

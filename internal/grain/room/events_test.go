@@ -24,8 +24,20 @@ func eventsRoomRef(t *testing.T) domain.RoomRef {
 	return domain.RoomRef{ID: rid, PublicCode: code, Name: "General", Status: domain.RoomStatusActive}
 }
 
+// sampleMembershipEvent builds a non-zero MembershipEvent so the fan-out
+// builders carry a concrete event id and timestamp.
+func sampleMembershipEvent(t *testing.T) MembershipEvent {
+	t.Helper()
+	eid, err := id.NewEventID(987654321)
+	if err != nil {
+		t.Fatalf("event id: %v", err)
+	}
+	return MembershipEvent{ID: eid, OccurredAt: time.UnixMilli(1_700_000_000_000)}
+}
+
 func TestBuildJoinedEvent(t *testing.T) {
-	got := buildJoinedEvent(eventsRoomRef(t), mustUserRef(t, "1", "Alice"))
+	evt := sampleMembershipEvent(t)
+	got := buildJoinedEvent(eventsRoomRef(t), mustUserRef(t, "1", "Alice"), evt)
 
 	if got.GetRoom().GetRoomId() != "4" || got.GetRoom().GetPublicCode() != "G000000004" {
 		t.Errorf("Room: got %+v, want id=4 code=G000000004", got.GetRoom())
@@ -39,10 +51,17 @@ func TestBuildJoinedEvent(t *testing.T) {
 	if got.GetEventType() != userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED {
 		t.Errorf("EventType: got %v, want JOINED", got.GetEventType())
 	}
+	if got.GetEventId() != "987654321" {
+		t.Errorf("EventId: got %q, want %q", got.GetEventId(), "987654321")
+	}
+	if !got.GetTimestamp().AsTime().Equal(evt.OccurredAt) {
+		t.Errorf("Timestamp: got %v, want %v", got.GetTimestamp().AsTime(), evt.OccurredAt)
+	}
 }
 
 func TestBuildLeftEvent(t *testing.T) {
-	got := buildLeftEvent(eventsRoomRef(t), mustUserRef(t, "1", "Alice"))
+	evt := sampleMembershipEvent(t)
+	got := buildLeftEvent(eventsRoomRef(t), mustUserRef(t, "1", "Alice"), evt)
 
 	if got.GetRoom().GetRoomId() != "4" || got.GetRoom().GetPublicCode() != "G000000004" {
 		t.Errorf("Room: got %+v, want id=4 code=G000000004", got.GetRoom())
@@ -55,6 +74,26 @@ func TestBuildLeftEvent(t *testing.T) {
 	}
 	if got.GetEventType() != userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT {
 		t.Errorf("EventType: got %v, want LEFT", got.GetEventType())
+	}
+	if got.GetEventId() != "987654321" {
+		t.Errorf("EventId: got %q, want %q", got.GetEventId(), "987654321")
+	}
+	if !got.GetTimestamp().AsTime().Equal(evt.OccurredAt) {
+		t.Errorf("Timestamp: got %v, want %v", got.GetTimestamp().AsTime(), evt.OccurredAt)
+	}
+}
+
+// TestBuildJoinedEvent_ZeroEventLeavesFieldsUnset documents that a zero event
+// (no membership store wired) leaves event_id/timestamp unset rather than
+// emitting a placeholder "0" id.
+func TestBuildJoinedEvent_ZeroEventLeavesFieldsUnset(t *testing.T) {
+	got := buildJoinedEvent(eventsRoomRef(t), mustUserRef(t, "1", "Alice"), MembershipEvent{})
+
+	if got.GetEventId() != "" {
+		t.Errorf("EventId: got %q, want empty", got.GetEventId())
+	}
+	if got.GetTimestamp() != nil {
+		t.Errorf("Timestamp: got %v, want nil", got.GetTimestamp())
 	}
 }
 

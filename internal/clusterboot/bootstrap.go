@@ -22,12 +22,31 @@ const (
 	automanagedRefreshTTL = 2 * time.Second
 )
 
+// GrainDeps bundles the collaborators the hosted grains need. Grouped into a
+// struct (not positional args) so call sites read by field name as the set
+// grows. RoomLoader is required; the persistence-backed fields may be nil, in
+// which case the grains keep membership in memory only (the behavior tests rely
+// on) — production wires all four.
+type GrainDeps struct {
+	// Directory seeds each User grain activation's display name.
+	Directory user.Directory
+	// RoomLoader hydrates each Room grain activation's RoomRef.
+	RoomLoader room.RoomLoader
+	// Membership is the Room grain's DB-authoritative membership store.
+	Membership room.MembershipStore
+	// JoinedRooms hydrates each User grain's joined-rooms cache on activation.
+	JoinedRooms user.JoinedRoomLoader
+}
+
 // Kinds returns the grain kinds blabby hosts: the User grain (which seeds each
-// activation's display name from dir) and the Room grain (which hydrates each
-// activation's RoomRef via loader). Separated from Build so a test can assert
-// the registered kinds without standing up an actor system.
-func Kinds(dir user.Directory, loader room.RoomLoader) []*cluster.Kind {
-	return []*cluster.Kind{user.NewKind(dir), room.NewKind(loader)}
+// activation's display name and hydrates its joined rooms) and the Room grain
+// (which hydrates its RoomRef and member set). Separated from Build so a test
+// can assert the registered kinds without standing up an actor system.
+func Kinds(deps GrainDeps) []*cluster.Kind {
+	return []*cluster.Kind{
+		user.NewKind(deps.Directory, user.WithJoinedRooms(deps.JoinedRooms)),
+		room.NewKind(deps.RoomLoader, room.WithMembership(deps.Membership)),
+	}
 }
 
 // Build constructs (but does not start) a proto.actor cluster from cc, hosting

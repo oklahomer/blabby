@@ -19,6 +19,11 @@ func (g *Grain) RecentMessageCount() int { return len(g.state.recentMessages) }
 // before Init so activation hydrates from the stub.
 func (g *Grain) SetLoader(l RoomLoader) { g.loader = l }
 
+// SetMembershipStore injects a MembershipStore for tests; production wires it via
+// NewKind's WithMembership option. Call before Init so activation seeds the
+// member cache from the stub.
+func (g *Grain) SetMembershipStore(s MembershipStore) { g.membership = s }
+
 // SetNotifier injects a userNotifier for tests; production code uses NewKind.
 func (g *Grain) SetNotifier(n userNotifier) { g.notifier = n }
 

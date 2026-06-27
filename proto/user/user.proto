@@ -107,11 +107,19 @@ enum RoomEventType {
 // NotifyRoomEventRequest delivers a room event (join/leave) to the User grain.
 // `room` carries the originating room's reference metadata so the connection
 // renders its public R… code without a lookup; `user` carries the subject's id
-// and display name.
+// and display name. `event_id` and `timestamp` identify the durable membership
+// event this notification derives from.
 message NotifyRoomEventRequest {
   common.RoomRef room = 1;
   common.UserRef user = 2;
   RoomEventType event_type = 3;
+  // event_id is the decimal Snowflake id of the member_joined/member_left event
+  // appended to the room timeline for this transition. It crosses the wire as a
+  // decimal string — the documented exception to never exposing internal numeric
+  // ids — so a consumer can correlate the fan-out with the timeline.
+  string event_id = 4;
+  // timestamp is the event's server-assigned occurred_at.
+  google.protobuf.Timestamp timestamp = 5;
 }
 
 // NotifyRoomEventResponse acknowledges the event notification. Same semantics

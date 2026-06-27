@@ -4,11 +4,13 @@ package clusterboot
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -19,11 +21,17 @@ import (
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
 	"github.com/asynkron/protoactor-go/eventstream"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/grain/room"
+	"github.com/oklahomer/blabby/internal/grain/user"
+	"github.com/oklahomer/blabby/internal/persistence/postgres"
+	"github.com/oklahomer/blabby/internal/persistence/workerlease"
 )
 
 const (
@@ -88,7 +96,19 @@ type traceStep struct {
 }
 
 func TestMultiMemberDepartureAndReactivation(t *testing.T) {
-	members, rawSeeds := startTestMembers(t, 2)
+	// This is a real end-to-end durability test: both members run the production
+	// persistence adapters against a shared Postgres, so the headline claim —
+	// membership survives a node loss — is proven against the real datastore, not
+	// a fake. Skipped unless BLABBY_DATABASE_URL points at a reachable instance
+	// with the schema + dev seed applied (e.g. `make up`); CI provisions one.
+	dsn := strings.TrimSpace(os.Getenv("BLABBY_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("BLABBY_DATABASE_URL not set; skipping database integration test")
+	}
+	pool := openTestPool(t, dsn)
+	seedDepartureFixtures(t, pool)
+
+	members, rawSeeds := startTestMembers(t, 2, pool)
 	gateway := startTestClient(t, rawSeeds, memberAddresses(members))
 	client := gateway.cluster
 	survivor := members[0].cluster
@@ -152,9 +172,12 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 	waitForTopology(t, gateway.topologies, []string{survivor.ActorSystem.Address()})
 
 	t.Run("User reactivation and reconnect", func(t *testing.T) {
+		// The reactivated recovery user re-hydrates its joined rooms from
+		// DB-authoritative membership: the room it joined before the departure is
+		// still there, no re-join required.
 		roomsAfter := getJoinedRoomsEventually(t, client, recoveryUserID)
-		if len(roomsAfter) != 0 {
-			t.Fatalf("reactivated recovery user rooms = %v, want empty state", roomsAfter)
+		if len(roomsAfter) != 1 || roomsAfter[0] != roomID {
+			t.Fatalf("reactivated recovery user rooms = %v, want [%s] (membership persisted)", roomsAfter, roomID)
 		}
 		assertPlacement(t, client, recoveryUserID, userKind.name, survivor.ActorSystem.Address())
 
@@ -189,13 +212,11 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 		})
 		assertPlacement(t, client, roomID, roomKind.name, survivor.ActorSystem.Address())
 
-		requireCall(t, "rejoin routing user after room reactivation", func() error {
-			return joinRoom(client, routingUserID, roomID)
-		})
-		assertRoomEvent(t, routingConnection, roomID, routingUserID, userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED)
-
+		// The reactivated Room grain reloaded its member set from the DB, so the
+		// routing user is still a member: it can post WITHOUT re-joining and the
+		// message fans out to its connection.
 		bodyMarker := "room-recovery-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-		requireCall(t, "send after room reactivation", func() error {
+		requireCall(t, "send after room reactivation (no re-join)", func() error {
 			return sendMessage(client, routingUserID, roomID, bodyMarker)
 		})
 		assertMessage(t, routingConnection, bodyMarker)
@@ -204,14 +225,116 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 		assertTrace(t, trace.lines(t),
 			traceStep{event: "server.cluster.member_left", attrs: map[string]string{"node_address": victimAddress}},
 			traceStep{event: "grain.activated", attrs: map[string]string{"grain_type": roomKind.name, "grain_id": roomID}},
-			traceStep{event: "room.member.joined", attrs: map[string]string{"grain_id": roomID}},
+			traceStep{event: "room.message.posted", attrs: map[string]string{"grain_id": roomID}},
 			traceStep{event: "grain.fanout", attrs: map[string]string{"grain_type": roomKind.name, "grain_id": roomID}},
 		)
 		assertLogOmits(t, trace, bodyMarker)
 	})
 }
 
-func startTestMembers(t *testing.T, count int) ([]*testMember, string) {
+// --- database-backed grain wiring for the departure test ---
+
+const (
+	// departureUserSeedSQL seeds the users the placement probes reach (recovery
+	// 1000+, routing 2000+) so membership/event writes satisfy their FKs into
+	// service_user. public_code/mail/handle are derived from the id to stay unique.
+	departureUserSeedSQL = `
+INSERT INTO service_user (id, public_code, mail_address, handle, handle_norm, display_name, password_hash, status)
+SELECT gs, lpad(gs::text, 10, '0'), 'u' || gs || '@departure.test', 'u' || gs, 'u' || gs,
+       'User ' || gs, convert_to('x', 'UTF8'), 'active'
+FROM (
+    SELECT generate_series(1000, 1199) AS gs
+    UNION ALL
+    SELECT generate_series(2000, 2199) AS gs
+) s
+ON CONFLICT DO NOTHING`
+
+	// departureRoomSeedSQL seeds active rooms covering the room probe range (3000+)
+	// so the real room loader hydrates them on activation. created_by is the dev
+	// seed's user 1.
+	departureRoomSeedSQL = `
+INSERT INTO room (id, public_code, display_name, created_by, status)
+SELECT gs, lpad(gs::text, 10, '0'), 'Room ' || gs, 1, 'active'
+FROM generate_series(3000, 3199) AS gs
+ON CONFLICT DO NOTHING`
+)
+
+// openTestPool connects a pool to the test database and closes it on cleanup.
+func openTestPool(t *testing.T, dsn string) *pgxpool.Pool {
+	t.Helper()
+	pool, err := postgres.NewPool(context.Background(), postgres.Config{
+		DSN: dsn, MaxConns: 8, MaxConnIdleTime: time.Minute, MaxConnLifetime: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// seedDepartureFixtures seeds the users and rooms the placement probes reach so
+// membership writes satisfy the room_membership FKs and the real room loader can
+// hydrate the probed rooms. It clears prior test rows up front and again on
+// cleanup so the test is re-runnable (seeded users/rooms are left in place;
+// re-seeding is idempotent).
+func seedDepartureFixtures(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	if err := cleanDepartureRows(ctx, pool); err != nil {
+		t.Fatalf("pre-clean fixtures: %v", err)
+	}
+	if _, err := pool.Exec(ctx, departureUserSeedSQL); err != nil {
+		t.Fatalf("seed users: %v", err)
+	}
+	if _, err := pool.Exec(ctx, departureRoomSeedSQL); err != nil {
+		t.Fatalf("seed rooms: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cleanDepartureRows(context.Background(), pool); err != nil {
+			t.Logf("cleanup fixtures: %v", err)
+		}
+	})
+}
+
+// cleanDepartureRows removes only the rows this test writes — memberships for the
+// probed rooms and their derived timeline events — so a re-run starts clean.
+func cleanDepartureRows(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, `DELETE FROM event WHERE room_id BETWEEN 3000 AND 3199`); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM room_membership WHERE room_id BETWEEN 3000 AND 3199`); err != nil {
+		return err
+	}
+	return nil
+}
+
+// newDatabaseDeps builds one member's production grain dependencies over the
+// shared pool: the real room/membership/joined-room adapters plus a per-member
+// worker-lease manager, so the two members mint event ids under distinct worker
+// ids. The manager is released on cleanup.
+func newDatabaseDeps(t *testing.T, pool *pgxpool.Pool, member int) GrainDeps {
+	t.Helper()
+	manager, err := workerlease.NewManager(
+		workerlease.NewRepo(pool),
+		fmt.Sprintf("departure-test-member-%d", member),
+	)
+	if err != nil {
+		t.Fatalf("build worker-lease manager %d: %v", member, err)
+	}
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatalf("acquire worker lease %d: %v", member, err)
+	}
+	t.Cleanup(manager.Stop)
+
+	return GrainDeps{
+		Directory:   auth.NewInMemoryUserStore(),
+		RoomLoader:  room.NewRoomRepoLoader(pool),
+		Membership:  room.NewMembershipStore(pool, manager),
+		JoinedRooms: user.NewJoinedRoomLoader(pool),
+	}
+}
+
+func startTestMembers(t *testing.T, count int, pool *pgxpool.Pool) ([]*testMember, string) {
 	t.Helper()
 	ports := reserveTestPorts(t, count*2)
 	discoveryPorts := ports[:count]
@@ -252,7 +375,7 @@ func startTestMembers(t *testing.T, count int) ([]*testMember, string) {
 		}
 
 		member := &testMember{
-			cluster:    Build(cc, Kinds(nil, activeAnyRoomLoader{})...),
+			cluster:    Build(cc, Kinds(newDatabaseDeps(t, pool, i))...),
 			topologies: make(chan *cluster.ClusterTopology, 16),
 		}
 		member.loggingSub = SubscribeTopologyLogging(member.cluster)
