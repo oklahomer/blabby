@@ -30,18 +30,22 @@ func (s *stubAuthenticator) ValidateToken(ctx context.Context, token string) (*a
 
 func TestNewGateway(t *testing.T) {
 	stub := &stubAuthenticator{}
-	g := NewGateway(stub, nil, nil, nil)
+	g := gatewayWithAuth(stub)
 	if g.auth != stub {
 		t.Fatal("Gateway.auth does not reference the authenticator passed to the constructor")
 	}
 }
 
+func gatewayWithAuth(authenticator auth.Authenticator) *Gateway {
+	return NewGateway(Deps{Authenticator: authenticator})
+}
+
 func TestRegisterRoutes_LoginRouteRegistered(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{
+	g := gatewayWithAuth(&stubAuthenticator{
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
 			return &auth.Result{UserID: mustUserID(t, "1"), Token: "tok"}, nil
 		},
-	}, nil, nil, nil)
+	})
 	handler := g.RegisterRoutes()
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"a@example.com","password":"b"}`))
@@ -55,7 +59,7 @@ func TestRegisterRoutes_LoginRouteRegistered(t *testing.T) {
 }
 
 func TestRegisterRoutes_WrongMethodReturns405WithJSONEnvelope(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{}, nil, nil, nil)
+	g := gatewayWithAuth(&stubAuthenticator{})
 	handler := g.RegisterRoutes()
 
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
@@ -104,7 +108,7 @@ func TestSplitMethodPath(t *testing.T) {
 }
 
 func TestRegisterRoutes_UnknownPathReturns404WithJSONEnvelope(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{}, nil, nil, nil)
+	g := gatewayWithAuth(&stubAuthenticator{})
 	handler := g.RegisterRoutes()
 
 	req := httptest.NewRequest(http.MethodPost, "/unknown", nil)

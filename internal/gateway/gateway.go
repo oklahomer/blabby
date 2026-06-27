@@ -25,17 +25,26 @@ type Gateway struct {
 	userGrain func(userID id.UserID) userGrainCaller
 }
 
-// NewGateway constructs a Gateway from its dependencies: the authenticator, the
-// room directory (which resolves the opaque R… codes to internal RoomIDs for the
-// HTTP routes), and the cluster client plus root for grain dispatch. Production
-// wires all of them; a test may pass nil for a dependency the exercised routes do
-// not touch.
-func NewGateway(authenticator auth.Authenticator, rooms RoomDirectory, c *cluster.Cluster, root *actor.RootContext) *Gateway {
+// Deps groups the Gateway's dependencies: the authenticator, the room directory
+// (which resolves the opaque R… codes to internal RoomIDs for the HTTP routes),
+// and the cluster client plus root for grain dispatch. Grouping them into one
+// struct keeps the constructor stable as the gateway grows and lets call sites
+// read by field name. A test may leave any field nil for a dependency the
+// exercised routes do not touch.
+type Deps struct {
+	Authenticator auth.Authenticator
+	Rooms         RoomDirectory
+	Cluster       *cluster.Cluster
+	ActorRoot     *actor.RootContext
+}
+
+// NewGateway constructs a Gateway from deps. Production wires all fields.
+func NewGateway(deps Deps) *Gateway {
 	return &Gateway{
-		auth:      authenticator,
-		rooms:     rooms,
-		cluster:   c,
-		actorRoot: root,
+		auth:      deps.Authenticator,
+		rooms:     deps.Rooms,
+		cluster:   deps.Cluster,
+		actorRoot: deps.ActorRoot,
 	}
 }
 

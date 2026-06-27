@@ -213,7 +213,12 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	slog.Info("server.cluster.started", "advertised_address", c.ActorSystem.Address())
 
 	authenticator := auth.NewJWTAuthenticator([]byte(cfg.jwtSecret), userDir, userDir)
-	gw := gateway.NewGateway(authenticator, roomDir, c, c.ActorSystem.Root)
+	gw := gateway.NewGateway(gateway.Deps{
+		Authenticator: authenticator,
+		Rooms:         roomDir,
+		Cluster:       c,
+		ActorRoot:     c.ActorSystem.Root,
+	})
 
 	srv := &http.Server{
 		Addr:              cfg.listenAddr,

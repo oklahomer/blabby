@@ -134,7 +134,7 @@ func TestHandleLogin(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := NewGateway(&stubAuthenticator{authenticateFn: tt.authFn}, nil, nil, nil)
+			g := gatewayWithAuth(&stubAuthenticator{authenticateFn: tt.authFn})
 
 			req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
@@ -174,13 +174,13 @@ func TestHandleLogin(t *testing.T) {
 }
 
 func TestHandleLogin_AuthErrorMessageDoesNotLeakDetails(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{
+	g := gatewayWithAuth(&stubAuthenticator{
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
 			// A credential rejection that wraps a leaky internal message: the client
 			// must still see only the generic response.
 			return nil, fmt.Errorf("user alice not found in database table users: %w", auth.ErrInvalidCredentials)
 		},
-	}, nil, nil, nil)
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"x"}`))
 	rec := httptest.NewRecorder()
@@ -202,11 +202,11 @@ func TestHandleLogin_AuthErrorMessageDoesNotLeakDetails(t *testing.T) {
 // (e.g. the account store is unreachable): it must surface as a 500, not a
 // misleading 401, and must not leak the infrastructure detail to the client.
 func TestHandleLogin_InfrastructureErrorReturns500(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{
+	g := gatewayWithAuth(&stubAuthenticator{
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
 			return nil, errors.New("dial tcp 127.0.0.1:5432: connection refused")
 		},
-	}, nil, nil, nil)
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"secret"}`))
 	rec := httptest.NewRecorder()
@@ -225,11 +225,11 @@ func TestHandleLogin_InfrastructureErrorReturns500(t *testing.T) {
 }
 
 func TestHandleLogin_NilResultFromAuthenticatorReturns500(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{
+	g := gatewayWithAuth(&stubAuthenticator{
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
 			return nil, nil
 		},
-	}, nil, nil, nil)
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"secret"}`))
 	rec := httptest.NewRecorder()
@@ -245,11 +245,11 @@ func TestHandleLogin_NilResultFromAuthenticatorReturns500(t *testing.T) {
 }
 
 func TestHandleLogin_EmptyTokenFromAuthenticatorReturns500(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{
+	g := gatewayWithAuth(&stubAuthenticator{
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
 			return &auth.Result{UserID: mustUserID(t, "1"), Token: ""}, nil
 		},
-	}, nil, nil, nil)
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"secret"}`))
 	rec := httptest.NewRecorder()
@@ -265,11 +265,11 @@ func TestHandleLogin_EmptyTokenFromAuthenticatorReturns500(t *testing.T) {
 }
 
 func TestHandleLogin_BodyTooLargeReturns400(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{
+	g := gatewayWithAuth(&stubAuthenticator{
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
 			return &auth.Result{Token: "tok"}, nil
 		},
-	}, nil, nil, nil)
+	})
 
 	// Build a JSON body larger than the 1 MB cap.
 	huge := strings.Repeat("a", (1<<20)+10)
