@@ -191,10 +191,10 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	}
 	defer leaseManager.Stop()
 
-	// The in-memory store backs credential lookup for login and token issue.
-	// The gateway never resolves display names — that is the User grain's job —
-	// so it consumes the store only as an auth.UserStore.
-	store := auth.NewInMemoryUserStore()
+	// The user directory backs login (verify email+password) and token validation
+	// (resolve the U… subject to a UserID), both over the gateway's pool. One value
+	// satisfies both auth collaborators, so it is passed as verifier and resolver.
+	userDir := gateway.NewUserRepoDirectory(pool)
 
 	// The gateway joins as a cluster client: it registers no grain kinds (a
 	// client routes to grains via the topology that members advertise) and never
@@ -212,7 +212,7 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	// for fan-out; logging it after StartClient lets an operator confirm it.
 	slog.Info("server.cluster.started", "advertised_address", c.ActorSystem.Address())
 
-	authenticator := auth.NewJWTAuthenticator([]byte(cfg.jwtSecret), store)
+	authenticator := auth.NewJWTAuthenticator([]byte(cfg.jwtSecret), userDir, userDir)
 	gw := gateway.NewGateway(authenticator, roomDir, c, c.ActorSystem.Root)
 
 	srv := &http.Server{

@@ -189,6 +189,23 @@ func (r *Repo) SetStatus(ctx context.Context, q postgres.Querier, userID id.User
 	return nil
 }
 
+const setPasswordHashSQL = `UPDATE service_user SET password_hash = $2, updated_at = now() WHERE id = $1`
+
+// SetPasswordHash replaces an account's stored password hash — the rehash-on-login
+// path, when a credential was stored below the current bcrypt target cost. It
+// returns ErrUserNotFound when no row carries the id, so a caller can tell a no-op
+// update from a successful one.
+func (r *Repo) SetPasswordHash(ctx context.Context, q postgres.Querier, userID id.UserID, hash []byte) error {
+	tag, err := q.Exec(ctx, setPasswordHashSQL, userID.Int64(), hash)
+	if err != nil {
+		return fmt.Errorf("userrepo: set password hash: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
 // isPublicCodeCollision reports whether err is (or wraps) a Postgres
 // unique_violation on the public_code constraint specifically. Any other unique
 // violation (a duplicate email, handle, or primary-key clash) is a different fault

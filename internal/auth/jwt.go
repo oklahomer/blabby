@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/oklahomer/blabby/internal/id"
 )
@@ -37,21 +36,28 @@ func WithExpiration(d time.Duration) Option {
 	}
 }
 
-// JWTAuthenticator implements Authenticator using JWT tokens.
+// JWTAuthenticator implements Authenticator using JWT tokens. It delegates
+// credential checking to a CredentialVerifier and token-subject resolution to a
+// PublicCodeResolver, so it owns the token format while the account store owns
+// identity.
 type JWTAuthenticator struct {
 	signingKey []byte
 	expiration time.Duration
-	store      UserStore
+	verifier   CredentialVerifier
+	resolver   PublicCodeResolver
 }
 
 // NewJWTAuthenticator creates a new JWT-based authenticator.
-// It panics if signingKey is empty or store is nil.
-func NewJWTAuthenticator(signingKey []byte, store UserStore, opts ...Option) *JWTAuthenticator {
+// It panics if signingKey is empty or either collaborator is nil.
+func NewJWTAuthenticator(signingKey []byte, verifier CredentialVerifier, resolver PublicCodeResolver, opts ...Option) *JWTAuthenticator {
 	if len(signingKey) == 0 {
 		panic("auth: signing key must not be empty")
 	}
-	if store == nil {
-		panic("auth: store must not be nil")
+	if verifier == nil {
+		panic("auth: credential verifier must not be nil")
+	}
+	if resolver == nil {
+		panic("auth: public-code resolver must not be nil")
 	}
 
 	keyCopy := make([]byte, len(signingKey))
@@ -60,7 +66,8 @@ func NewJWTAuthenticator(signingKey []byte, store UserStore, opts ...Option) *JW
 	a := &JWTAuthenticator{
 		signingKey: keyCopy,
 		expiration: defaultExpiration,
-		store:      store,
+		verifier:   verifier,
+		resolver:   resolver,
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -68,32 +75,24 @@ func NewJWTAuthenticator(signingKey []byte, store UserStore, opts ...Option) *JW
 	return a
 }
 
-// Authenticate validates credentials and returns a signed JWT. The
-// store's user ID is parsed into an id.UserID before signing — a
-// structurally invalid stored ID is a server-side data-integrity issue
-// and surfaces to the client as a generic credential failure, with the
-// underlying cause logged for operators.
-func (a *JWTAuthenticator) Authenticate(_ context.Context, params AuthParams) (*Result, error) {
-	user, err := a.store.Lookup(params.Username)
+// Authenticate verifies the email/password and returns a signed JWT whose subject
+// is the user's opaque public_code (U…), never the internal numeric id. It
+// preserves the verifier's error classification for the caller: a credential
+// rejection wraps ErrInvalidCredentials (the gateway answers a generic 401), while
+// an infrastructure failure is returned with its detail intact (answered with a
+// 500). Scrubbing detail from the client response is the gateway handler's job.
+func (a *JWTAuthenticator) Authenticate(ctx context.Context, params AuthParams) (*Result, error) {
+	user, err := a.verifier.VerifyCredentials(ctx, params.MailAddress, params.Password)
 	if err != nil {
-		slog.Warn("authentication failed", "username", params.Username, "reason", "user_not_found")
-		return nil, errors.New("failed to authenticate: invalid credentials")
-	}
-
-	if err := bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(params.Password)); err != nil {
-		slog.Warn("authentication failed", "username", params.Username, "reason", "invalid_credentials")
-		return nil, errors.New("failed to authenticate: invalid credentials")
-	}
-
-	userID, err := id.ParseUserID(user.ID)
-	if err != nil {
-		slog.Error("authentication failed", "username", params.Username, "reason", "store_user_id_invalid", "error", err)
-		return nil, errors.New("failed to authenticate: invalid credentials")
+		// Preserve the verifier's classification: ErrInvalidCredentials stays
+		// matchable so the caller answers a generic 401, while an infrastructure
+		// failure keeps its detail for the caller to log and answer with a 500.
+		return nil, fmt.Errorf("authenticate: %w", err)
 	}
 
 	now := time.Now()
 	claims := &jwt.RegisteredClaims{
-		Subject:   userID.String(),
+		Subject:   user.PublicCode.FormatUser(),
 		Issuer:    Issuer,
 		Audience:  jwt.ClaimStrings{Audience},
 		ExpiresAt: jwt.NewNumericDate(now.Add(a.expiration)),
@@ -106,26 +105,30 @@ func (a *JWTAuthenticator) Authenticate(_ context.Context, params AuthParams) (*
 		return nil, fmt.Errorf("failed to sign token: %w", err)
 	}
 
-	slog.Info("authentication successful", "user_id", userID.String())
+	slog.Info("authentication successful", "user_id", user.UserID.String())
 
 	return &Result{
-		UserID: userID,
+		UserID: user.UserID,
 		Token:  tokenString,
 	}, nil
 }
 
 // ValidateToken parses a JWT string and returns the embedded claims.
 //
-// On failure the returned error always wraps one of ErrTokenExpired or
-// ErrTokenInvalid so callers can classify the failure via errors.Is without
-// importing the underlying JWT library. The underlying jwt error is preserved
-// in the chain so callers asserting on it continue to work.
+// On failure the returned error wraps ErrTokenExpired, ErrTokenInvalid, or
+// ErrIdentityUnavailable so callers can classify the failure via errors.Is
+// without importing the underlying JWT library. The underlying jwt error is
+// preserved in the chain so callers asserting on it continue to work.
 //
-// A structurally invalid Subject claim (empty, control characters, etc.)
-// is treated as an invalid token rather than a separate failure mode —
-// the JWT carried bytes that cannot identify a user, which is what
-// ErrTokenInvalid means at this boundary.
-func (a *JWTAuthenticator) ValidateToken(_ context.Context, tokenString string) (*Claims, error) {
+// A Subject that is not a well-formed U… public_code, or that resolves to no
+// account, is treated as an invalid token rather than a separate failure mode —
+// the JWT carried bytes that cannot identify a live user, which is what
+// ErrTokenInvalid means at this boundary. (A token minted with the pre-migration
+// numeric subject therefore fails here and the holder must re-login.) If the
+// subject is well-formed but cannot be resolved because the account backend is
+// unavailable, ValidateToken returns ErrIdentityUnavailable instead, so a
+// transient outage does not invalidate an otherwise-valid session.
+func (a *JWTAuthenticator) ValidateToken(ctx context.Context, tokenString string) (*Claims, error) {
 	if tokenString == "" {
 		return nil, fmt.Errorf("%w: empty token", ErrTokenInvalid)
 	}
@@ -144,9 +147,19 @@ func (a *JWTAuthenticator) ValidateToken(_ context.Context, tokenString string) 
 		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
 	}
 
-	userID, err := id.ParseUserID(claims.Subject)
+	code, err := id.ParseUserCode(claims.Subject)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
+	}
+	userID, err := a.resolver.ResolveUserID(ctx, code)
+	if errors.Is(err, ErrPublicCodeUnknown) {
+		// The subject names no live account: the token cannot identify anyone.
+		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
+	}
+	if err != nil {
+		// The backend was unavailable, so validity is indeterminate; the caller
+		// answers 503 rather than discarding a possibly-valid session as invalid.
+		return nil, fmt.Errorf("%w: %w", ErrIdentityUnavailable, err)
 	}
 
 	// jwt.WithExpirationRequired() guarantees ExpiresAt is non-nil — the

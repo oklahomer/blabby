@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -264,6 +265,20 @@ func TestAuth_ExpiredTokenYields1002(t *testing.T) {
 	got := readJSON(t, sess.client)
 	if got["code"].(float64) != 1002 {
 		t.Errorf("code: got %v, want 1002", got["code"])
+	}
+	expectActorStops(t, sess.system, sess.pid, time.Second)
+}
+
+func TestAuth_IdentityUnavailableYields5002(t *testing.T) {
+	authStub := &stubAuthenticator{validateFn: func(_ context.Context, _ string) (*auth.Claims, error) {
+		return nil, fmt.Errorf("%w: db unreachable", auth.ErrIdentityUnavailable)
+	}}
+	sess := startSession(t, authStub, &recordingGrainCaller{})
+	writeAuthFrame(t, sess.client, "valid-but-backend-down")
+
+	got := readJSON(t, sess.client)
+	if got["code"].(float64) != 5002 {
+		t.Errorf("code: got %v, want 5002", got["code"])
 	}
 	expectActorStops(t, sess.system, sess.pid, time.Second)
 }

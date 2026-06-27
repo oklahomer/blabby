@@ -10,18 +10,18 @@ import (
 	"github.com/oklahomer/blabby/cmd/client/internal/api"
 )
 
-// noopSubmitter records the most recent (username, password) it was
+// noopSubmitter records the most recent (email, password) it was
 // called with and returns a sentinel Cmd. Used to assert that
 // enter-submit fires for valid input and is suppressed otherwise.
 type recorder struct {
 	called   bool
-	username string
+	email    string
 	password string
 }
 
 func (r *recorder) submit(u, p string) tea.Cmd {
 	r.called = true
-	r.username = u
+	r.email = u
 	r.password = p
 	return func() tea.Msg { return "sentinel" }
 }
@@ -68,7 +68,7 @@ func typeIn(t *testing.T, m Model, s string) Model {
 func TestEnterSubmitsWithBothFieldsPopulated(t *testing.T) {
 	rec := &recorder{}
 	m := New(rec.submit, "http://localhost:8080")
-	m = typeIn(t, m, "rina")
+	m = typeIn(t, m, "rina@example.com")
 	m = stepTab(t, m)
 	m = typeIn(t, m, "hunter2")
 	next, cmd := m.Update(keyMsg("enter"))
@@ -80,8 +80,8 @@ func TestEnterSubmitsWithBothFieldsPopulated(t *testing.T) {
 	if !rec.called {
 		t.Fatal("submit not invoked")
 	}
-	if rec.username != "rina" || rec.password != "hunter2" {
-		t.Fatalf("got %q/%q", rec.username, rec.password)
+	if rec.email != "rina@example.com" || rec.password != "hunter2" {
+		t.Fatalf("got %q/%q", rec.email, rec.password)
 	}
 	if got, ok := next.(Model); !ok || !got.inFlight() {
 		t.Fatal("expected inFlight after enter")
@@ -90,7 +90,7 @@ func TestEnterSubmitsWithBothFieldsPopulated(t *testing.T) {
 
 func TestEnterWithEmptyFieldShowsInlineError(t *testing.T) {
 	m := New((&recorder{}).submit, "http://localhost:8080")
-	m = typeIn(t, m, "rina")
+	m = typeIn(t, m, "rina@example.com")
 	next, cmd := m.Update(keyMsg("enter")) // password still empty
 
 	if cmd != nil {
@@ -140,7 +140,7 @@ func TestKeysSuppressedWhileInFlight(t *testing.T) {
 
 func TestRejectionClearsPasswordAndShowsHeadline(t *testing.T) {
 	m := New((&recorder{}).submit, "http://localhost:8080")
-	m = typeIn(t, m, "rina")
+	m = typeIn(t, m, "rina@example.com")
 	m = stepTab(t, m)
 	m = typeIn(t, m, "wrong")
 	m.phase = phaseSigningIn
@@ -215,16 +215,16 @@ func TestSetConnectingFlipsInFlightCopy(t *testing.T) {
 
 func TestFocusCyclesViaTab(t *testing.T) {
 	m := New((&recorder{}).submit, "http://localhost:8080")
-	if m.focused != usernameSlot {
-		t.Fatalf("initial focus = %d, want username", m.focused)
+	if m.focused != emailSlot {
+		t.Fatalf("initial focus = %d, want email", m.focused)
 	}
 	m = stepTab(t, m)
 	if m.focused != passwordSlot {
 		t.Fatalf("after tab focus = %d, want password", m.focused)
 	}
 	m = stepShiftTab(t, m)
-	if m.focused != usernameSlot {
-		t.Fatalf("after shift+tab focus = %d, want username", m.focused)
+	if m.focused != emailSlot {
+		t.Fatalf("after shift+tab focus = %d, want email", m.focused)
 	}
 }
 

@@ -2,6 +2,7 @@ package user_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -909,7 +910,9 @@ type resolveDirStub struct {
 	err error
 }
 
-func (d resolveDirStub) Resolve(id.UserID) (id.UserRef, error) { return d.ref, d.err }
+func (d resolveDirStub) Resolve(context.Context, id.UserID) (id.UserRef, error) {
+	return d.ref, d.err
+}
 
 // TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully exercises the three
 // fallback branches of self-resolution at activation. The invariant under
@@ -951,10 +954,18 @@ func TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully(t *testing.T) {
 		{
 			name:       "directory miss degrades to identity and warns",
 			identity:   "1",
-			directory:  resolveDirStub{err: errors.New("not found")},
+			directory:  resolveDirStub{err: user.ErrProfileNotFound},
 			wantID:     "1",
 			wantName:   "1",
 			wantReason: "directory_miss",
+		},
+		{
+			name:       "directory backend error degrades to identity and logs the error class",
+			identity:   "1",
+			directory:  resolveDirStub{err: errors.New("dial tcp: connection refused")},
+			wantID:     "1",
+			wantName:   "1",
+			wantReason: "directory_error",
 		},
 		{
 			name:       "unparseable identity degrades to identity and warns",

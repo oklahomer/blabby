@@ -13,6 +13,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -86,18 +87,26 @@ type Grain struct {
 	joinedLoader JoinedRoomLoader
 }
 
+// ErrProfileNotFound is returned by Directory.Resolve when no profile exists for
+// the given id. It is distinct from an infrastructure failure (a stalled or
+// unreachable store), so resolveSelf can treat a genuine miss as a benign fallback
+// while surfacing a real backend error loudly.
+var ErrProfileNotFound = errors.New("user: profile not found")
+
 // Directory resolves a user's profile (a UserRef of id + display name) from
 // their identity. The User grain seeds its UserRef from it on activation; the
-// production implementation is the auth user store. A one-method interface so
-// the grain unit-tests can inject a fake (or omit it and fall back to the raw
-// identity).
+// production implementation reads service_user via userrepo (see
+// NewRepoDirectory). A one-method interface so the grain unit-tests can inject a
+// fake (or omit it and fall back to the raw identity).
 //
-// Cluster note: the Phase-1 implementation is a per-node, identically-seeded
-// in-memory store. It is coherent across nodes only because that data never
-// changes; a mutable directory (renames, persistence) must be backed by a
-// shared source so every node resolves the same profile.
+// Resolve reports ErrProfileNotFound when the id has no profile, and any other
+// error for a backend failure. Like JoinedRoomLoader, the implementation owns its
+// own latency budget — the grain passes a plain context and imposes no deadline —
+// so a stalled lookup cannot block an activation. Backed by the shared database,
+// it resolves the same profile on every cluster member — including renames, unlike
+// a per-node store.
 type Directory interface {
-	Resolve(userID id.UserID) (id.UserRef, error)
+	Resolve(ctx context.Context, userID id.UserID) (id.UserRef, error)
 }
 
 // Option configures a User kind built by NewKind.
@@ -175,27 +184,39 @@ func (g *Grain) hydrateJoinedRooms(ctx cluster.GrainContext) {
 }
 
 // resolveSelf builds the grain's own UserRef once at activation, seeding the
-// display name from the directory. It falls back to the raw identity as the
-// name when no directory is injected, the identity is unparseable, or the
-// directory has no entry — a miss degrades to showing the user ID rather than
-// breaking message flow. The cached result is reused read-only on every
-// outbound command.
+// display name from the directory. It falls back to the raw identity as the name
+// when no directory is injected, the identity is unparseable, the directory has no
+// entry, or the directory lookup fails — degrading to showing the user ID rather
+// than breaking message flow. The fallback is non-fatal by design: a genuine miss
+// logs at warn, while a backend failure logs at error (so an outage stays visible)
+// but still degrades rather than failing the activation. The cached result is
+// reused read-only on every outbound command.
 func (g *Grain) resolveSelf(ctx cluster.GrainContext) *commonpb.UserRef {
 	identity := ctx.Identity()
+	fallback := &commonpb.UserRef{Id: identity, Name: identity}
 	uid, err := id.ParseUserID(identity)
 	if err != nil {
 		slog.Warn(eventUserProfileSeedFailed,
 			"grain_type", ctx.Kind(), "grain_id", identity, "reason", "invalid_identity")
-		return &commonpb.UserRef{Id: identity, Name: identity}
+		return fallback
 	}
 	if g.directory != nil {
-		if ref, err := g.directory.Resolve(uid); err == nil {
+		ref, err := g.directory.Resolve(context.Background(), uid)
+		switch {
+		case err == nil:
 			return &commonpb.UserRef{Id: ref.ID().String(), Name: ref.Name()}
+		case errors.Is(err, ErrProfileNotFound):
+			// A genuine miss: no profile for this id. Benign — fall back to the raw id.
+			slog.Warn(eventUserProfileSeedFailed,
+				"grain_type", ctx.Kind(), "grain_id", identity, "reason", "directory_miss")
+		default:
+			// A backend failure silently degrading to the raw id would hide an
+			// outage, so surface the real error class loudly before falling back.
+			slog.Error(eventUserProfileSeedFailed,
+				"grain_type", ctx.Kind(), "grain_id", identity, "reason", "directory_error", "error", err)
 		}
-		slog.Warn(eventUserProfileSeedFailed,
-			"grain_type", ctx.Kind(), "grain_id", identity, "reason", "directory_miss")
 	}
-	return &commonpb.UserRef{Id: identity, Name: identity}
+	return fallback
 }
 
 // Terminate is a passivation hook; state is not persisted across activations.

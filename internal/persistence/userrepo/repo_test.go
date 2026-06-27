@@ -354,6 +354,34 @@ func TestSetStatus_NotFound(t *testing.T) {
 	}
 }
 
+func TestSetPasswordHash_Success(t *testing.T) {
+	var gotSQL string
+	var gotArgs []any
+	fq := &fakeQuerier{exec: func(sql string, args ...any) (pgconn.CommandTag, error) {
+		gotSQL, gotArgs = sql, args
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	}}
+
+	if err := New(nil).SetPasswordHash(context.Background(), fq, mustUserID(t, 42), []byte("$2a$12$new")); err != nil {
+		t.Fatalf("SetPasswordHash: %v", err)
+	}
+	if gotArgs[0].(int64) != 42 || string(gotArgs[1].([]byte)) != "$2a$12$new" {
+		t.Errorf("set password hash args = %v", gotArgs)
+	}
+	if !strings.Contains(gotSQL, "UPDATE service_user") || !strings.Contains(gotSQL, "password_hash = $2") {
+		t.Errorf("unexpected update SQL: %s", gotSQL)
+	}
+}
+
+func TestSetPasswordHash_NotFound(t *testing.T) {
+	fq := &fakeQuerier{exec: func(string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.NewCommandTag("UPDATE 0"), nil
+	}}
+	if err := New(nil).SetPasswordHash(context.Background(), fq, mustUserID(t, 99), []byte("x")); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("SetPasswordHash(missing): got %v, want ErrUserNotFound", err)
+	}
+}
+
 func TestSetStatus_PropagatesError(t *testing.T) {
 	sentinel := errors.New("db down")
 	fq := &fakeQuerier{exec: func(string, ...any) (pgconn.CommandTag, error) {

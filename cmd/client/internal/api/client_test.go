@@ -58,19 +58,22 @@ func TestLoginCmdSuccess(t *testing.T) {
 			http.Error(w, "wrong route", http.StatusNotFound)
 			return
 		}
-		var req LoginRequest
+		var req map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
-		if req.Username != "rina" || req.Password != "hunter2" {
-			t.Errorf("got credentials %q/%q", req.Username, req.Password)
+		if req["mail_address"] != "rina@example.com" || req["password"] != "hunter2" {
+			t.Errorf("got credentials %q/%q", req["mail_address"], req["password"])
+		}
+		if _, ok := req["username"]; ok {
+			t.Errorf("login request still sent username field: %#v", req)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(LoginResponse{Token: "fake.jwt.token"})
 	}))
 	defer srv.Close()
 
-	msg := LoginCmd(srv.Client(), srv.URL, "rina", "hunter2", 2*time.Second)()
+	msg := LoginCmd(srv.Client(), srv.URL, "rina@example.com", "hunter2", 2*time.Second)()
 	got, ok := msg.(LoginSucceeded)
 	if !ok {
 		t.Fatalf("expected LoginSucceeded, got %T: %#v", msg, msg)
@@ -78,8 +81,8 @@ func TestLoginCmdSuccess(t *testing.T) {
 	if got.Token != "fake.jwt.token" {
 		t.Fatalf("got token %q", got.Token)
 	}
-	if got.Username != "rina" {
-		t.Fatalf("got username %q", got.Username)
+	if got.Email != "rina@example.com" {
+		t.Fatalf("got email %q", got.Email)
 	}
 }
 
@@ -93,7 +96,7 @@ func TestLoginCmdRejected(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	msg := LoginCmd(srv.Client(), srv.URL, "rina", "wrong", 2*time.Second)()
+	msg := LoginCmd(srv.Client(), srv.URL, "rina@example.com", "wrong", 2*time.Second)()
 	got, ok := msg.(LoginRejected)
 	if !ok {
 		t.Fatalf("expected LoginRejected, got %T", msg)
@@ -112,7 +115,7 @@ func TestLoginCmdTransportError(t *testing.T) {
 	addr := srv.URL
 	srv.Close()
 
-	msg := LoginCmd(&http.Client{}, addr, "rina", "hunter2", 500*time.Millisecond)()
+	msg := LoginCmd(&http.Client{}, addr, "rina@example.com", "hunter2", 500*time.Millisecond)()
 	if _, ok := msg.(LoginTransportError); !ok {
 		t.Fatalf("expected LoginTransportError, got %T", msg)
 	}
@@ -125,7 +128,7 @@ func TestLoginCmdMalformedSuccessResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	msg := LoginCmd(srv.Client(), srv.URL, "rina", "hunter2", 2*time.Second)()
+	msg := LoginCmd(srv.Client(), srv.URL, "rina@example.com", "hunter2", 2*time.Second)()
 	if _, ok := msg.(LoginTransportError); !ok {
 		t.Fatalf("expected LoginTransportError, got %T", msg)
 	}
@@ -384,7 +387,7 @@ func TestLoginCmdTokenNeverLeaksToErrorPath(t *testing.T) {
 
 	// Even if we encode a token-shaped password, the error path must
 	// not return any message containing it.
-	msg := LoginCmd(srv.Client(), srv.URL, "rina", secretToken, time.Second)()
+	msg := LoginCmd(srv.Client(), srv.URL, "rina@example.com", secretToken, time.Second)()
 	if rej, ok := msg.(LoginRejected); ok {
 		if strings.Contains(rej.Message, secretToken) {
 			t.Fatalf("LoginRejected message leaked password: %q", rej.Message)

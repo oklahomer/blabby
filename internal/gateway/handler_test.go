@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,8 +26,8 @@ func decodeErrorResponse(t *testing.T, body io.Reader) ErrorResponse {
 
 func TestHandleLogin(t *testing.T) {
 	successAuth := func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
-		if params.Username != "alice" || params.Password != "secret" {
-			return nil, errors.New("invalid credentials")
+		if params.MailAddress != "alice@example.com" || params.Password != "secret" {
+			return nil, auth.ErrInvalidCredentials
 		}
 		return &auth.Result{UserID: mustUserID(t, "1"), Token: "signed.jwt.token"}, nil
 	}
@@ -40,13 +41,13 @@ func TestHandleLogin(t *testing.T) {
 	}{
 		{
 			name:       "valid credentials returns 200 with token",
-			body:       `{"username":"alice","password":"secret"}`,
+			body:       `{"mail_address":"alice@example.com","password":"secret"}`,
 			authFn:     successAuth,
 			wantStatus: http.StatusOK,
 		},
 		{
 			name:          "invalid credentials returns 401 with code 1001",
-			body:          `{"username":"alice","password":"wrong"}`,
+			body:          `{"mail_address":"alice@example.com","password":"wrong"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusUnauthorized,
 			wantErrorCode: errcode.AuthInvalidToken,
@@ -60,13 +61,13 @@ func TestHandleLogin(t *testing.T) {
 		},
 		{
 			name:          "malformed JSON returns 400 with code 4001",
-			body:          `{"username":"alice"`,
+			body:          `{"mail_address":"alice@example.com"`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
-			name:          "missing username returns 400 with code 4001",
+			name:          "missing mail address returns 400 with code 4001",
 			body:          `{"password":"secret"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
@@ -74,56 +75,56 @@ func TestHandleLogin(t *testing.T) {
 		},
 		{
 			name:          "missing password returns 400 with code 4001",
-			body:          `{"username":"alice"}`,
+			body:          `{"mail_address":"alice@example.com"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
-			name:          "empty username and password returns 400",
-			body:          `{"username":"","password":""}`,
+			name:          "empty mail address and password returns 400",
+			body:          `{"mail_address":"","password":""}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
-			name:          "whitespace-only username returns 400",
-			body:          `{"username":"   ","password":"secret"}`,
+			name:          "whitespace-only mail address returns 400",
+			body:          `{"mail_address":"   ","password":"secret"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "whitespace-only password returns 400",
-			body:          `{"username":"alice","password":"\t\n"}`,
+			body:          `{"mail_address":"alice@example.com","password":"\t\n"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "trailing JSON object returns 400",
-			body:          `{"username":"alice","password":"secret"}{"x":1}`,
+			body:          `{"mail_address":"alice@example.com","password":"secret"}{"x":1}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "trailing junk after JSON returns 400",
-			body:          `{"username":"alice","password":"secret"} garbage`,
+			body:          `{"mail_address":"alice@example.com","password":"secret"} garbage`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
-			name:          "username over length cap returns 400",
-			body:          `{"username":"` + strings.Repeat("a", maxUsernameBytes+1) + `","password":"secret"}`,
+			name:          "mail address over length cap returns 400",
+			body:          `{"mail_address":"` + strings.Repeat("a", maxMailAddressBytes+1) + `","password":"secret"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
 			name:          "password over length cap returns 400",
-			body:          `{"username":"alice","password":"` + strings.Repeat("p", maxPasswordBytes+1) + `"}`,
+			body:          `{"mail_address":"alice@example.com","password":"` + strings.Repeat("p", maxPasswordBytes+1) + `"}`,
 			authFn:        successAuth,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errcode.InvalidRequest,
@@ -174,11 +175,13 @@ func TestHandleLogin(t *testing.T) {
 func TestHandleLogin_AuthErrorMessageDoesNotLeakDetails(t *testing.T) {
 	g := NewGateway(&stubAuthenticator{
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
-			return nil, errors.New("user alice not found in database table users")
+			// A credential rejection that wraps a leaky internal message: the client
+			// must still see only the generic response.
+			return nil, fmt.Errorf("user alice not found in database table users: %w", auth.ErrInvalidCredentials)
 		},
 	}, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"alice","password":"x"}`))
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"x"}`))
 	rec := httptest.NewRecorder()
 	g.RegisterRoutes().ServeHTTP(rec, req)
 
@@ -194,6 +197,32 @@ func TestHandleLogin_AuthErrorMessageDoesNotLeakDetails(t *testing.T) {
 	}
 }
 
+// TestHandleLogin_InfrastructureErrorReturns500 covers a non-credential failure
+// (e.g. the account store is unreachable): it must surface as a 500, not a
+// misleading 401, and must not leak the infrastructure detail to the client.
+func TestHandleLogin_InfrastructureErrorReturns500(t *testing.T) {
+	g := NewGateway(&stubAuthenticator{
+		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
+			return nil, errors.New("dial tcp 127.0.0.1:5432: connection refused")
+		},
+	}, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"secret"}`))
+	rec := httptest.NewRecorder()
+	g.RegisterRoutes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d, want 500 (body=%s)", rec.Code, rec.Body.String())
+	}
+	resp := decodeErrorResponse(t, rec.Body)
+	if resp.Error.Code != errcode.InternalError {
+		t.Errorf("code: got %d, want %d", resp.Error.Code, errcode.InternalError)
+	}
+	if strings.Contains(resp.Error.Message, "connection refused") || strings.Contains(resp.Error.Message, "5432") {
+		t.Errorf("error message leaks infrastructure detail: %q", resp.Error.Message)
+	}
+}
+
 func TestHandleLogin_NilResultFromAuthenticatorReturns500(t *testing.T) {
 	g := NewGateway(&stubAuthenticator{
 		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
@@ -201,7 +230,7 @@ func TestHandleLogin_NilResultFromAuthenticatorReturns500(t *testing.T) {
 		},
 	}, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"alice","password":"secret"}`))
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"secret"}`))
 	rec := httptest.NewRecorder()
 	g.RegisterRoutes().ServeHTTP(rec, req)
 
@@ -221,7 +250,7 @@ func TestHandleLogin_EmptyTokenFromAuthenticatorReturns500(t *testing.T) {
 		},
 	}, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"alice","password":"secret"}`))
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"secret"}`))
 	rec := httptest.NewRecorder()
 	g.RegisterRoutes().ServeHTTP(rec, req)
 
@@ -243,7 +272,7 @@ func TestHandleLogin_BodyTooLargeReturns400(t *testing.T) {
 
 	// Build a JSON body larger than the 1 MB cap.
 	huge := strings.Repeat("a", (1<<20)+10)
-	body := `{"username":"alice","password":"` + huge + `"}`
+	body := `{"mail_address":"alice@example.com","password":"` + huge + `"}`
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body))
 	rec := httptest.NewRecorder()

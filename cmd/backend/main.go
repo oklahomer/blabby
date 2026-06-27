@@ -27,7 +27,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/clusterboot"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
@@ -104,13 +103,11 @@ func run(dbCfg postgres.Config, cc clusterboot.Config) error {
 	}
 	defer leaseManager.Stop()
 
-	// The in-memory store backs the User grain's display-name directory. Its
-	// fixed, immutable seed makes every member resolve identical UserRefs, so no
-	// shared store is needed across members.
-	store := auth.NewInMemoryUserStore()
-
+	// The User grain's display-name directory reads service_user via userrepo over
+	// this same pool, so every member resolves identical UserRefs from the one
+	// shared source.
 	deps := clusterboot.GrainDeps{
-		Directory:   store,
+		Directory:   user.NewRepoDirectory(pool),
 		RoomLoader:  room.NewRoomRepoLoader(pool),
 		Membership:  room.NewMembershipStore(pool, leaseManager),
 		JoinedRooms: user.NewJoinedRoomLoader(pool),

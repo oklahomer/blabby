@@ -22,7 +22,7 @@ func TestStylesProduceNonEmptyRender(t *testing.T) {
 		{"title", Title().Render("Rooms")},
 		{"subtle", Subtle().Render("(no rooms yet)")},
 		{"error", Error().Render("✗ Invalid credentials")},
-		{"label", Label().Render("User:")},
+		{"label", Label().Render("Email:")},
 		{"modal", ModalBorder().Render("Sign in")},
 	}
 

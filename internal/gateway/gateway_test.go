@@ -44,7 +44,7 @@ func TestRegisterRoutes_LoginRouteRegistered(t *testing.T) {
 	}, nil, nil, nil)
 	handler := g.RegisterRoutes()
 
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"a","password":"b"}`))
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"a@example.com","password":"b"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

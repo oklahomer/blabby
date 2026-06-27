@@ -37,12 +37,12 @@ const (
 
 // Outbound tea.Msg types emitted by LoginCmd.
 
-// LoginSucceeded carries the JWT and the trimmed username from a
-// successful POST /login response. The username is mirrored back to
+// LoginSucceeded carries the JWT and the trimmed email from a
+// successful POST /login response. The email is mirrored back to
 // the app so the Profile pane can show the credential the user typed.
 type LoginSucceeded struct {
-	Token    string
-	Username string
+	Token string
+	Email string
 }
 
 // LoginRejected reports that the server returned a parseable error
@@ -133,7 +133,7 @@ type WSDisconnected struct {
 //
 // The token never appears in any returned message except
 // LoginSucceeded; it is never logged or echoed elsewhere.
-func LoginCmd(client *http.Client, server, username, password string, timeout time.Duration) tea.Cmd {
+func LoginCmd(client *http.Client, server, email, password string, timeout time.Duration) tea.Cmd {
 	if timeout <= 0 {
 		timeout = DefaultLoginTimeout
 	}
@@ -141,7 +141,7 @@ func LoginCmd(client *http.Client, server, username, password string, timeout ti
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
-		body, err := json.Marshal(LoginRequest{Username: username, Password: password})
+		body, err := json.Marshal(LoginRequest{MailAddress: email, Password: password})
 		if err != nil {
 			return LoginTransportError{Err: fmt.Errorf("encode login request: %w", err)}
 		}
@@ -171,7 +171,7 @@ func LoginCmd(client *http.Client, server, username, password string, timeout ti
 			if err := json.Unmarshal(raw, &lr); err != nil || lr.Token == "" {
 				return LoginTransportError{Err: errors.New("malformed login response from server")}
 			}
-			return LoginSucceeded{Token: lr.Token, Username: strings.TrimSpace(username)}
+			return LoginSucceeded{Token: lr.Token, Email: strings.TrimSpace(email)}
 		}
 
 		var env ErrorEnvelope
