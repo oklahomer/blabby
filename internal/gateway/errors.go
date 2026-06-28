@@ -149,3 +149,28 @@ func ErrInternalError(msg string) ErrorDetail { return NewErrorDetail(errcode.In
 func ErrServiceUnavailable(msg string) ErrorDetail {
 	return NewErrorDetail(errcode.ServiceUnavailable, msg)
 }
+
+// ErrInvalidEmail builds an ErrorDetail for a malformed registration email.
+func ErrInvalidEmail(msg string) ErrorDetail { return NewErrorDetail(errcode.InvalidEmail, msg) }
+
+// ErrWeakPassword builds an ErrorDetail for a registration password below the
+// minimum strength.
+func ErrWeakPassword(msg string) ErrorDetail { return NewErrorDetail(errcode.WeakPassword, msg) }
+
+// ErrEmailAlreadyRegistered builds an ErrorDetail for a registration whose email
+// is already taken.
+func ErrEmailAlreadyRegistered(msg string) ErrorDetail {
+	return NewErrorDetail(errcode.EmailAlreadyRegistered, msg)
+}
+
+// ErrHandleAlreadyTaken builds an ErrorDetail for a registration whose handle is
+// already taken.
+func ErrHandleAlreadyTaken(msg string) ErrorDetail {
+	return NewErrorDetail(errcode.HandleAlreadyTaken, msg)
+}
+
+// ErrVerificationRateLimited builds an ErrorDetail for a PIN resend that exceeded
+// its budget.
+func ErrVerificationRateLimited(msg string) ErrorDetail {
+	return NewErrorDetail(errcode.VerificationRateLimited, msg)
+}

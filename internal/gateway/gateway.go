@@ -14,10 +14,11 @@ import (
 // Gateway is the HTTP entry point for the chat service. It translates
 // between client-facing JSON / WebSocket frames and internal services.
 type Gateway struct {
-	auth      auth.Authenticator
-	rooms     RoomDirectory
-	cluster   *cluster.Cluster
-	actorRoot *actor.RootContext
+	auth         auth.Authenticator
+	rooms        RoomDirectory
+	registration Registrar
+	cluster      *cluster.Cluster
+	actorRoot    *actor.RootContext
 
 	// userGrain is a test seam. Production construction in NewGateway
 	// leaves it nil and userGrainFor falls through to
@@ -34,6 +35,7 @@ type Gateway struct {
 type Deps struct {
 	Authenticator auth.Authenticator
 	Rooms         RoomDirectory
+	Registration  Registrar
 	Cluster       *cluster.Cluster
 	ActorRoot     *actor.RootContext
 }
@@ -41,10 +43,11 @@ type Deps struct {
 // NewGateway constructs a Gateway from deps. Production wires all fields.
 func NewGateway(deps Deps) *Gateway {
 	return &Gateway{
-		auth:      deps.Authenticator,
-		rooms:     deps.Rooms,
-		cluster:   deps.Cluster,
-		actorRoot: deps.ActorRoot,
+		auth:         deps.Authenticator,
+		rooms:        deps.Rooms,
+		registration: deps.Registration,
+		cluster:      deps.Cluster,
+		actorRoot:    deps.ActorRoot,
 	}
 }
 
@@ -61,10 +64,13 @@ func (g *Gateway) RegisterRoutes() http.Handler {
 	mux := http.NewServeMux()
 
 	loginMethod, loginPath := splitMethodPath(endpointLogin)
+	registerMethod, registerPath := splitMethodPath(endpointRegister)
 	wsMethod, wsPath := splitMethodPath(endpointWS)
 
 	mux.HandleFunc(endpointLogin, g.handleLogin)
 	mux.HandleFunc(loginPath, g.handleMethodNotAllowed(loginMethod))
+	mux.HandleFunc(endpointRegister, g.handleRegister)
+	mux.HandleFunc(registerPath, g.handleMethodNotAllowed(registerMethod))
 	mux.HandleFunc(endpointWS, g.handleWS)
 	mux.HandleFunc(wsPath, g.handleMethodNotAllowed(wsMethod))
 	mux.Handle(endpointRoomList, g.requireAuth(g.handleRoomList))

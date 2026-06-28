@@ -34,7 +34,10 @@ import (
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/logging"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
+	"github.com/oklahomer/blabby/internal/persistence/userrepo"
+	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/persistence/workerlease"
+	"github.com/oklahomer/blabby/internal/verification"
 )
 
 const (
@@ -196,6 +199,26 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	// satisfies both auth collaborators, so it is passed as verifier and resolver.
 	userDir := gateway.NewUserRepoDirectory(pool)
 
+	// Registration mints accounts and issues verification PINs. It needs the
+	// worker-lease manager as its id source (it creates users) and a delivery
+	// sender selected from the environment — console by default, SMTP opt-in, which
+	// fails fast here if misconfigured.
+	verifyCfg, err := verification.ConfigFromEnv()
+	if err != nil {
+		return fmt.Errorf("verification config: %w", err)
+	}
+	verifySender, err := verification.NewSender(verifyCfg)
+	if err != nil {
+		return fmt.Errorf("build verification sender: %w", err)
+	}
+	registration := gateway.NewRegistrationService(
+		userrepo.New(leaseManager),
+		verifyrepo.New(),
+		verifySender,
+		postgres.NewTransactor(pool),
+		gateway.DefaultRegistrationPolicy(),
+	)
+
 	// The gateway joins as a cluster client: it registers no grain kinds (a
 	// client routes to grains via the topology that members advertise) and never
 	// hosts an activation.
@@ -216,6 +239,7 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	gw := gateway.NewGateway(gateway.Deps{
 		Authenticator: authenticator,
 		Rooms:         roomDir,
+		Registration:  registration,
 		Cluster:       c,
 		ActorRoot:     c.ActorSystem.Root,
 	})
