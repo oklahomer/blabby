@@ -55,7 +55,7 @@ func TestRegistrationIntegration(t *testing.T) {
 		verifyrepo.New(),
 		sender,
 		postgres.NewTransactor(pool),
-		RegistrationPolicy{PinTTL: 10 * time.Minute, ResendMinInterval: time.Minute, MaxResendCount: 5, CollisionRetries: 3},
+		RegistrationPolicy{PinTTL: 10 * time.Minute, ResendMinInterval: time.Minute, MaxResendCount: 5, MaxVerifyAttempts: 5, CollisionRetries: 3},
 	)
 
 	suffix := fmt.Sprintf("%d", base)
