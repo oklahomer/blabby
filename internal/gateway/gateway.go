@@ -17,6 +17,7 @@ type Gateway struct {
 	auth         auth.Authenticator
 	rooms        RoomDirectory
 	registration Registrar
+	verification VerificationService
 	cluster      *cluster.Cluster
 	actorRoot    *actor.RootContext
 
@@ -36,6 +37,7 @@ type Deps struct {
 	Authenticator auth.Authenticator
 	Rooms         RoomDirectory
 	Registration  Registrar
+	Verification  VerificationService
 	Cluster       *cluster.Cluster
 	ActorRoot     *actor.RootContext
 }
@@ -46,6 +48,7 @@ func NewGateway(deps Deps) *Gateway {
 		auth:         deps.Authenticator,
 		rooms:        deps.Rooms,
 		registration: deps.Registration,
+		verification: deps.Verification,
 		cluster:      deps.Cluster,
 		actorRoot:    deps.ActorRoot,
 	}
@@ -65,12 +68,18 @@ func (g *Gateway) RegisterRoutes() http.Handler {
 
 	loginMethod, loginPath := splitMethodPath(endpointLogin)
 	registerMethod, registerPath := splitMethodPath(endpointRegister)
+	verifyMethod, verifyPath := splitMethodPath(endpointVerify)
+	resendMethod, resendPath := splitMethodPath(endpointResendVerification)
 	wsMethod, wsPath := splitMethodPath(endpointWS)
 
 	mux.HandleFunc(endpointLogin, g.handleLogin)
 	mux.HandleFunc(loginPath, g.handleMethodNotAllowed(loginMethod))
 	mux.HandleFunc(endpointRegister, g.handleRegister)
 	mux.HandleFunc(registerPath, g.handleMethodNotAllowed(registerMethod))
+	mux.HandleFunc(endpointVerify, g.handleVerify)
+	mux.HandleFunc(verifyPath, g.handleMethodNotAllowed(verifyMethod))
+	mux.HandleFunc(endpointResendVerification, g.handleResendVerification)
+	mux.HandleFunc(resendPath, g.handleMethodNotAllowed(resendMethod))
 	mux.HandleFunc(endpointWS, g.handleWS)
 	mux.HandleFunc(wsPath, g.handleMethodNotAllowed(wsMethod))
 	mux.Handle(endpointRoomList, g.requireAuth(g.handleRoomList))

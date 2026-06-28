@@ -48,11 +48,15 @@ type transactor interface {
 type registrationUsers interface {
 	FindByEmail(ctx context.Context, q postgres.Querier, mail domain.MailAddress) (userrepo.User, error)
 	Create(ctx context.Context, q postgres.Querier, params userrepo.CreateParams) (userrepo.User, error)
+	SetStatus(ctx context.Context, q postgres.Querier, userID id.UserID, status domain.UserStatus) error
 }
 
 type registrationVerifications interface {
 	Create(ctx context.Context, q postgres.Querier, params verifyrepo.CreateParams) error
 	Resend(ctx context.Context, q postgres.Querier, params verifyrepo.ResendParams, policy verifyrepo.ResendPolicy) error
+	FindByUser(ctx context.Context, q postgres.Querier, userID id.UserID) (verifyrepo.Verification, error)
+	IncrementAttempts(ctx context.Context, q postgres.Querier, userID id.UserID) (int, error)
+	Delete(ctx context.Context, q postgres.Querier, userID id.UserID) error
 }
 
 // RegistrationPolicy bounds the registration/resend behavior.
@@ -63,6 +67,9 @@ type RegistrationPolicy struct {
 	ResendMinInterval time.Duration
 	// MaxResendCount caps how many times a pending account's PIN may be re-issued.
 	MaxResendCount int
+	// MaxVerifyAttempts caps wrong PIN submissions before the challenge locks; the
+	// user must request a new code, and a resend resets the counter.
+	MaxVerifyAttempts int
 	// CollisionRetries bounds re-running the create transaction when a minted
 	// public_code collides with an existing row.
 	CollisionRetries int
@@ -74,6 +81,7 @@ func DefaultRegistrationPolicy() RegistrationPolicy {
 		PinTTL:            10 * time.Minute,
 		ResendMinInterval: 60 * time.Second,
 		MaxResendCount:    5,
+		MaxVerifyAttempts: 5,
 		CollisionRetries:  3,
 	}
 }

@@ -20,11 +20,14 @@ type userResult struct {
 }
 
 type fakeRegistrationUsers struct {
-	findResults   []userResult
-	createResults []userResult
-	lastCreate    userrepo.CreateParams
-	findCalls     int
-	createCalls   int
+	findResults    []userResult
+	createResults  []userResult
+	setStatusErr   error
+	lastCreate     userrepo.CreateParams
+	lastSetStatus  domain.UserStatus
+	findCalls      int
+	createCalls    int
+	setStatusCalls int
 }
 
 func (f *fakeRegistrationUsers) FindByEmail(context.Context, postgres.Querier, domain.MailAddress) (userrepo.User, error) {
@@ -46,14 +49,31 @@ func (f *fakeRegistrationUsers) Create(_ context.Context, _ postgres.Querier, pa
 	return result.user, result.err
 }
 
+func (f *fakeRegistrationUsers) SetStatus(_ context.Context, _ postgres.Querier, _ id.UserID, status domain.UserStatus) error {
+	f.setStatusCalls++
+	f.lastSetStatus = status
+	return f.setStatusErr
+}
+
+type verificationResult struct {
+	verification verifyrepo.Verification
+	err          error
+}
+
 type fakeRegistrationVerifications struct {
-	createResults []error
-	resendResults []error
-	lastCreate    verifyrepo.CreateParams
-	lastResend    verifyrepo.ResendParams
-	lastPolicy    verifyrepo.ResendPolicy
-	createCalls   int
-	resendCalls   int
+	createResults  []error
+	resendResults  []error
+	findResults    []verificationResult
+	incrementErr   error
+	deleteErr      error
+	lastCreate     verifyrepo.CreateParams
+	lastResend     verifyrepo.ResendParams
+	lastPolicy     verifyrepo.ResendPolicy
+	createCalls    int
+	resendCalls    int
+	findCalls      int
+	incrementCalls int
+	deleteCalls    int
 }
 
 func (f *fakeRegistrationVerifications) Create(_ context.Context, _ postgres.Querier, params verifyrepo.CreateParams) error {
@@ -75,6 +95,25 @@ func (f *fakeRegistrationVerifications) Resend(_ context.Context, _ postgres.Que
 	err := f.resendResults[f.resendCalls]
 	f.resendCalls++
 	return err
+}
+
+func (f *fakeRegistrationVerifications) FindByUser(_ context.Context, _ postgres.Querier, _ id.UserID) (verifyrepo.Verification, error) {
+	if f.findCalls >= len(f.findResults) {
+		return verifyrepo.Verification{}, errors.New("unexpected FindByUser")
+	}
+	result := f.findResults[f.findCalls]
+	f.findCalls++
+	return result.verification, result.err
+}
+
+func (f *fakeRegistrationVerifications) IncrementAttempts(_ context.Context, _ postgres.Querier, _ id.UserID) (int, error) {
+	f.incrementCalls++
+	return 0, f.incrementErr
+}
+
+func (f *fakeRegistrationVerifications) Delete(_ context.Context, _ postgres.Querier, _ id.UserID) error {
+	f.deleteCalls++
+	return f.deleteErr
 }
 
 type fakeRegistrationTx struct {
@@ -171,6 +210,7 @@ func newRegistrationServiceForTest(users registrationUsers, verify registrationV
 			PinTTL:            time.Minute,
 			ResendMinInterval: time.Minute,
 			MaxResendCount:    5,
+			MaxVerifyAttempts: 5,
 			CollisionRetries:  3,
 		},
 	}

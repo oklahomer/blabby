@@ -91,6 +91,36 @@ func TestRegistrationIntegration(t *testing.T) {
 	if len(challenge.PinHash) == 0 {
 		t.Fatal("verification row has an empty pin_hash")
 	}
+	correctPIN := sender.pin.String()
+
+	// A wrong PIN fails uniformly but commits the attempt increment — the property a
+	// fake transaction cannot prove, since the failure is reported while the
+	// transaction still commits.
+	if err := svc.Verify(ctx, VerifyParams{MailAddress: mail, PIN: "000000"}); !errors.Is(err, errVerifyInvalid) {
+		t.Fatalf("Verify(wrong) = %v, want errVerifyInvalid", err)
+	}
+	afterWrong, err := verify.FindByUser(ctx, pool, created.ID)
+	if err != nil {
+		t.Fatalf("FindByUser after wrong PIN: %v", err)
+	}
+	if afterWrong.Attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (the increment must persist)", afterWrong.Attempts)
+	}
+
+	// The correct PIN activates the account and clears the challenge.
+	if err := svc.Verify(ctx, VerifyParams{MailAddress: mail, PIN: correctPIN}); err != nil {
+		t.Fatalf("Verify(correct): %v", err)
+	}
+	activated, err := users.FindByEmail(ctx, pool, mail)
+	if err != nil {
+		t.Fatalf("FindByEmail after verify: %v", err)
+	}
+	if activated.Status != domain.UserStatusActive {
+		t.Fatalf("status = %q, want active", activated.Status)
+	}
+	if _, err := verify.FindByUser(ctx, pool, created.ID); !errors.Is(err, verifyrepo.ErrVerificationNotFound) {
+		t.Fatalf("FindByUser after verify = %v, want challenge cleared", err)
+	}
 
 	// A different email reusing the same handle is rejected.
 	otherMail := mustIntegrationMail(t, "itest2-"+suffix+"@example.com")

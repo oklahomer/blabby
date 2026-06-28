@@ -174,3 +174,9 @@ func ErrHandleAlreadyTaken(msg string) ErrorDetail {
 func ErrVerificationRateLimited(msg string) ErrorDetail {
 	return NewErrorDetail(errcode.VerificationRateLimited, msg)
 }
+
+// ErrVerificationInvalid builds an ErrorDetail for a verification that could not
+// succeed (unknown account/challenge, expired challenge, or wrong PIN).
+func ErrVerificationInvalid(msg string) ErrorDetail {
+	return NewErrorDetail(errcode.VerificationInvalid, msg)
+}

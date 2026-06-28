@@ -240,6 +240,7 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 		Authenticator: authenticator,
 		Rooms:         roomDir,
 		Registration:  registration,
+		Verification:  registration,
 		Cluster:       c,
 		ActorRoot:     c.ActorSystem.Root,
 	})
