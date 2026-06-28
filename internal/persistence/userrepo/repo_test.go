@@ -68,9 +68,9 @@ func assignAll(dest []any, values []any) error {
 }
 
 // userValues builds one row in the scanUser column order.
-func userValues(uid int64, code, mail, handle, displayName string, hash []byte, status string) []any {
+func userValues(uid int64, code, mail, handle, handleNorm, displayName string, hash []byte, status string) []any {
 	ts := time.Unix(0, 0).UTC()
-	return []any{uid, code, mail, handle, handle, displayName, hash, status, ts, ts}
+	return []any{uid, code, mail, handle, handleNorm, displayName, hash, status, ts, ts}
 }
 
 type stubIDSource struct {
@@ -94,11 +94,29 @@ func mustUserID(t *testing.T, v int64) id.UserID {
 	return uid
 }
 
-func createParams() CreateParams {
+func mustMailAddress(t *testing.T, raw string) domain.MailAddress {
+	t.Helper()
+	addr, err := domain.NewMailAddress(raw)
+	if err != nil {
+		t.Fatalf("NewMailAddress(%q): %v", raw, err)
+	}
+	return addr
+}
+
+func mustHandle(t *testing.T, raw string) domain.Handle {
+	t.Helper()
+	handle, err := domain.NewHandle(raw)
+	if err != nil {
+		t.Fatalf("NewHandle(%q): %v", raw, err)
+	}
+	return handle
+}
+
+func createParams(t *testing.T) CreateParams {
+	t.Helper()
 	return CreateParams{
-		MailAddress:  "alice@example.com",
-		Handle:       "Alice",
-		HandleNorm:   "alice",
+		MailAddress:  mustMailAddress(t, "alice@example.com"),
+		Handle:       mustHandle(t, "Alice"),
 		DisplayName:  "Alice",
 		PasswordHash: []byte("$2a$12$hash"),
 		Status:       domain.UserStatusPending,
@@ -115,19 +133,22 @@ func TestCreate_Success(t *testing.T) {
 			// RETURNING echoes the inserted row back, with the status it was given.
 			return assignAll(dest, userValues(
 				args[0].(int64), args[1].(string), args[2].(string), args[3].(string),
-				args[5].(string), args[6].([]byte), args[7].(string)))
+				args[4].(string), args[5].(string), args[6].([]byte), args[7].(string)))
 		}}
 	}}
 
-	user, err := New(&stubIDSource{id: uid}).Create(context.Background(), fq, createParams())
+	user, err := New(&stubIDSource{id: uid}).Create(context.Background(), fq, createParams(t))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if user.ID.Int64() != uid {
 		t.Errorf("ID = %d, want %d", user.ID.Int64(), uid)
 	}
-	if user.MailAddress != "alice@example.com" {
+	if user.MailAddress.String() != "alice@example.com" {
 		t.Errorf("MailAddress = %q, want alice@example.com", user.MailAddress)
+	}
+	if user.Handle.Display() != "Alice" || user.Handle.Normalized() != "alice" {
+		t.Errorf("Handle = %q/%q, want Alice/alice", user.Handle.Display(), user.Handle.Normalized())
 	}
 	if user.Status != domain.UserStatusPending {
 		t.Errorf("Status = %q, want pending", user.Status)
@@ -135,7 +156,9 @@ func TestCreate_Success(t *testing.T) {
 	if !strings.HasPrefix(user.PublicID(), "U") {
 		t.Errorf("PublicID = %q, want a U… code", user.PublicID())
 	}
-	if gotArgs[0].(int64) != uid || gotArgs[2].(string) != "alice@example.com" || gotArgs[7].(string) != "pending" {
+	if gotArgs[0].(int64) != uid || gotArgs[2].(string) != "alice@example.com" ||
+		gotArgs[3].(string) != "Alice" || gotArgs[4].(string) != "alice" ||
+		gotArgs[7].(string) != "pending" {
 		t.Errorf("insert args = %v", gotArgs)
 	}
 	if !strings.Contains(gotSQL, "INSERT INTO service_user") || !strings.Contains(gotSQL, "$8::user_status") {
@@ -151,7 +174,7 @@ func TestCreate_MintErrorSkipsDB(t *testing.T) {
 		return fakeRow{scan: func(...any) error { return nil }}
 	}}
 
-	_, err := New(&stubIDSource{err: sentinel}).Create(context.Background(), fq, createParams())
+	_, err := New(&stubIDSource{err: sentinel}).Create(context.Background(), fq, createParams(t))
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("Create: got %v, want the mint error", err)
 	}
@@ -171,7 +194,7 @@ func TestCreate_ReportsPublicCodeCollision(t *testing.T) {
 		}}
 	}}
 
-	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams())
+	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
 	if !errors.Is(err, ErrPublicCodeCollision) {
 		t.Fatalf("Create: got %v, want ErrPublicCodeCollision", err)
 	}
@@ -180,27 +203,55 @@ func TestCreate_ReportsPublicCodeCollision(t *testing.T) {
 	}
 }
 
-func TestCreate_DuplicateEmailIsHardError(t *testing.T) {
-	// A 23505 on a different constraint (a duplicate email, handle, or minted id)
-	// is not a public_code clash: it must surface as a hard error, not a
-	// recoverable collision the caller would retry with the same email.
-	calls := 0
+func TestCreate_ClassifiesDuplicateByConstraint(t *testing.T) {
+	// A 23505 is mapped to a specific sentinel by the constraint name, so
+	// registration can distinguish a taken email from a taken handle.
+	tests := []struct {
+		name       string
+		constraint string
+		want       error
+	}{
+		{"mail address taken", "service_user_mail_address_key", ErrMailAddressTaken},
+		{"handle taken", "service_user_handle_norm_key", ErrHandleTaken},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
+				calls++
+				return fakeRow{scan: func(...any) error {
+					return &pgconn.PgError{Code: uniqueViolation, ConstraintName: tc.constraint}
+				}}
+			}}
+
+			_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Create: got %v, want %v", err, tc.want)
+			}
+			if calls != 1 {
+				t.Fatalf("queried %d times, want 1 (Create does not retry a taken email/handle)", calls)
+			}
+		})
+	}
+}
+
+func TestCreate_PrimaryKeyCollisionIsHardError(t *testing.T) {
+	// A 23505 on the primary key (a duplicate minted UserID) is not an expected
+	// duplicate: it must surface as a hard error, not any of the duplicate sentinels.
 	fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
-		calls++
 		return fakeRow{scan: func(...any) error {
-			return &pgconn.PgError{Code: uniqueViolation, ConstraintName: "service_user_mail_address_key"}
+			return &pgconn.PgError{Code: uniqueViolation, ConstraintName: "service_user_pkey"}
 		}}
 	}}
 
-	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams())
+	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
 	if err == nil {
-		t.Fatal("Create: want an error for a duplicate email")
+		t.Fatal("Create: want an error for a primary-key collision")
 	}
-	if errors.Is(err, ErrPublicCodeCollision) {
-		t.Fatal("a duplicate-email violation must not be reported as a public_code collision")
-	}
-	if calls != 1 {
-		t.Fatalf("queried %d times, want 1", calls)
+	for _, sentinel := range []error{ErrPublicCodeCollision, ErrMailAddressTaken, ErrHandleTaken} {
+		if errors.Is(err, sentinel) {
+			t.Fatalf("a primary-key collision must not be classified as %v", sentinel)
+		}
 	}
 }
 
@@ -212,7 +263,7 @@ func TestCreate_PropagatesHardError(t *testing.T) {
 		return fakeRow{scan: func(...any) error { return sentinel }}
 	}}
 
-	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams())
+	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("Create: got %v, want the db error", err)
 	}
@@ -234,14 +285,14 @@ func findByCases(t *testing.T) []findByCase {
 		{
 			name: "FindByEmail",
 			call: func(r *Repo, q postgres.Querier) (User, error) {
-				return r.FindByEmail(context.Background(), q, "alice@example.com")
+				return r.FindByEmail(context.Background(), q, mustMailAddress(t, "alice@example.com"))
 			},
 			wantArg: "alice@example.com",
 		},
 		{
-			name: "FindByHandleNorm",
+			name: "FindByHandle",
 			call: func(r *Repo, q postgres.Querier) (User, error) {
-				return r.FindByHandleNorm(context.Background(), q, "alice")
+				return r.FindByHandle(context.Background(), q, mustHandle(t, "Alice"))
 			},
 			wantArg: "alice",
 		},
@@ -263,7 +314,7 @@ func TestFindBy_Success(t *testing.T) {
 					t.Errorf("lookup arg = %v, want %v", args[0], tc.wantArg)
 				}
 				return fakeRow{scan: func(dest ...any) error {
-					return assignAll(dest, userValues(42, "A000000042", "alice@example.com", "alice", "Alice", []byte("$2a$12$hash"), "active"))
+					return assignAll(dest, userValues(42, "A000000042", "alice@example.com", "Alice", "alice", "Alice", []byte("$2a$12$hash"), "active"))
 				}}
 			}}
 
@@ -271,13 +322,26 @@ func TestFindBy_Success(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
-			if user.ID.Int64() != 42 || user.MailAddress != "alice@example.com" || user.Status != domain.UserStatusActive {
+			if user.ID.Int64() != 42 || user.MailAddress.String() != "alice@example.com" || user.Status != domain.UserStatusActive {
 				t.Errorf("user = %+v", user)
 			}
 			if string(user.PasswordHash) != "$2a$12$hash" {
 				t.Errorf("PasswordHash = %q, want the stored hash", user.PasswordHash)
 			}
 		})
+	}
+}
+
+func TestFindBy_RejectsInconsistentHandleNorm(t *testing.T) {
+	fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
+		return fakeRow{scan: func(dest ...any) error {
+			return assignAll(dest, userValues(42, "A000000042", "alice@example.com", "Alice", "bob", "Alice", []byte("$2a$12$hash"), "active"))
+		}}
+	}}
+
+	_, err := New(nil).FindByID(context.Background(), fq, mustUserID(t, 42))
+	if err == nil || !strings.Contains(err.Error(), "handle_norm") {
+		t.Fatalf("FindByID err = %v, want handle_norm integrity error", err)
 	}
 }
 

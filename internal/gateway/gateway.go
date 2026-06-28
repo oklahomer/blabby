@@ -14,10 +14,12 @@ import (
 // Gateway is the HTTP entry point for the chat service. It translates
 // between client-facing JSON / WebSocket frames and internal services.
 type Gateway struct {
-	auth      auth.Authenticator
-	rooms     RoomDirectory
-	cluster   *cluster.Cluster
-	actorRoot *actor.RootContext
+	auth         auth.Authenticator
+	rooms        RoomDirectory
+	registration Registrar
+	verification VerificationService
+	cluster      *cluster.Cluster
+	actorRoot    *actor.RootContext
 
 	// userGrain is a test seam. Production construction in NewGateway
 	// leaves it nil and userGrainFor falls through to
@@ -25,17 +27,30 @@ type Gateway struct {
 	userGrain func(userID id.UserID) userGrainCaller
 }
 
-// NewGateway constructs a Gateway from its dependencies: the authenticator, the
-// room directory (which resolves the opaque R… codes to internal RoomIDs for the
-// HTTP routes), and the cluster client plus root for grain dispatch. Production
-// wires all of them; a test may pass nil for a dependency the exercised routes do
-// not touch.
-func NewGateway(authenticator auth.Authenticator, rooms RoomDirectory, c *cluster.Cluster, root *actor.RootContext) *Gateway {
+// Deps groups the Gateway's dependencies: the authenticator, the room directory
+// (which resolves the opaque R… codes to internal RoomIDs for the HTTP routes),
+// and the cluster client plus root for grain dispatch. Grouping them into one
+// struct keeps the constructor stable as the gateway grows and lets call sites
+// read by field name. A test may leave any field nil for a dependency the
+// exercised routes do not touch.
+type Deps struct {
+	Authenticator auth.Authenticator
+	Rooms         RoomDirectory
+	Registration  Registrar
+	Verification  VerificationService
+	Cluster       *cluster.Cluster
+	ActorRoot     *actor.RootContext
+}
+
+// NewGateway constructs a Gateway from deps. Production wires all fields.
+func NewGateway(deps Deps) *Gateway {
 	return &Gateway{
-		auth:      authenticator,
-		rooms:     rooms,
-		cluster:   c,
-		actorRoot: root,
+		auth:         deps.Authenticator,
+		rooms:        deps.Rooms,
+		registration: deps.Registration,
+		verification: deps.Verification,
+		cluster:      deps.Cluster,
+		actorRoot:    deps.ActorRoot,
 	}
 }
 
@@ -52,10 +67,19 @@ func (g *Gateway) RegisterRoutes() http.Handler {
 	mux := http.NewServeMux()
 
 	loginMethod, loginPath := splitMethodPath(endpointLogin)
+	registerMethod, registerPath := splitMethodPath(endpointRegister)
+	verifyMethod, verifyPath := splitMethodPath(endpointVerify)
+	resendMethod, resendPath := splitMethodPath(endpointResendVerification)
 	wsMethod, wsPath := splitMethodPath(endpointWS)
 
 	mux.HandleFunc(endpointLogin, g.handleLogin)
 	mux.HandleFunc(loginPath, g.handleMethodNotAllowed(loginMethod))
+	mux.HandleFunc(endpointRegister, g.handleRegister)
+	mux.HandleFunc(registerPath, g.handleMethodNotAllowed(registerMethod))
+	mux.HandleFunc(endpointVerify, g.handleVerify)
+	mux.HandleFunc(verifyPath, g.handleMethodNotAllowed(verifyMethod))
+	mux.HandleFunc(endpointResendVerification, g.handleResendVerification)
+	mux.HandleFunc(resendPath, g.handleMethodNotAllowed(resendMethod))
 	mux.HandleFunc(endpointWS, g.handleWS)
 	mux.HandleFunc(wsPath, g.handleMethodNotAllowed(wsMethod))
 	mux.Handle(endpointRoomList, g.requireAuth(g.handleRoomList))

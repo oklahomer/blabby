@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
@@ -77,6 +78,19 @@ func TestHashPassword_AcceptsLongPasswords(t *testing.T) {
 	}
 	if err := VerifyPassword(hash, one); err != nil {
 		t.Errorf("VerifyPassword(same long password) = %v, want nil", err)
+	}
+}
+
+func TestValidatePasswordStrength(t *testing.T) {
+	// Boundary: exactly MinPasswordLen passes, one byte short fails.
+	if err := ValidatePasswordStrength(strings.Repeat("a", MinPasswordLen)); err != nil {
+		t.Errorf("ValidatePasswordStrength(len %d) = %v, want nil", MinPasswordLen, err)
+	}
+	if err := ValidatePasswordStrength(strings.Repeat("a", MinPasswordLen-1)); !errors.Is(err, ErrWeakPassword) {
+		t.Errorf("ValidatePasswordStrength(len %d) = %v, want ErrWeakPassword", MinPasswordLen-1, err)
+	}
+	if err := ValidatePasswordStrength(""); !errors.Is(err, ErrWeakPassword) {
+		t.Errorf("ValidatePasswordStrength(empty) = %v, want ErrWeakPassword", err)
 	}
 }
 

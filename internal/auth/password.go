@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -12,6 +13,25 @@ import (
 // effective cost ratchets up as users sign in. It matches the cost the schema
 // seed used, so the seed accounts verify without a rehash.
 const PasswordTargetCost = 12
+
+// MinPasswordLen is the registration minimum password length, in bytes. The
+// bcrypt(cost 12) pre-hash scheme is the real protection; this only rejects
+// trivially short passwords. The maximum length is a transport concern (the
+// gateway caps the request field), not a strength rule.
+const MinPasswordLen = 12
+
+// ErrWeakPassword reports a password below MinPasswordLen. Registration maps it to
+// the WEAK_PASSWORD response.
+var ErrWeakPassword = errors.New("auth: password is too short")
+
+// ValidatePasswordStrength enforces the registration minimum-length policy,
+// returning ErrWeakPassword for a password shorter than MinPasswordLen.
+func ValidatePasswordStrength(plain string) error {
+	if len(plain) < MinPasswordLen {
+		return ErrWeakPassword
+	}
+	return nil
+}
 
 // prehash maps an arbitrary-length password to a fixed 44-byte token by
 // base64-encoding its SHA-256 digest, which is then what bcrypt actually hashes.

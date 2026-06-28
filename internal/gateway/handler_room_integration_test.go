@@ -101,7 +101,12 @@ func TestGateway_RoomEndpoints_Integration(t *testing.T) {
 
 	c := clustertest.Start(t, roomKind, userKind)
 
-	g := gateway.NewGateway(&integrationAuth{userID: userID, token: bearer}, newStubRoomDirectory(), c, c.ActorSystem.Root)
+	g := gateway.NewGateway(gateway.Deps{
+		Authenticator: &integrationAuth{userID: userID, token: bearer},
+		Rooms:         newStubRoomDirectory(),
+		Cluster:       c,
+		ActorRoot:     c.ActorSystem.Root,
+	})
 	srv := httptest.NewServer(g.RegisterRoutes())
 	t.Cleanup(srv.Close)
 

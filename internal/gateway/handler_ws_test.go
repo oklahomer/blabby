@@ -8,7 +8,7 @@ import (
 )
 
 func TestHandleWS_NonGetReturnsMethodNotAllowed(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{}, nil, nil, nil)
+	g := gatewayWithAuth(&stubAuthenticator{})
 	srv := httptest.NewServer(g.RegisterRoutes())
 	defer srv.Close()
 
@@ -27,7 +27,7 @@ func TestHandleWS_NonGetReturnsMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleWS_GetWithoutUpgradeHeadersReturnsBadRequest(t *testing.T) {
-	g := NewGateway(&stubAuthenticator{}, nil, nil, nil)
+	g := gatewayWithAuth(&stubAuthenticator{})
 	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
 	rec := httptest.NewRecorder()
 

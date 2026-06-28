@@ -46,13 +46,16 @@ END $$;
 -- account, including seeds, carries a real hash.
 CREATE TABLE IF NOT EXISTS service_user (
     id            BIGINT      PRIMARY KEY,
-    -- The UNIQUE constraint is named explicitly so userrepo's collision
-    -- classifier (publicCodeConstraint) cannot drift from Postgres's implicit
-    -- naming.
+    -- The UNIQUE constraints are named explicitly so userrepo's conflict
+    -- classifier (publicCodeConstraint / mailAddressConstraint /
+    -- handleNormConstraint) cannot drift from Postgres's implicit naming — that
+    -- is how a duplicate registration is mapped to EMAIL_ALREADY_REGISTERED vs
+    -- HANDLE_ALREADY_TAKEN.
     public_code   TEXT        NOT NULL CONSTRAINT service_user_public_code_key UNIQUE,
-    mail_address  TEXT        NOT NULL UNIQUE,
-    handle        TEXT        NOT NULL,
-    handle_norm   TEXT        NOT NULL UNIQUE,
+    mail_address  TEXT        NOT NULL CONSTRAINT service_user_mail_address_key UNIQUE,
+    handle        TEXT        NOT NULL CHECK (handle ~ '^[A-Za-z0-9_]{3,30}$'),
+    handle_norm   TEXT        NOT NULL CONSTRAINT service_user_handle_norm_key UNIQUE
+                                CHECK (handle_norm = lower(handle)),
     display_name  TEXT        NOT NULL,
     password_hash BYTEA       NOT NULL,
     status        user_status NOT NULL,
