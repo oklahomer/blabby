@@ -1,0 +1,23 @@
+syntax = "proto3";
+package maintenance;
+
+option go_package = "github.com/oklahomer/blabby/gen/maintenance;maintenancepb";
+
+// MaintenanceGrain hosts blabby's periodic system jobs as a single cluster-wide
+// activation (one fixed identity). A scheduler calls it on an interval; the grain
+// coalesces concurrent triggers so at most one job runs at a time.
+service MaintenanceGrain {
+  // SweepPendingAccounts starts a pending-account GC sweep unless one is already
+  // running. It returns immediately, without awaiting the sweep, so the caller is
+  // never blocked on the database work.
+  rpc SweepPendingAccounts(SweepPendingAccountsRequest) returns (SweepPendingAccountsResponse);
+}
+
+message SweepPendingAccountsRequest {}
+
+// SweepPendingAccountsResponse reports whether the trigger started a sweep.
+message SweepPendingAccountsResponse {
+  // accepted is false when a sweep was already running, so this trigger was a
+  // no-op; the in-flight sweep continues.
+  bool accepted = 1;
+}

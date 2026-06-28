@@ -26,14 +26,22 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/oklahomer/blabby/internal/clusterboot"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
 	"github.com/oklahomer/blabby/internal/logging"
+	"github.com/oklahomer/blabby/internal/persistence/accountgc"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 	"github.com/oklahomer/blabby/internal/persistence/workerlease"
 )
+
+// pendingAccountGCGrace is how long after a verification challenge expires an
+// unverified pending account is kept before the maintenance grain sweeps it. It is
+// short so abandoned registrations are reclaimed quickly in the demo; a resend
+// extends the challenge's expiry, so an account a user is still verifying is safe.
+const pendingAccountGCGrace = 5 * time.Minute
 
 func main() {
 	level := logging.SetupDefault()
@@ -103,6 +111,15 @@ func run(dbCfg postgres.Config, cc clusterboot.Config) error {
 	}
 	defer leaseManager.Stop()
 
+	// The singleton maintenance grain runs the pending-account GC over this same
+	// pool. The grace window is short so abandoned registrations are reclaimed
+	// quickly; a resend extends a challenge's expiry and so protects an account a
+	// user is still verifying.
+	sweeper, err := accountgc.NewSweeper(postgres.NewTransactor(pool), pendingAccountGCGrace)
+	if err != nil {
+		return fmt.Errorf("build pending-account sweeper: %w", err)
+	}
+
 	// The User grain's display-name directory reads service_user via userrepo over
 	// this same pool, so every member resolves identical UserRefs from the one
 	// shared source.
@@ -111,6 +128,7 @@ func run(dbCfg postgres.Config, cc clusterboot.Config) error {
 		RoomLoader:  room.NewRoomRepoLoader(pool),
 		Membership:  room.NewMembershipStore(pool, leaseManager),
 		JoinedRooms: user.NewJoinedRoomLoader(pool),
+		Sweeper:     sweeper,
 	}
 
 	c := clusterboot.Build(cc, clusterboot.Kinds(deps)...)

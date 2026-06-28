@@ -5,10 +5,23 @@ import (
 	"net"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 )
+
+// noopSweeper is a do-nothing maintenance.Sweeper for tests that only need the
+// kinds registered, since maintenance.NewKind rejects a nil sweeper.
+type noopSweeper struct{}
+
+func (noopSweeper) Sweep(context.Context, time.Time) (int64, error) { return 0, nil }
+
+// testGrainDeps returns the minimal GrainDeps the bootstrap tests need: a room
+// loader and a non-nil sweeper.
+func testGrainDeps() GrainDeps {
+	return GrainDeps{RoomLoader: activeAnyRoomLoader{}, Sweeper: noopSweeper{}}
+}
 
 // stubRoomPublicCode is a valid bare 10-symbol Crockford public_code used by the
 // test loader so the Join flow's public-code parse (User grain) succeeds.
@@ -58,7 +71,7 @@ func TestBuildConstructsCluster(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := Build(tc.cc, Kinds(GrainDeps{RoomLoader: activeAnyRoomLoader{}})...)
+			c := Build(tc.cc, Kinds(testGrainDeps())...)
 			if c.ActorSystem == nil {
 				t.Fatal("Build returned a cluster without an actor system")
 			}
@@ -69,7 +82,7 @@ func TestBuildConstructsCluster(t *testing.T) {
 // TestSubscribeTopologyLogging confirms the subscription is established on the
 // built cluster's EventStream.
 func TestSubscribeTopologyLogging(t *testing.T) {
-	c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Kinds(GrainDeps{RoomLoader: activeAnyRoomLoader{}})...)
+	c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Kinds(testGrainDeps())...)
 
 	sub := SubscribeTopologyLogging(c)
 	if sub == nil {
@@ -78,21 +91,21 @@ func TestSubscribeTopologyLogging(t *testing.T) {
 	c.ActorSystem.EventStream.Unsubscribe(sub)
 }
 
-func TestKindsRegistersUserAndRoom(t *testing.T) {
-	kinds := Kinds(GrainDeps{RoomLoader: activeAnyRoomLoader{}})
+func TestKindsRegistersGrains(t *testing.T) {
+	kinds := Kinds(testGrainDeps())
 
 	got := make(map[string]bool, len(kinds))
 	for _, k := range kinds {
 		got[k.Kind] = true
 	}
 
-	for _, want := range []string{"UserGrain", "RoomGrain"} {
+	for _, want := range []string{"UserGrain", "RoomGrain", "MaintenanceGrain"} {
 		if !got[want] {
 			t.Errorf("Kinds missing %q kind; got %v", want, got)
 		}
 	}
-	if len(kinds) != 2 {
-		t.Errorf("Kinds returned %d kinds, want 2", len(kinds))
+	if len(kinds) != 3 {
+		t.Errorf("Kinds returned %d kinds, want 3", len(kinds))
 	}
 }
 
