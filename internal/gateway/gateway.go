@@ -18,6 +18,7 @@ type Gateway struct {
 	rooms        RoomDirectory
 	registration Registrar
 	verification VerificationService
+	maintenance  MaintenanceTrigger
 	cluster      *cluster.Cluster
 	actorRoot    *actor.RootContext
 
@@ -38,6 +39,7 @@ type Deps struct {
 	Rooms         RoomDirectory
 	Registration  Registrar
 	Verification  VerificationService
+	Maintenance   MaintenanceTrigger
 	Cluster       *cluster.Cluster
 	ActorRoot     *actor.RootContext
 }
@@ -49,6 +51,7 @@ func NewGateway(deps Deps) *Gateway {
 		rooms:        deps.Rooms,
 		registration: deps.Registration,
 		verification: deps.Verification,
+		maintenance:  deps.Maintenance,
 		cluster:      deps.Cluster,
 		actorRoot:    deps.ActorRoot,
 	}
@@ -87,6 +90,20 @@ func (g *Gateway) RegisterRoutes() http.Handler {
 	mux.Handle(endpointRoomMembershipPut, g.requireAuth(g.handleRoomMembershipPut))
 	mux.Handle(endpointRoomMembershipDelete, g.requireAuth(g.handleRoomMembershipDelete))
 	mux.Handle(endpointRoomMessage, g.requireAuth(g.handleRoomSendMessage))
+	mux.HandleFunc("/", g.handleNotFound)
+	return mux
+}
+
+// RegisterInternalRoutes returns the handler for the gateway's internal listener:
+// operational endpoints (scheduled-job triggers) that must not be reachable from the
+// public API. The caller serves this on a separate, network-restricted listener (see
+// cmd/gateway), so these routes never share the public mux.
+func (g *Gateway) RegisterInternalRoutes() http.Handler {
+	mux := http.NewServeMux()
+
+	gcMethod, gcPath := splitMethodPath(endpointPendingAccountGC)
+	mux.HandleFunc(endpointPendingAccountGC, g.handlePendingAccountGC)
+	mux.HandleFunc(gcPath, g.handleMethodNotAllowed(gcMethod))
 	mux.HandleFunc("/", g.handleNotFound)
 	return mux
 }

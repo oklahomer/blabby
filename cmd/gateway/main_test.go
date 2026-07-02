@@ -16,10 +16,11 @@ func TestParseConfig(t *testing.T) {
 		wantErr  bool
 		errMatch string
 
-		wantListen    string
-		wantSecret    string
-		wantUsingDev  bool
-		wantMultiNode bool
+		wantListen         string
+		wantInternalListen string
+		wantSecret         string
+		wantUsingDev       bool
+		wantMultiNode      bool
 	}{
 		{
 			// Flagless gateway runs the local demo: its cluster defaults include
@@ -56,6 +57,15 @@ func TestParseConfig(t *testing.T) {
 			wantMultiNode: true,
 		},
 		{
+			name:               "custom internal listen",
+			args:               []string{"--internal-listen", "127.0.0.1:9999"},
+			wantListen:         defaultListenAddr,
+			wantInternalListen: "127.0.0.1:9999",
+			wantSecret:         devJWTSecret,
+			wantUsingDev:       true,
+			wantMultiNode:      true,
+		},
+		{
 			name:     "empty listen rejected",
 			args:     []string{"--listen", "   "},
 			wantErr:  true,
@@ -66,6 +76,18 @@ func TestParseConfig(t *testing.T) {
 			args:     []string{"--listen", "localhost"},
 			wantErr:  true,
 			errMatch: "host:port",
+		},
+		{
+			name:     "internal listen without port rejected",
+			args:     []string{"--internal-listen", "localhost"},
+			wantErr:  true,
+			errMatch: "host:port",
+		},
+		{
+			name:     "internal listen equal to listen rejected",
+			args:     []string{"--listen", "127.0.0.1:9000", "--internal-listen", "127.0.0.1:9000"},
+			wantErr:  true,
+			errMatch: "must differ",
 		},
 		{
 			name:     "unknown flag rejected",
@@ -101,6 +123,13 @@ func TestParseConfig(t *testing.T) {
 			}
 			if gotCfg.listenAddr != tc.wantListen {
 				t.Errorf("listenAddr = %q, want %q", gotCfg.listenAddr, tc.wantListen)
+			}
+			wantInternal := tc.wantInternalListen
+			if wantInternal == "" {
+				wantInternal = defaultInternalListenAddr
+			}
+			if gotCfg.internalListenAddr != wantInternal {
+				t.Errorf("internalListenAddr = %q, want %q", gotCfg.internalListenAddr, wantInternal)
 			}
 			if gotCfg.jwtSecret != tc.wantSecret {
 				t.Errorf("jwtSecret = %q, want %q", gotCfg.jwtSecret, tc.wantSecret)

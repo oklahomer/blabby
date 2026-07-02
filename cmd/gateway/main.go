@@ -8,11 +8,14 @@
 //	go run ./cmd/gateway --seeds <backend-host:discoveryPort> \
 //	    --advertised-host <host:cluster-port> --cluster-port <port>
 //
-// It serves HTTP on :8080 by default. Override the listen address with --listen
-// and the JWT signing secret with --jwt-secret; when no secret is supplied a
-// built-in development key is used (and a warning is logged). Every gateway in a
-// real deployment MUST share the same signing secret. See
-// docs/multi-node-cluster.md.
+// It serves the public HTTP API on :8080 by default (--listen) and internal
+// operational endpoints — scheduled-job triggers under /internal/ — on a second
+// listener, loopback 127.0.0.1:9090 by default (--internal-listen). The internal
+// listener is unauthenticated and must stay network-restricted; never expose it
+// through the public ingress. Override the JWT signing secret with --jwt-secret;
+// when no secret is supplied a built-in development key is used (and a warning is
+// logged). Every gateway in a real deployment MUST share the same signing secret.
+// See docs/multi-node-cluster.md.
 package main
 
 import (
@@ -42,6 +45,12 @@ import (
 
 const (
 	defaultListenAddr = ":8080"
+
+	// defaultInternalListenAddr is the internal listener for operational endpoints
+	// (scheduled-job triggers). It defaults to loopback so the unauthenticated
+	// /internal/* routes are not reachable off-host out of the box; a multi-host
+	// deployment binds it to an internal interface and firewalls it.
+	defaultInternalListenAddr = "127.0.0.1:9090"
 
 	// devJWTSecret is the fallback signing key used when --jwt-secret is not
 	// provided, so a fresh clone runs with zero configuration. It is
@@ -84,9 +93,10 @@ func gatewayClusterDefaults() clusterboot.Defaults {
 // newConfig is the single boundary where raw flag strings are checked. The
 // cluster settings live separately in clusterboot.Config.
 type config struct {
-	listenAddr     string
-	jwtSecret      string
-	usingDevSecret bool
+	listenAddr         string
+	internalListenAddr string
+	jwtSecret          string
+	usingDevSecret     bool
 }
 
 func main() {
@@ -111,7 +121,8 @@ func main() {
 // same FlagSet.
 func parseConfig(args []string) (config, postgres.Config, clusterboot.Config, error) {
 	fs := flag.NewFlagSet("blabby-gateway", flag.ContinueOnError)
-	listen := fs.String("listen", defaultListenAddr, "HTTP listen address (host:port)")
+	listen := fs.String("listen", defaultListenAddr, "public HTTP listen address (host:port)")
+	internalListen := fs.String("internal-listen", defaultInternalListenAddr, "internal listen address (host:port) for operational endpoints; keep network-restricted")
 	secret := fs.String("jwt-secret", "", "JWT signing secret; a development default is used when empty")
 	dbCfg := postgres.BindFlags(fs)
 	clusterCfg := clusterboot.BindFlags(fs, gatewayClusterDefaults())
@@ -119,7 +130,7 @@ func parseConfig(args []string) (config, postgres.Config, clusterboot.Config, er
 		return config{}, postgres.Config{}, clusterboot.Config{}, err
 	}
 
-	cfg, err := newConfig(*listen, *secret)
+	cfg, err := newConfig(*listen, *internalListen, *secret)
 	if err != nil {
 		return config{}, postgres.Config{}, clusterboot.Config{}, err
 	}
@@ -135,18 +146,25 @@ func parseConfig(args []string) (config, postgres.Config, clusterboot.Config, er
 }
 
 // newConfig validates raw flag values into a config (parse, don't validate).
-// The listen address must be a well-formed host:port. An empty signing secret
+// Both listen addresses must be well-formed host:port. An empty signing secret
 // falls back to devJWTSecret and flags usingDevSecret so run can warn.
-func newConfig(listen, secret string) (config, error) {
-	listen = strings.TrimSpace(listen)
-	if listen == "" {
-		return config{}, errors.New("--listen must not be empty")
+func newConfig(listen, internalListen, secret string) (config, error) {
+	listen, err := validateListenAddr("--listen", listen)
+	if err != nil {
+		return config{}, err
 	}
-	if _, _, err := net.SplitHostPort(listen); err != nil {
-		return config{}, fmt.Errorf("--listen %q is not a valid host:port: %w", listen, err)
+	internalListen, err = validateListenAddr("--internal-listen", internalListen)
+	if err != nil {
+		return config{}, err
+	}
+	// A literal-string comparison: equivalent spellings of one address (e.g.
+	// ":8080" vs "0.0.0.0:8080") still slip through to a bind-time failure, which
+	// remains the backstop.
+	if listen == internalListen {
+		return config{}, fmt.Errorf("--internal-listen must differ from --listen (both %q)", listen)
 	}
 
-	cfg := config{listenAddr: listen}
+	cfg := config{listenAddr: listen, internalListenAddr: internalListen}
 	if s := strings.TrimSpace(secret); s != "" {
 		cfg.jwtSecret = s
 	} else {
@@ -154,6 +172,19 @@ func newConfig(listen, secret string) (config, error) {
 		cfg.usingDevSecret = true
 	}
 	return cfg, nil
+}
+
+// validateListenAddr trims addr and confirms it is a well-formed host:port,
+// returning a flag-named error otherwise.
+func validateListenAddr(flagName, addr string) (string, error) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", fmt.Errorf("%s must not be empty", flagName)
+	}
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		return "", fmt.Errorf("%s %q is not a valid host:port: %w", flagName, addr, err)
+	}
+	return addr, nil
 }
 
 // run joins the cluster as a client and serves the HTTP gateway, then blocks
@@ -241,35 +272,46 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 		Rooms:         roomDir,
 		Registration:  registration,
 		Verification:  registration,
+		Maintenance:   gateway.NewClusterMaintenanceTrigger(c),
 		Cluster:       c,
 		ActorRoot:     c.ActorSystem.Root,
 	})
 
+	// The public API and the internal operational endpoints (scheduled-job
+	// triggers) are served on separate listeners. The internal listener defaults to
+	// loopback and carries unauthenticated routes, so it must stay network-restricted.
 	srv := &http.Server{
 		Addr:              cfg.listenAddr,
 		Handler:           gw.RegisterRoutes(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
+	internalSrv := &http.Server{
+		Addr:              cfg.internalListenAddr,
+		Handler:           gw.RegisterInternalRoutes(),
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
 
-	return serve(srv)
+	return serve(srv, internalSrv)
 }
 
-// serve runs srv until SIGINT/SIGTERM, then drains it gracefully. A listen
-// failure (e.g. the port is already in use) is returned before any signal so
-// the process exits non-zero; a signal-initiated shutdown returns nil.
-func serve(srv *http.Server) error {
+// serve runs every server until SIGINT/SIGTERM, then drains them all gracefully. A
+// listen failure on any server (e.g. the port is already in use) is returned before
+// any signal so the process exits non-zero; a signal-initiated shutdown returns nil.
+func serve(servers ...*http.Server) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	serveErr := make(chan error, 1)
-	go func() {
-		slog.Info("server.http.listening", "addr", srv.Addr)
-		err := srv.ListenAndServe()
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
-		}
-		serveErr <- err
-	}()
+	serveErr := make(chan error, len(servers))
+	for _, srv := range servers {
+		go func(s *http.Server) {
+			slog.Info("server.http.listening", "addr", s.Addr)
+			err := s.ListenAndServe()
+			if errors.Is(err, http.ErrServerClosed) {
+				err = nil
+			}
+			serveErr <- err
+		}(srv)
+	}
 
 	select {
 	case err := <-serveErr:
@@ -281,10 +323,24 @@ func serve(srv *http.Server) error {
 		slog.Info("server.shutdown", "reason", "signal")
 	}
 
+	// Drain the servers concurrently so they share the shutdown budget instead of
+	// consuming it in sequence — a slow public drain must not make the internal
+	// listener's drain report a spurious deadline error.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("http shutdown: %w", err)
+	shutdownErrs := make(chan error, len(servers))
+	for _, srv := range servers {
+		go func(s *http.Server) {
+			if err := s.Shutdown(shutdownCtx); err != nil {
+				shutdownErrs <- fmt.Errorf("http shutdown %s: %w", s.Addr, err)
+				return
+			}
+			shutdownErrs <- nil
+		}(srv)
 	}
-	return nil
+	var shutdownErr error
+	for range servers {
+		shutdownErr = errors.Join(shutdownErr, <-shutdownErrs)
+	}
+	return shutdownErr
 }
