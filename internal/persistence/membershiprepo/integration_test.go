@@ -30,7 +30,9 @@ func TestMembershipRepoIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	defer pool.Close()
+	// Registered before the row cleanups below so it runs after them (LIFO); a
+	// defer would close the pool before any t.Cleanup could use it.
+	t.Cleanup(pool.Close)
 
 	repo := New()
 
@@ -83,6 +85,49 @@ func TestMembershipRepoIntegration(t *testing.T) {
 	// so a caller can fail closed on a cache/DB divergence.
 	if err := repo.Remove(ctx, pool, mustRoomID(t, 4), mustUserID(t, 3)); !errors.Is(err, ErrMembershipNotFound) {
 		t.Fatalf("Remove(absent): got %v, want ErrMembershipNotFound", err)
+	}
+
+	// The seeded owner (user 1) cannot be removed: the guarded delete keeps the
+	// row and reports the reason.
+	if err := repo.Remove(ctx, pool, mustRoomID(t, 4), mustUserID(t, 1)); !errors.Is(err, ErrOwnerCannotLeave) {
+		t.Fatalf("Remove(owner): got %v, want ErrOwnerCannotLeave", err)
+	}
+	if role, err := repo.GetRole(ctx, pool, mustRoomID(t, 4), mustUserID(t, 1)); err != nil || role != domain.MembershipRoleOwner {
+		t.Fatalf("GetRole(owner) = %q, %v; the refused delete must keep the owner row", role, err)
+	}
+
+	// Role lifecycle on a scratch member: member -> admin -> transfer receives
+	// ownership (old owner demotes to admin) -> transfer back restores the seed.
+	if err := repo.Add(ctx, pool, mustRoomID(t, 4), mustUserRef(t, 3, "charlie"), domain.MembershipRoleMember); err != nil {
+		t.Fatalf("Add for role lifecycle: %v", err)
+	}
+	if err := repo.UpdateRole(ctx, pool, mustRoomID(t, 4), mustUserID(t, 3), domain.MembershipRoleAdmin); err != nil {
+		t.Fatalf("UpdateRole: %v", err)
+	}
+	if role, err := repo.GetRole(ctx, pool, mustRoomID(t, 4), mustUserID(t, 3)); err != nil || role != domain.MembershipRoleAdmin {
+		t.Fatalf("GetRole after update = %q, %v; want admin", role, err)
+	}
+
+	if err := repo.TransferOwnership(ctx, pool, mustRoomID(t, 4), mustUserID(t, 1), mustUserID(t, 3)); err != nil {
+		t.Fatalf("TransferOwnership: %v", err)
+	}
+	if role, err := repo.GetRole(ctx, pool, mustRoomID(t, 4), mustUserID(t, 3)); err != nil || role != domain.MembershipRoleOwner {
+		t.Fatalf("GetRole(new owner) = %q, %v; want owner", role, err)
+	}
+	if role, err := repo.GetRole(ctx, pool, mustRoomID(t, 4), mustUserID(t, 1)); err != nil || role != domain.MembershipRoleAdmin {
+		t.Fatalf("GetRole(old owner) = %q, %v; want admin (kept management rights)", role, err)
+	}
+
+	// Restore the seed state: hand ownership back, drop user 1 back to owner via
+	// the transfer, then remove the scratch member.
+	if err := repo.TransferOwnership(ctx, pool, mustRoomID(t, 4), mustUserID(t, 3), mustUserID(t, 1)); err != nil {
+		t.Fatalf("TransferOwnership back: %v", err)
+	}
+	if role, err := repo.GetRole(ctx, pool, mustRoomID(t, 4), mustUserID(t, 1)); err != nil || role != domain.MembershipRoleOwner {
+		t.Fatalf("GetRole(restored owner) = %q, %v; want owner", role, err)
+	}
+	if err := repo.Remove(ctx, pool, mustRoomID(t, 4), mustUserID(t, 3)); err != nil {
+		t.Fatalf("Remove scratch member: %v", err)
 	}
 }
 
