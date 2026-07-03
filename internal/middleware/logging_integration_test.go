@@ -12,8 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
-	commonpb "github.com/oklahomer/blabby/gen/common"
-	roompb "github.com/oklahomer/blabby/gen/room"
+	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
@@ -22,11 +21,17 @@ import (
 )
 
 // activeRoomLoader reports every id as an active room so the Room grain can
-// activate without a database in this trace test.
+// activate without a database in this trace test. It carries a valid public
+// code because the Join flow returns the RoomRef to the User grain, whose
+// boundary parse fails closed on a malformed code.
 type activeRoomLoader struct{}
 
 func (activeRoomLoader) LoadRoom(_ context.Context, roomID id.RoomID) (domain.RoomRef, error) {
-	return domain.RoomRef{ID: roomID, Status: domain.RoomStatusActive}, nil
+	code, err := id.ParsePublicCode("G000000004")
+	if err != nil {
+		return domain.RoomRef{}, err
+	}
+	return domain.RoomRef{ID: roomID, PublicCode: code, Name: "Room " + roomID.String(), Status: domain.RoomStatusActive}, nil
 }
 
 // syncBuffer is a goroutine-safe *bytes.Buffer wrapper. The slog handler
@@ -50,20 +55,14 @@ func (s *syncBuffer) String() string {
 	return s.buf.String()
 }
 
-// TestLoggingMiddleware_Integration_EndToEndTrace drives Room.Join and
-// Room.PostMessage through a real cluster, then asserts that the captured JSON
-// log stream reconstructs the cross-grain trace without leaking message text.
-//
-// The test drives the Room grain client directly rather than the User
-// grain client. Calling user.JoinRoom would block the User grain while it
-// awaits a synchronous reply from Room.Join, but Room.Join's fan-out
-// dispatches NotifyRoomEvent back into the same User grain — that
-// re-entry deadlocks under the default protoactor cluster.Request
-// semantics. Driving via Room avoids the cycle: the test holds the
-// outermost future and User grain runs unblocked when Room calls back.
-// The trace shape this exercises still covers every middleware-emitted
-// line plus the new domain follow-up lines (room.member.joined,
-// room.message.posted, grain.fanout for both Room and User).
+// TestLoggingMiddleware_Integration_EndToEndTrace drives JoinRoom and
+// SendMessage through the User grain client on a real cluster — the same
+// route production commands take — then asserts that the captured JSON log
+// stream reconstructs the full cross-grain trace (User command → Room →
+// async fan-out back through the User grain) without leaking message text.
+// Driving the User grain is safe because fan-out is an asynchronous
+// notification off the Room grain's critical path (ADR-015); the self-echo
+// deadlock this test once had to avoid no longer exists.
 // UserConnection.connection.msg is covered by unit tests and the gateway
 // package's own WebSocket integration tests.
 func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
@@ -78,31 +77,33 @@ func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 	const alice = "1"
 	const general = "4"
 
-	roomClient := roompb.GetRoomGrainGrainClient(c, general)
+	uc := userpb.GetUserGrainGrainClient(c, alice)
 
-	// 1) Room.Join — Room grain fans out NotifyRoomEvent to alice's
-	//    User grain, which has no registered connections (target_count=0).
-	joinResp, err := roomClient.Join(&roompb.JoinRequest{User: &commonpb.UserRef{Id: alice, Name: alice}})
+	// 1) User.JoinRoom — the User grain commands Room.Join, whose fan-out
+	//    dispatches NotifyRoomEvent back to alice's User grain (no registered
+	//    connections, so target_count=0).
+	joinResp, err := uc.JoinRoom(&userpb.JoinRoomRequest{RoomId: general})
 	if err != nil {
-		t.Fatalf("Room.Join via cluster: %v", err)
+		t.Fatalf("User.JoinRoom via cluster: %v", err)
 	}
 	if joinResp.GetError() != nil {
-		t.Fatalf("Room.Join: error %+v", joinResp.GetError())
+		t.Fatalf("User.JoinRoom: error %+v", joinResp.GetError())
 	}
 
-	// 2) Room.PostMessage — Room grain assigns the server timestamp and
-	//    fans out ForwardMessage back through alice's User grain. The
-	//    text is a fresh UUID and must never appear in the log buffer.
+	// 2) User.SendMessage — the User grain commands Room.PostMessage, which
+	//    assigns the server timestamp and fans out ForwardMessage back through
+	//    alice's User grain. The text is a fresh UUID and must never appear in
+	//    the log buffer.
 	bodyMarker := uuid.NewString()
-	postResp, err := roomClient.PostMessage(&roompb.PostMessageRequest{
-		User: &commonpb.UserRef{Id: alice, Name: alice},
-		Text: bodyMarker,
+	sendResp, err := uc.SendMessage(&userpb.SendMessageRequest{
+		RoomId: general,
+		Text:   bodyMarker,
 	})
 	if err != nil {
-		t.Fatalf("Room.PostMessage via cluster: %v", err)
+		t.Fatalf("User.SendMessage via cluster: %v", err)
 	}
-	if postResp.GetError() != nil {
-		t.Fatalf("Room.PostMessage: error %+v", postResp.GetError())
+	if sendResp.GetError() != nil {
+		t.Fatalf("User.SendMessage: error %+v", sendResp.GetError())
 	}
 
 	// Wait for the User-grain fan-out lines to land in the buffer.
@@ -110,26 +111,28 @@ func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 
 	lines := parseJSONLines(t, captureBuf.String())
 
-	// Trace assertions: every step in the cross-grain trace is present
-	// at least once. Lifecycle events (grain.activated) are covered by
-	// the package's unit tests.
+	// Trace assertions: every step in the cross-grain trace is present at
+	// least once. The test's only client calls go to the User grain, so any
+	// RoomGrain line proves the User→Room command leg, and the UserGrain
+	// grain.fanout lines prove the asynchronous notify/forward legs arrived
+	// back. Lifecycle events (grain.activated) are covered by the package's
+	// unit tests.
 	expect := []struct {
 		event     string
 		grainType string
 		grainID   string // empty = match any
 	}{
-		// Room.Join trail.
+		// JoinRoom trail: User command envelope → Room → fan-out → User notify.
+		{event: "grain.msg", grainType: "UserGrain", grainID: alice},   // JoinRoom envelope
 		{event: "grain.msg", grainType: "RoomGrain", grainID: general}, // Join envelope
 		{event: "room.member.joined", grainType: "RoomGrain", grainID: general},
 		{event: "grain.fanout", grainType: "RoomGrain", grainID: general}, // Join.fanout
-		{event: "grain.msg", grainType: "UserGrain", grainID: alice},      // NotifyRoomEvent envelope
 		{event: "grain.fanout", grainType: "UserGrain", grainID: alice},   // NotifyRoomEvent.fanout
 
-		// Room.PostMessage trail.
+		// SendMessage trail: User command envelope → Room → fan-out → User forward.
 		{event: "grain.msg", grainType: "RoomGrain", grainID: general}, // PostMessage envelope
 		{event: "room.message.posted", grainType: "RoomGrain", grainID: general},
 		{event: "grain.fanout", grainType: "RoomGrain", grainID: general}, // PostMessage.fanout
-		{event: "grain.msg", grainType: "UserGrain", grainID: alice},      // ForwardMessage envelope
 		{event: "grain.fanout", grainType: "UserGrain", grainID: alice},   // ForwardMessage.fanout
 	}
 	for _, want := range expect {
