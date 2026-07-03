@@ -49,6 +49,7 @@ func gatewayWithFake(fake userGrainCaller) *Gateway {
 	return &Gateway{
 		auth:      &stubAuthenticator{},
 		rooms:     newStubRoomDirectory(),
+		users:     newStubUserResolver(),
 		cluster:   sentinelCluster(),
 		actorRoot: sentinelActorRoot(),
 		userGrain: func(id.UserID) userGrainCaller { return fake },
@@ -67,6 +68,10 @@ func servePath(t *testing.T, g *Gateway, method, pattern, path, body, contentTyp
 		mux.HandleFunc(pattern, g.handleRoomMembershipDelete)
 	case "POST /rooms/{id}/messages":
 		mux.HandleFunc(pattern, g.handleRoomSendMessage)
+	case "PUT /rooms/{id}/members/{user}/role":
+		mux.HandleFunc(pattern, g.handleRoomMemberRolePut)
+	case "PUT /rooms/{id}/owner":
+		mux.HandleFunc(pattern, g.handleRoomOwnerPut)
 	default:
 		t.Fatalf("unsupported pattern: %q", pattern)
 	}

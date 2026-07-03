@@ -28,6 +28,12 @@ type fakeUserGrainCaller struct {
 	getJoinedReq  *userpb.GetJoinedRoomsRequest
 	getJoinedResp *userpb.GetJoinedRoomsResponse
 	getJoinedErr  error
+	setRoleReq    *userpb.SetRoomMemberRoleRequest
+	setRoleResp   *userpb.SetRoomMemberRoleResponse
+	setRoleErr    error
+	transferReq   *userpb.TransferRoomOwnershipRequest
+	transferResp  *userpb.TransferRoomOwnershipResponse
+	transferErr   error
 	calls         int
 }
 
@@ -53,6 +59,18 @@ func (f *fakeUserGrainCaller) GetJoinedRooms(req *userpb.GetJoinedRoomsRequest) 
 	f.calls++
 	f.getJoinedReq = req
 	return f.getJoinedResp, f.getJoinedErr
+}
+
+func (f *fakeUserGrainCaller) SetRoomMemberRole(req *userpb.SetRoomMemberRoleRequest) (*userpb.SetRoomMemberRoleResponse, error) {
+	f.calls++
+	f.setRoleReq = req
+	return f.setRoleResp, f.setRoleErr
+}
+
+func (f *fakeUserGrainCaller) TransferRoomOwnership(req *userpb.TransferRoomOwnershipRequest) (*userpb.TransferRoomOwnershipResponse, error) {
+	f.calls++
+	f.transferReq = req
+	return f.transferResp, f.transferErr
 }
 
 func TestUserGrainFor_FallsThroughToClusterAdapter_WhenSeamUnset(t *testing.T) {

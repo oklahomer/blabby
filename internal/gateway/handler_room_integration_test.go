@@ -91,8 +91,9 @@ func (s *stubRoomGrain) TransferOwnership(*roompb.TransferOwnershipRequest, clus
 // TestGateway_RoomEndpoints_Integration drives the join → joined →
 // send → leave → joined flow over HTTP through a real Gateway, real
 // User grain, and a stub Room grain in an in-process cluster. The
-// stub Room grain isolates this test from Room → User fan-out, which
-// would deadlock on a single-member cluster.
+// stub Room grain keeps the test focused on the HTTP↔User-grain
+// contract; the real Room grain's fan-out behavior (asynchronous per
+// ADR-015) is covered by internal/grain/room's own integration tests.
 func TestGateway_RoomEndpoints_Integration(t *testing.T) {
 	const userID = "1"
 	const roomCode = "RG000000004" // resolves to internal room id 4 via the stub directory
