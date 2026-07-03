@@ -38,8 +38,8 @@ func TestRoomRepoIntegration(t *testing.T) {
 
 	repo := New(&stubIDSource{id: rawID})
 	created, err := repo.Create(ctx, pool, CreateParams{
-		DisplayName: "Integration Room",
-		CreatedBy:   mustUserID(t, 1), // seed user alice
+		Name:      mustRoomName(t, "Integration Room"),
+		CreatedBy: mustUserID(t, 1), // seed user alice
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

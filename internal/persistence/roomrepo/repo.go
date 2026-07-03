@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
@@ -61,10 +62,11 @@ func New(ids IDSource) *Repo {
 }
 
 // CreateParams carries the caller-supplied fields of a new room. The RoomID and
-// public_code are minted by Create, not supplied.
+// public_code are minted by Create, not supplied. Name is an already-parsed
+// domain value, so an unvalidated display name cannot reach the insert.
 type CreateParams struct {
-	DisplayName string
-	CreatedBy   id.UserID
+	Name      domain.RoomName
+	CreatedBy id.UserID
 }
 
 const insertSQL = `
@@ -94,7 +96,7 @@ func (r *Repo) Create(ctx context.Context, q postgres.Querier, params CreatePara
 	}
 
 	room, err := scanRoom(q.QueryRow(ctx, insertSQL,
-		roomID.Int64(), code.String(), params.DisplayName, params.CreatedBy.Int64()))
+		roomID.Int64(), code.String(), params.Name.String(), params.CreatedBy.Int64()))
 	switch {
 	case err == nil:
 		return room, nil
