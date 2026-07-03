@@ -194,6 +194,9 @@ SELECT EXISTS(SELECT 1 FROM target), EXISTS(SELECT 1 FROM promoted)`
 // precondition failing here (from does not own the room, to is not a member) is
 // a broken contract surfaced as a hard error, with neither row changed.
 func (r *Repo) TransferOwnership(ctx context.Context, q postgres.Querier, roomID id.RoomID, from, to id.UserID) error {
+	if from == to {
+		return nil
+	}
 	var targetExists, promoted bool
 	if err := q.QueryRow(ctx, transferOwnershipSQL, roomID.Int64(), from.Int64(), to.Int64()).Scan(&targetExists, &promoted); err != nil {
 		return fmt.Errorf("membershiprepo: transfer ownership: %w", err)

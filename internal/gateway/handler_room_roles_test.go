@@ -154,7 +154,7 @@ func TestHandleRoomOwnerPut(t *testing.T) {
 			wantStatus: http.StatusBadRequest, wantErrorCode: errcode.InvalidRequest,
 		},
 		{
-			name: "owner-cannot-leave style conflict is relayed", body: `{"user":"UB000000002"}`,
+			name: "permission denied is relayed", body: `{"user":"UB000000002"}`,
 			grain:      &fakeUserGrainCaller{transferResp: &userpb.TransferRoomOwnershipResponse{Error: grainDetail(errcode.RoomPermissionDenied, "only the owner can transfer ownership")}},
 			wantStatus: http.StatusForbidden, wantErrorCode: errcode.RoomPermissionDenied,
 		},

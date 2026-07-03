@@ -369,6 +369,12 @@ func TestTransferOwnership(t *testing.T) {
 	}
 }
 
+func TestTransferOwnership_SelfNoop(t *testing.T) {
+	if err := New().TransferOwnership(context.Background(), &fakeQuerier{}, mustRoomID(t, 4), mustUserID(t, 1), mustUserID(t, 1)); err != nil {
+		t.Fatalf("TransferOwnership(self): %v", err)
+	}
+}
+
 func TestTransferOwnership_BrokenPreconditionsAreHardErrors(t *testing.T) {
 	tests := []struct {
 		name         string

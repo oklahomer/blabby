@@ -23,8 +23,8 @@ const (
 	// so handing the room to the current owner is an idempotent 200.
 	endpointRoomOwner = "PUT /rooms/{id}/owner"
 
-	// maxRoleBodyBytes caps the tiny JSON bodies of the role endpoints.
-	maxRoleBodyBytes = 1024
+	// maxRoomCommandBodyBytes caps the tiny JSON bodies of the room command endpoints.
+	maxRoomCommandBodyBytes = 1024
 )
 
 // UserResolver maps a client-facing U… public code to the internal UserID. The
@@ -62,7 +62,7 @@ func (g *Gateway) handleRoomMemberRolePut(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req setRoleRequest
-	if !decodeRoleBody(w, r, &req) {
+	if !decodeRoomCommandBody(w, r, &req) {
 		return
 	}
 	if strings.TrimSpace(req.Role) == "" {
@@ -101,7 +101,7 @@ func (g *Gateway) handleRoomOwnerPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req setOwnerRequest
-	if !decodeRoleBody(w, r, &req) {
+	if !decodeRoomCommandBody(w, r, &req) {
 		return
 	}
 	if strings.TrimSpace(req.User) == "" {
@@ -160,15 +160,15 @@ func (g *Gateway) requireTargetUserID(w http.ResponseWriter, r *http.Request, en
 	return targetID, true
 }
 
-// decodeRoleBody decodes one of the role endpoints' tiny JSON bodies with the
+// decodeRoomCommandBody decodes one of the room command endpoints' tiny JSON bodies with the
 // package's strict rules (JSON content type, size cap, no trailing data),
 // writing the rejection itself and returning false on failure.
-func decodeRoleBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+func decodeRoomCommandBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	if !contentTypeIsJSON(r.Header.Get("Content-Type")) {
 		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("content-type must be application/json"))
 		return false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxRoleBodyBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, maxRoomCommandBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(dst); err != nil {
 		var maxErr *http.MaxBytesError
