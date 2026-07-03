@@ -28,6 +28,7 @@ import (
 	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/middleware"
+	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
 )
 
 // Event-name constants for every log line this package emits. Follow the
@@ -37,15 +38,19 @@ import (
 // grain.unhandled) live in internal/middleware as exported constants and
 // are referenced via middleware.EventXxx.
 const (
-	eventRoomMemberJoined          = "room.member.joined"
-	eventRoomMemberJoinRejected    = "room.member.join_rejected"
-	eventRoomMemberLeft            = "room.member.left"
-	eventRoomMemberLeaveRejected   = "room.member.leave_rejected"
-	eventRoomMessagePosted         = "room.message.posted"
-	eventRoomMessagePostRejected   = "room.message.post_rejected"
-	eventRoomFanoutSupervision     = "room.fanout.supervision"
-	eventRoomActivationRejected    = "room.activation.rejected"
-	eventRoomMembershipWriteFailed = "room.membership.write_failed"
+	eventRoomMemberJoined              = "room.member.joined"
+	eventRoomMemberJoinRejected        = "room.member.join_rejected"
+	eventRoomMemberLeft                = "room.member.left"
+	eventRoomMemberLeaveRejected       = "room.member.leave_rejected"
+	eventRoomRoleChanged               = "room.role.changed"
+	eventRoomRoleChangeRejected        = "room.role.change_rejected"
+	eventRoomOwnershipTransferred      = "room.ownership.transferred"
+	eventRoomOwnershipTransferRejected = "room.ownership.transfer_rejected"
+	eventRoomMessagePosted             = "room.message.posted"
+	eventRoomMessagePostRejected       = "room.message.post_rejected"
+	eventRoomFanoutSupervision         = "room.fanout.supervision"
+	eventRoomActivationRejected        = "room.activation.rejected"
+	eventRoomMembershipWriteFailed     = "room.membership.write_failed"
 )
 
 // passivationTimeout is the receive-timeout the Room kind passivates on. It is
@@ -372,6 +377,15 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 	// Persist the transition (row delete + member_left event, one txn) before
 	// mutating in-memory state or fanning out (fail-closed).
 	evt, err := g.recordLeave(ctx, leaver)
+	if errors.Is(err, membershiprepo.ErrOwnerCannotLeave) {
+		slog.Warn(eventRoomMemberLeaveRejected,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"user_id", userID,
+			"reason", errcode.RoomOwnerCannotLeave.Status(),
+		)
+		return leaveErr(errcode.RoomOwnerCannotLeave, "transfer ownership before leaving the room"), nil
+	}
 	if err != nil {
 		return leaveErr(errcode.InternalError, "failed to record membership"), nil
 	}
@@ -419,12 +433,17 @@ func (g *Grain) recordJoin(ctx cluster.GrainContext, joiner id.UserRef) (Members
 }
 
 // recordLeave is recordJoin's mirror: it persists the row delete and member_left
-// event in one transaction.
+// event in one transaction. An owner-refused leave is an expected business
+// outcome the caller maps to its own rejection; only real write failures are
+// logged here.
 func (g *Grain) recordLeave(ctx cluster.GrainContext, leaver id.UserRef) (MembershipEvent, error) {
 	if g.membership == nil {
 		return MembershipEvent{}, nil
 	}
 	evt, err := g.membership.RecordLeave(context.Background(), g.state.roomRef().ID, leaver)
+	if err != nil && errors.Is(err, membershiprepo.ErrOwnerCannotLeave) {
+		return MembershipEvent{}, err
+	}
 	if err != nil {
 		slog.Error(eventRoomMembershipWriteFailed,
 			"grain_type", ctx.Kind(),

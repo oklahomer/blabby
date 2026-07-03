@@ -64,6 +64,8 @@ type RoomGrain interface {
 	Join(req *JoinRequest, ctx cluster.GrainContext) (*JoinResponse, error)
 	Leave(req *LeaveRequest, ctx cluster.GrainContext) (*LeaveResponse, error)
 	PostMessage(req *PostMessageRequest, ctx cluster.GrainContext) (*PostMessageResponse, error)
+	SetMemberRole(req *SetMemberRoleRequest, ctx cluster.GrainContext) (*SetMemberRoleResponse, error)
+	TransferOwnership(req *TransferOwnershipRequest, ctx cluster.GrainContext) (*TransferOwnershipResponse, error)
 }
 
 // RoomGrainGrainClient holds the base data for the RoomGrainGrain
@@ -142,6 +144,60 @@ func (g *RoomGrainGrainClient) PostMessage(r *PostMessageRequest, opts ...cluste
 	}
 	switch msg := resp.(type) {
 	case *PostMessageResponse:
+		return msg, nil
+	case *cluster.GrainErrorResponse:
+		if msg == nil {
+			return nil, nil
+		}
+		return nil, msg
+	default:
+		return nil, fmt.Errorf("unknown response type %T", resp)
+	}
+}
+
+// SetMemberRole requests the execution on to the cluster with CallOptions
+func (g *RoomGrainGrainClient) SetMemberRole(r *SetMemberRoleRequest, opts ...cluster.GrainCallOption) (*SetMemberRoleResponse, error) {
+	if g.cluster.Config.RequestLog {
+		g.cluster.Logger().Info("Requesting", slog.String("identity", g.Identity), slog.String("kind", "RoomGrain"), slog.String("method", "SetMemberRole"), slog.Any("request", r))
+	}
+	bytes, err := proto.Marshal(r)
+	if err != nil {
+		return nil, err
+	}
+	reqMsg := &cluster.GrainRequest{MethodIndex: 3, MessageData: bytes}
+	resp, err := g.cluster.Request(g.Identity, "RoomGrain", reqMsg, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("error request: %w", err)
+	}
+	switch msg := resp.(type) {
+	case *SetMemberRoleResponse:
+		return msg, nil
+	case *cluster.GrainErrorResponse:
+		if msg == nil {
+			return nil, nil
+		}
+		return nil, msg
+	default:
+		return nil, fmt.Errorf("unknown response type %T", resp)
+	}
+}
+
+// TransferOwnership requests the execution on to the cluster with CallOptions
+func (g *RoomGrainGrainClient) TransferOwnership(r *TransferOwnershipRequest, opts ...cluster.GrainCallOption) (*TransferOwnershipResponse, error) {
+	if g.cluster.Config.RequestLog {
+		g.cluster.Logger().Info("Requesting", slog.String("identity", g.Identity), slog.String("kind", "RoomGrain"), slog.String("method", "TransferOwnership"), slog.Any("request", r))
+	}
+	bytes, err := proto.Marshal(r)
+	if err != nil {
+		return nil, err
+	}
+	reqMsg := &cluster.GrainRequest{MethodIndex: 4, MessageData: bytes}
+	resp, err := g.cluster.Request(g.Identity, "RoomGrain", reqMsg, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("error request: %w", err)
+	}
+	switch msg := resp.(type) {
+	case *TransferOwnershipResponse:
 		return msg, nil
 	case *cluster.GrainErrorResponse:
 		if msg == nil {
@@ -235,6 +291,46 @@ func (a *RoomGrainActor) Receive(ctx actor.Context) {
 			}
 
 			r0, err := a.inner.PostMessage(req, a.ctx)
+			if err != nil {
+				resp := cluster.FromError(err)
+				ctx.Respond(resp)
+				return
+			}
+			ctx.Respond(r0)
+		case 3:
+			req := &SetMemberRoleRequest{}
+			err := proto.Unmarshal(msg.MessageData, req)
+			if err != nil {
+				ctx.Logger().Error("[Grain] SetMemberRole(SetMemberRoleRequest) proto.Unmarshal failed.", slog.Any("error", err))
+				resp := cluster.NewGrainErrorResponse(cluster.ErrorReason_INVALID_ARGUMENT, err.Error()).
+					WithMetadata(map[string]string{
+						"argument": req.String(),
+					})
+				ctx.Respond(resp)
+				return
+			}
+
+			r0, err := a.inner.SetMemberRole(req, a.ctx)
+			if err != nil {
+				resp := cluster.FromError(err)
+				ctx.Respond(resp)
+				return
+			}
+			ctx.Respond(r0)
+		case 4:
+			req := &TransferOwnershipRequest{}
+			err := proto.Unmarshal(msg.MessageData, req)
+			if err != nil {
+				ctx.Logger().Error("[Grain] TransferOwnership(TransferOwnershipRequest) proto.Unmarshal failed.", slog.Any("error", err))
+				resp := cluster.NewGrainErrorResponse(cluster.ErrorReason_INVALID_ARGUMENT, err.Error()).
+					WithMetadata(map[string]string{
+						"argument": req.String(),
+					})
+				ctx.Respond(resp)
+				return
+			}
+
+			r0, err := a.inner.TransferOwnership(req, a.ctx)
 			if err != nil {
 				resp := cluster.FromError(err)
 				ctx.Respond(resp)

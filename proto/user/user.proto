@@ -138,6 +138,36 @@ message GetJoinedRoomsResponse {
   repeated common.RoomRef rooms = 1;
 }
 
+// SetRoomMemberRoleRequest routes a role change to the room: set
+// `target_user_id`'s role in `room_id` to `role` ("admin" or "member"). The
+// User grain attaches the caller's server-resolved identity as the acting
+// member when forwarding to the Room grain.
+message SetRoomMemberRoleRequest {
+  string room_id = 1;
+  string target_user_id = 2;
+  string role = 3;
+}
+
+// SetRoomMemberRoleResponse indicates whether the role change was applied.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
+message SetRoomMemberRoleResponse {
+  common.ErrorDetail error = 1;
+}
+
+// TransferRoomOwnershipRequest routes an ownership transfer to the room: hand
+// `room_id` to `new_owner_user_id`. The User grain attaches the caller's
+// server-resolved identity as the current owner when forwarding.
+message TransferRoomOwnershipRequest {
+  string room_id = 1;
+  string new_owner_user_id = 2;
+}
+
+// TransferRoomOwnershipResponse indicates whether ownership moved.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
+message TransferRoomOwnershipResponse {
+  common.ErrorDetail error = 1;
+}
+
 // UserGrain defines the User virtual actor service.
 service UserGrain {
   // Connection lifecycle. Deregistration is implicit via Watch; no
@@ -155,4 +185,9 @@ service UserGrain {
 
   // Queries
   rpc GetJoinedRooms(GetJoinedRoomsRequest) returns (GetJoinedRoomsResponse);
+
+  // Role management. New RPCs append after the originals so the generated
+  // method indexes of the existing calls never shift.
+  rpc SetRoomMemberRole(SetRoomMemberRoleRequest) returns (SetRoomMemberRoleResponse);
+  rpc TransferRoomOwnership(TransferRoomOwnershipRequest) returns (TransferRoomOwnershipResponse);
 }

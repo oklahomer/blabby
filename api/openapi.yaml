@@ -382,7 +382,9 @@ paths:
       description: |
         Idempotently removes the authenticated user from the room. Like the PUT,
         this is safe to repeat: if the caller is not a member the call still
-        returns `200`, never an error.
+        returns `200`, never an error. The one exception is the room's owner,
+        who cannot leave until ownership is transferred
+        (`PUT /rooms/{id}/owner`).
       responses:
         '200':
           description: The caller is not a member of the room.
@@ -398,6 +400,175 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/RoomNotFound'
+        '409':
+          description: |
+            The caller owns the room. Transfer ownership first, then retry the
+            leave.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 2004
+                  status: ROOM_OWNER_CANNOT_LEAVE
+                  message: transfer ownership before leaving the room
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /rooms/{id}/members/{user}/role:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+      - $ref: '#/components/parameters/UserCode'
+    put:
+      operationId: setRoomMemberRole
+      tags:
+        - Rooms
+      summary: Set another member's role.
+      description: |
+        Changes the target member's role to `admin` or `member`. The caller must
+        be a member whose role permits it — the owner or an admin; admins may
+        promote members and demote admins alike. The owner role never moves
+        through this endpoint: replacing the owner is `PUT /rooms/{id}/owner`.
+        Setting a role the member already holds succeeds, so the PUT is safe to
+        repeat.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetRoleRequest'
+            example:
+              role: admin
+      responses:
+        '200':
+          description: The member now holds the requested role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              example:
+                success: true
+        '400':
+          description: |
+            The room or user code was malformed, the user code matches no
+            account, the body was malformed or missing `role`, or the role was
+            not `admin`/`member`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4001
+                  status: INVALID_REQUEST
+                  message: role must be admin or member
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: |
+            The caller or the target is not a member (`ROOM_NOT_MEMBER`), or the
+            caller's role does not permit the change (`ROOM_PERMISSION_DENIED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 2005
+                  status: ROOM_PERMISSION_DENIED
+                  message: your role does not permit changing member roles
+        '404':
+          $ref: '#/components/responses/RoomNotFound'
+        '413':
+          description: The request body exceeded the 1 KiB limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4003
+                  status: PAYLOAD_TOO_LARGE
+                  message: request body exceeds maximum size
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /rooms/{id}/owner:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    put:
+      operationId: transferRoomOwnership
+      tags:
+        - Rooms
+      summary: Transfer the room's ownership.
+      description: |
+        Hands the room to another member: the caller (who must be the current
+        owner) is demoted to admin and the named member becomes the owner. The
+        owner is modelled as a REST resource, so naming the current owner is an
+        idempotent `200` no-op. An owner cannot leave a room
+        (`409 ROOM_OWNER_CANNOT_LEAVE` on the membership DELETE) until they have
+        transferred it here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetOwnerRequest'
+            example:
+              user: UB000000002
+      responses:
+        '200':
+          description: The named member owns the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              example:
+                success: true
+        '400':
+          description: |
+            The room code was malformed, the body was malformed or missing
+            `user`, or the user code was malformed or matches no account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4001
+                  status: INVALID_REQUEST
+                  message: unknown user
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: |
+            The caller or the named member is not a member (`ROOM_NOT_MEMBER`),
+            or the caller is not the owner (`ROOM_PERMISSION_DENIED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 2005
+                  status: ROOM_PERMISSION_DENIED
+                  message: only the owner can transfer ownership
+        '404':
+          $ref: '#/components/responses/RoomNotFound'
+        '413':
+          description: The request body exceeded the 1 KiB limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4003
+                  status: PAYLOAD_TOO_LARGE
+                  message: request body exceeds maximum size
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
@@ -499,6 +670,20 @@ components:
       schema:
         type: string
       example: RG000000004
+    UserCode:
+      name: user
+      in: path
+      required: true
+      description: |
+        The target member's opaque public user code: `U` followed by 10
+        Crockford Base32 symbols (e.g. `UB000000002`). Parsed with the same
+        leniency as room codes. A malformed or unknown code is rejected with
+        `400 INVALID_REQUEST` — the codes are unguessable, and a nonexistent
+        user is by definition not a member, so nothing is revealed that
+        membership wouldn't.
+      schema:
+        type: string
+      example: UB000000002
   schemas:
     RegisterRequest:
       type: object
@@ -625,6 +810,29 @@ components:
           pattern: '\S'
           x-max-utf8-bytes: 4096
           description: The message body. Required, non-blank, at most 4 KiB.
+    SetRoleRequest:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          type: string
+          enum:
+            - admin
+            - member
+          description: |
+            The target member's new role. The owner role is not assignable here;
+            it moves only through `PUT /rooms/{id}/owner`.
+    SetOwnerRequest:
+      type: object
+      required:
+        - user
+      properties:
+        user:
+          type: string
+          description: |
+            The new owner's opaque public user code (`U…`). Must be a member of
+            the room.
     SuccessResponse:
       type: object
       required:
@@ -676,6 +884,8 @@ components:
             - ROOM_NOT_MEMBER
             - ROOM_ALREADY_MEMBER
             - ROOM_NOT_FOUND
+            - ROOM_OWNER_CANNOT_LEAVE
+            - ROOM_PERMISSION_DENIED
             - RATE_LIMIT_EXCEEDED
             - VERIFICATION_RATE_LIMITED
             - INVALID_REQUEST

@@ -17,6 +17,8 @@ type roomClient interface {
 	Join(roomID id.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error)
 	Leave(roomID id.RoomID, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error)
 	PostMessage(roomID id.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error)
+	SetMemberRole(roomID id.RoomID, req *roompb.SetMemberRoleRequest) (*roompb.SetMemberRoleResponse, error)
+	TransferOwnership(roomID id.RoomID, req *roompb.TransferOwnershipRequest) (*roompb.TransferOwnershipResponse, error)
 }
 
 // clusterRoomClient is the production roomClient; it routes calls to the
@@ -55,6 +57,22 @@ func (r *clusterRoomClient) PostMessage(roomID id.RoomID, req *roompb.PostMessag
 	resp, err := roompb.GetRoomGrainGrainClient(r.c, roomID.String()).PostMessage(req)
 	if err != nil {
 		return nil, fmt.Errorf("room grain PostMessage: %w", err)
+	}
+	return resp, nil
+}
+
+func (r *clusterRoomClient) SetMemberRole(roomID id.RoomID, req *roompb.SetMemberRoleRequest) (*roompb.SetMemberRoleResponse, error) {
+	resp, err := roompb.GetRoomGrainGrainClient(r.c, roomID.String()).SetMemberRole(req)
+	if err != nil {
+		return nil, fmt.Errorf("room grain SetMemberRole: %w", err)
+	}
+	return resp, nil
+}
+
+func (r *clusterRoomClient) TransferOwnership(roomID id.RoomID, req *roompb.TransferOwnershipRequest) (*roompb.TransferOwnershipResponse, error) {
+	resp, err := roompb.GetRoomGrainGrainClient(r.c, roomID.String()).TransferOwnership(req)
+	if err != nil {
+		return nil, fmt.Errorf("room grain TransferOwnership: %w", err)
 	}
 	return resp, nil
 }

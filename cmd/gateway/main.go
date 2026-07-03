@@ -293,6 +293,7 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	gw := gateway.NewGateway(gateway.Deps{
 		Authenticator: authenticator,
 		Rooms:         roomDir,
+		Users:         userDir,
 		Registration:  registration,
 		Verification:  registration,
 		Maintenance:   gateway.NewClusterMaintenanceTrigger(c),

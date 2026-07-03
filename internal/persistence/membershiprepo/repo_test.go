@@ -17,10 +17,12 @@ import (
 )
 
 // fakeQuerier is an in-memory postgres.Querier for exercising the repo's control
-// flow without a database. exec drives Add/Remove; query drives the list reads.
+// flow without a database. exec drives Add/UpdateRole/TransferOwnership; query
+// drives the list reads; queryRow drives Remove and GetRole.
 type fakeQuerier struct {
-	exec  func(sql string, args ...any) (pgconn.CommandTag, error)
-	query func(sql string, args ...any) (pgx.Rows, error)
+	exec     func(sql string, args ...any) (pgconn.CommandTag, error)
+	query    func(sql string, args ...any) (pgx.Rows, error)
+	queryRow func(sql string, args ...any) pgx.Row
 }
 
 var _ postgres.Querier = (*fakeQuerier)(nil)
@@ -33,8 +35,24 @@ func (f *fakeQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Row
 	return f.query(sql, args...)
 }
 
-func (f *fakeQuerier) QueryRow(context.Context, string, ...any) pgx.Row {
-	panic("membershiprepo does not use QueryRow")
+func (f *fakeQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	if f.queryRow == nil {
+		panic("fakeQuerier: QueryRow not stubbed")
+	}
+	return f.queryRow(sql, args...)
+}
+
+// fakeRow replays one row (column values in scan order) or an error.
+type fakeRow struct {
+	values []any
+	err    error
+}
+
+func (r fakeRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	return assignAll(dest, r.values)
 }
 
 // fakeRows replays a fixed set of rows (each a slice of column values in scan
@@ -75,6 +93,8 @@ func assignAll(dest []any, values []any) error {
 			*d = values[i].(int64)
 		case *string:
 			*d = values[i].(string)
+		case *bool:
+			*d = values[i].(bool)
 		case *time.Time:
 			*d = values[i].(time.Time)
 		default:
@@ -222,28 +242,160 @@ func TestAdd_PropagatesError(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
-	var gotArgs []any
-	fq := &fakeQuerier{exec: func(_ string, args ...any) (pgconn.CommandTag, error) {
-		gotArgs = args
-		return pgconn.NewCommandTag("DELETE 1"), nil
-	}}
-
-	if err := New().Remove(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2)); err != nil {
-		t.Fatalf("Remove: %v", err)
+	// The guarded delete reports (existed, deleted) in one statement; each pair
+	// maps to a distinct outcome.
+	tests := []struct {
+		name    string
+		existed bool
+		deleted bool
+		wantErr error
+	}{
+		{name: "member removed", existed: true, deleted: true, wantErr: nil},
+		{name: "owner is refused", existed: true, deleted: false, wantErr: ErrOwnerCannotLeave},
+		// A missing row is a cache/DB divergence, surfaced so the caller fails
+		// closed rather than appending a member_left event for a change that did
+		// not happen.
+		{name: "absent row is strict", existed: false, deleted: false, wantErr: ErrMembershipNotFound},
 	}
-	if gotArgs[0].(int64) != 4 || gotArgs[1].(int64) != 2 {
-		t.Errorf("remove args = %v, want [4 2]", gotArgs)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotSQL string
+			var gotArgs []any
+			fq := &fakeQuerier{queryRow: func(sql string, args ...any) pgx.Row {
+				gotSQL, gotArgs = sql, args
+				return fakeRow{values: []any{tc.existed, tc.deleted}}
+			}}
+
+			err := New().Remove(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2))
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Remove: got %v, want %v", err, tc.wantErr)
+			}
+			if gotArgs[0].(int64) != 4 || gotArgs[1].(int64) != 2 {
+				t.Errorf("remove args = %v, want [4 2]", gotArgs)
+			}
+			if !strings.Contains(gotSQL, "role <> 'owner'") {
+				t.Errorf("Remove SQL must exclude the owner from the delete: %s", gotSQL)
+			}
+		})
 	}
 }
 
-func TestRemove_NotFoundIsStrict(t *testing.T) {
-	// A 0-row delete is a cache/DB divergence, surfaced so the caller fails closed
-	// rather than appending a member_left event for a change that did not happen.
-	fq := &fakeQuerier{exec: func(string, ...any) (pgconn.CommandTag, error) {
-		return pgconn.NewCommandTag("DELETE 0"), nil
+func TestGetRole(t *testing.T) {
+	t.Run("member role", func(t *testing.T) {
+		var gotArgs []any
+		fq := &fakeQuerier{queryRow: func(_ string, args ...any) pgx.Row {
+			gotArgs = args
+			return fakeRow{values: []any{"admin"}}
+		}}
+		role, err := New().GetRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2))
+		if err != nil {
+			t.Fatalf("GetRole: %v", err)
+		}
+		if role != domain.MembershipRoleAdmin {
+			t.Errorf("role = %q, want admin", role)
+		}
+		if gotArgs[0].(int64) != 4 || gotArgs[1].(int64) != 2 {
+			t.Errorf("args = %v, want [4 2]", gotArgs)
+		}
+	})
+	t.Run("absent member", func(t *testing.T) {
+		fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
+			return fakeRow{err: pgx.ErrNoRows}
+		}}
+		if _, err := New().GetRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2)); !errors.Is(err, ErrMembershipNotFound) {
+			t.Fatalf("GetRole(absent): got %v, want ErrMembershipNotFound", err)
+		}
+	})
+	t.Run("unknown label is a hard error", func(t *testing.T) {
+		fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
+			return fakeRow{values: []any{"superuser"}}
+		}}
+		if _, err := New().GetRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2)); err == nil {
+			t.Fatal("GetRole: want an error for an unknown role label")
+		}
+	})
+}
+
+func TestUpdateRole(t *testing.T) {
+	var gotSQL string
+	var gotArgs []any
+	fq := &fakeQuerier{exec: func(sql string, args ...any) (pgconn.CommandTag, error) {
+		gotSQL, gotArgs = sql, args
+		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}}
-	err := New().Remove(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2))
+
+	if err := New().UpdateRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2), domain.MembershipRoleAdmin); err != nil {
+		t.Fatalf("UpdateRole: %v", err)
+	}
+	if gotArgs[0].(int64) != 4 || gotArgs[1].(int64) != 2 || gotArgs[2].(string) != "admin" {
+		t.Errorf("args = %v, want [4 2 admin]", gotArgs)
+	}
+	if !strings.Contains(gotSQL, "$3::membership_role") {
+		t.Errorf("UpdateRole SQL must cast the role param to the enum: %s", gotSQL)
+	}
+}
+
+func TestUpdateRole_NotFoundIsStrict(t *testing.T) {
+	fq := &fakeQuerier{exec: func(string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.NewCommandTag("UPDATE 0"), nil
+	}}
+	err := New().UpdateRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2), domain.MembershipRoleMember)
 	if !errors.Is(err, ErrMembershipNotFound) {
-		t.Fatalf("Remove(absent): got %v, want ErrMembershipNotFound", err)
+		t.Fatalf("UpdateRole(absent): got %v, want ErrMembershipNotFound", err)
+	}
+}
+
+func TestTransferOwnership(t *testing.T) {
+	// One all-or-nothing statement: the target's membership gates the demote,
+	// the demote gates the promote, so the writes land together even when q is
+	// an autocommitting pool.
+	var gotSQL string
+	var gotArgs []any
+	fq := &fakeQuerier{queryRow: func(sql string, args ...any) pgx.Row {
+		gotSQL, gotArgs = sql, args
+		return fakeRow{values: []any{true, true}}
+	}}
+
+	if err := New().TransferOwnership(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 1), mustUserID(t, 2)); err != nil {
+		t.Fatalf("TransferOwnership: %v", err)
+	}
+	if gotArgs[0].(int64) != 4 || gotArgs[1].(int64) != 1 || gotArgs[2].(int64) != 2 {
+		t.Errorf("args = %v, want [4 1 2]", gotArgs)
+	}
+	// The demote must be gated on the target's membership and the promote on the
+	// demote, so a broken precondition changes nothing.
+	if !strings.Contains(gotSQL, "EXISTS (SELECT 1 FROM target)") || !strings.Contains(gotSQL, "EXISTS (SELECT 1 FROM demoted)") {
+		t.Errorf("TransferOwnership SQL must chain target -> demote -> promote: %s", gotSQL)
+	}
+}
+
+func TestTransferOwnership_SelfNoop(t *testing.T) {
+	if err := New().TransferOwnership(context.Background(), &fakeQuerier{}, mustRoomID(t, 4), mustUserID(t, 1), mustUserID(t, 1)); err != nil {
+		t.Fatalf("TransferOwnership(self): %v", err)
+	}
+}
+
+func TestTransferOwnership_BrokenPreconditionsAreHardErrors(t *testing.T) {
+	tests := []struct {
+		name         string
+		targetExists bool
+		promoted     bool
+	}{
+		{name: "to is not a member", targetExists: false, promoted: false},
+		{name: "from does not own the room", targetExists: true, promoted: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
+				return fakeRow{values: []any{tc.targetExists, tc.promoted}}
+			}}
+			err := New().TransferOwnership(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 1), mustUserID(t, 2))
+			if err == nil {
+				t.Fatal("TransferOwnership: want a hard error on a broken precondition")
+			}
+			if errors.Is(err, ErrMembershipNotFound) || errors.Is(err, ErrOwnerCannotLeave) {
+				t.Fatalf("TransferOwnership: %v must not be a recoverable sentinel", err)
+			}
+		})
 	}
 }

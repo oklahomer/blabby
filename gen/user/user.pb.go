@@ -842,6 +842,217 @@ func (x *GetJoinedRoomsResponse) GetRooms() []*common.RoomRef {
 	return nil
 }
 
+// SetRoomMemberRoleRequest routes a role change to the room: set
+// `target_user_id`'s role in `room_id` to `role` ("admin" or "member"). The
+// User grain attaches the caller's server-resolved identity as the acting
+// member when forwarding to the Room grain.
+type SetRoomMemberRoleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RoomId        string                 `protobuf:"bytes,1,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
+	TargetUserId  string                 `protobuf:"bytes,2,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
+	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetRoomMemberRoleRequest) Reset() {
+	*x = SetRoomMemberRoleRequest{}
+	mi := &file_user_user_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetRoomMemberRoleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetRoomMemberRoleRequest) ProtoMessage() {}
+
+func (x *SetRoomMemberRoleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_user_user_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetRoomMemberRoleRequest.ProtoReflect.Descriptor instead.
+func (*SetRoomMemberRoleRequest) Descriptor() ([]byte, []int) {
+	return file_user_user_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *SetRoomMemberRoleRequest) GetRoomId() string {
+	if x != nil {
+		return x.RoomId
+	}
+	return ""
+}
+
+func (x *SetRoomMemberRoleRequest) GetTargetUserId() string {
+	if x != nil {
+		return x.TargetUserId
+	}
+	return ""
+}
+
+func (x *SetRoomMemberRoleRequest) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+// SetRoomMemberRoleResponse indicates whether the role change was applied.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
+type SetRoomMemberRoleResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetRoomMemberRoleResponse) Reset() {
+	*x = SetRoomMemberRoleResponse{}
+	mi := &file_user_user_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetRoomMemberRoleResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetRoomMemberRoleResponse) ProtoMessage() {}
+
+func (x *SetRoomMemberRoleResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_user_user_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetRoomMemberRoleResponse.ProtoReflect.Descriptor instead.
+func (*SetRoomMemberRoleResponse) Descriptor() ([]byte, []int) {
+	return file_user_user_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *SetRoomMemberRoleResponse) GetError() *common.ErrorDetail {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+// TransferRoomOwnershipRequest routes an ownership transfer to the room: hand
+// `room_id` to `new_owner_user_id`. The User grain attaches the caller's
+// server-resolved identity as the current owner when forwarding.
+type TransferRoomOwnershipRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RoomId         string                 `protobuf:"bytes,1,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
+	NewOwnerUserId string                 `protobuf:"bytes,2,opt,name=new_owner_user_id,json=newOwnerUserId,proto3" json:"new_owner_user_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *TransferRoomOwnershipRequest) Reset() {
+	*x = TransferRoomOwnershipRequest{}
+	mi := &file_user_user_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransferRoomOwnershipRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransferRoomOwnershipRequest) ProtoMessage() {}
+
+func (x *TransferRoomOwnershipRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_user_user_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransferRoomOwnershipRequest.ProtoReflect.Descriptor instead.
+func (*TransferRoomOwnershipRequest) Descriptor() ([]byte, []int) {
+	return file_user_user_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *TransferRoomOwnershipRequest) GetRoomId() string {
+	if x != nil {
+		return x.RoomId
+	}
+	return ""
+}
+
+func (x *TransferRoomOwnershipRequest) GetNewOwnerUserId() string {
+	if x != nil {
+		return x.NewOwnerUserId
+	}
+	return ""
+}
+
+// TransferRoomOwnershipResponse indicates whether ownership moved.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
+type TransferRoomOwnershipResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransferRoomOwnershipResponse) Reset() {
+	*x = TransferRoomOwnershipResponse{}
+	mi := &file_user_user_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransferRoomOwnershipResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransferRoomOwnershipResponse) ProtoMessage() {}
+
+func (x *TransferRoomOwnershipResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_user_user_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransferRoomOwnershipResponse.ProtoReflect.Descriptor instead.
+func (*TransferRoomOwnershipResponse) Descriptor() ([]byte, []int) {
+	return file_user_user_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *TransferRoomOwnershipResponse) GetError() *common.ErrorDetail {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
 var File_user_user_proto protoreflect.FileDescriptor
 
 const file_user_user_proto_rawDesc = "" +
@@ -884,11 +1095,22 @@ const file_user_user_proto_rawDesc = "" +
 	"\x17NotifyRoomEventResponse\"\x17\n" +
 	"\x15GetJoinedRoomsRequest\"?\n" +
 	"\x16GetJoinedRoomsResponse\x12%\n" +
-	"\x05rooms\x18\x01 \x03(\v2\x0f.common.RoomRefR\x05rooms*f\n" +
+	"\x05rooms\x18\x01 \x03(\v2\x0f.common.RoomRefR\x05rooms\"m\n" +
+	"\x18SetRoomMemberRoleRequest\x12\x17\n" +
+	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12$\n" +
+	"\x0etarget_user_id\x18\x02 \x01(\tR\ftargetUserId\x12\x12\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\"F\n" +
+	"\x19SetRoomMemberRoleResponse\x12)\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"b\n" +
+	"\x1cTransferRoomOwnershipRequest\x12\x17\n" +
+	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12)\n" +
+	"\x11new_owner_user_id\x18\x02 \x01(\tR\x0enewOwnerUserId\"J\n" +
+	"\x1dTransferRoomOwnershipResponse\x12)\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error*f\n" +
 	"\rRoomEventType\x12\x1f\n" +
 	"\x1bROOM_EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16ROOM_EVENT_TYPE_JOINED\x10\x01\x12\x18\n" +
-	"\x14ROOM_EVENT_TYPE_LEFT\x10\x022\x8b\x04\n" +
+	"\x14ROOM_EVENT_TYPE_LEFT\x10\x022\xc3\x05\n" +
 	"\tUserGrain\x12W\n" +
 	"\x12RegisterConnection\x12\x1f.user.RegisterConnectionRequest\x1a .user.RegisterConnectionResponse\x129\n" +
 	"\bJoinRoom\x12\x15.user.JoinRoomRequest\x1a\x16.user.JoinRoomResponse\x12<\n" +
@@ -896,7 +1118,9 @@ const file_user_user_proto_rawDesc = "" +
 	"\vSendMessage\x12\x18.user.SendMessageRequest\x1a\x19.user.SendMessageResponse\x12K\n" +
 	"\x0eForwardMessage\x12\x1b.user.ForwardMessageRequest\x1a\x1c.user.ForwardMessageResponse\x12N\n" +
 	"\x0fNotifyRoomEvent\x12\x1c.user.NotifyRoomEventRequest\x1a\x1d.user.NotifyRoomEventResponse\x12K\n" +
-	"\x0eGetJoinedRooms\x12\x1b.user.GetJoinedRoomsRequest\x1a\x1c.user.GetJoinedRoomsResponseB-Z+github.com/oklahomer/blabby/gen/user;userpbb\x06proto3"
+	"\x0eGetJoinedRooms\x12\x1b.user.GetJoinedRoomsRequest\x1a\x1c.user.GetJoinedRoomsResponse\x12T\n" +
+	"\x11SetRoomMemberRole\x12\x1e.user.SetRoomMemberRoleRequest\x1a\x1f.user.SetRoomMemberRoleResponse\x12`\n" +
+	"\x15TransferRoomOwnership\x12\".user.TransferRoomOwnershipRequest\x1a#.user.TransferRoomOwnershipResponseB-Z+github.com/oklahomer/blabby/gen/user;userpbb\x06proto3"
 
 var (
 	file_user_user_proto_rawDescOnce sync.Once
@@ -911,63 +1135,73 @@ func file_user_user_proto_rawDescGZIP() []byte {
 }
 
 var file_user_user_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_user_user_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_user_user_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_user_user_proto_goTypes = []any{
-	(RoomEventType)(0),                 // 0: user.RoomEventType
-	(*PID)(nil),                        // 1: user.PID
-	(*RegisterConnectionRequest)(nil),  // 2: user.RegisterConnectionRequest
-	(*RegisterConnectionResponse)(nil), // 3: user.RegisterConnectionResponse
-	(*JoinRoomRequest)(nil),            // 4: user.JoinRoomRequest
-	(*JoinRoomResponse)(nil),           // 5: user.JoinRoomResponse
-	(*LeaveRoomRequest)(nil),           // 6: user.LeaveRoomRequest
-	(*LeaveRoomResponse)(nil),          // 7: user.LeaveRoomResponse
-	(*SendMessageRequest)(nil),         // 8: user.SendMessageRequest
-	(*SendMessageResponse)(nil),        // 9: user.SendMessageResponse
-	(*ForwardMessageRequest)(nil),      // 10: user.ForwardMessageRequest
-	(*ForwardMessageResponse)(nil),     // 11: user.ForwardMessageResponse
-	(*NotifyRoomEventRequest)(nil),     // 12: user.NotifyRoomEventRequest
-	(*NotifyRoomEventResponse)(nil),    // 13: user.NotifyRoomEventResponse
-	(*GetJoinedRoomsRequest)(nil),      // 14: user.GetJoinedRoomsRequest
-	(*GetJoinedRoomsResponse)(nil),     // 15: user.GetJoinedRoomsResponse
-	(*common.ErrorDetail)(nil),         // 16: common.ErrorDetail
-	(*timestamppb.Timestamp)(nil),      // 17: google.protobuf.Timestamp
-	(*common.RoomRef)(nil),             // 18: common.RoomRef
-	(*common.UserRef)(nil),             // 19: common.UserRef
+	(RoomEventType)(0),                    // 0: user.RoomEventType
+	(*PID)(nil),                           // 1: user.PID
+	(*RegisterConnectionRequest)(nil),     // 2: user.RegisterConnectionRequest
+	(*RegisterConnectionResponse)(nil),    // 3: user.RegisterConnectionResponse
+	(*JoinRoomRequest)(nil),               // 4: user.JoinRoomRequest
+	(*JoinRoomResponse)(nil),              // 5: user.JoinRoomResponse
+	(*LeaveRoomRequest)(nil),              // 6: user.LeaveRoomRequest
+	(*LeaveRoomResponse)(nil),             // 7: user.LeaveRoomResponse
+	(*SendMessageRequest)(nil),            // 8: user.SendMessageRequest
+	(*SendMessageResponse)(nil),           // 9: user.SendMessageResponse
+	(*ForwardMessageRequest)(nil),         // 10: user.ForwardMessageRequest
+	(*ForwardMessageResponse)(nil),        // 11: user.ForwardMessageResponse
+	(*NotifyRoomEventRequest)(nil),        // 12: user.NotifyRoomEventRequest
+	(*NotifyRoomEventResponse)(nil),       // 13: user.NotifyRoomEventResponse
+	(*GetJoinedRoomsRequest)(nil),         // 14: user.GetJoinedRoomsRequest
+	(*GetJoinedRoomsResponse)(nil),        // 15: user.GetJoinedRoomsResponse
+	(*SetRoomMemberRoleRequest)(nil),      // 16: user.SetRoomMemberRoleRequest
+	(*SetRoomMemberRoleResponse)(nil),     // 17: user.SetRoomMemberRoleResponse
+	(*TransferRoomOwnershipRequest)(nil),  // 18: user.TransferRoomOwnershipRequest
+	(*TransferRoomOwnershipResponse)(nil), // 19: user.TransferRoomOwnershipResponse
+	(*common.ErrorDetail)(nil),            // 20: common.ErrorDetail
+	(*timestamppb.Timestamp)(nil),         // 21: google.protobuf.Timestamp
+	(*common.RoomRef)(nil),                // 22: common.RoomRef
+	(*common.UserRef)(nil),                // 23: common.UserRef
 }
 var file_user_user_proto_depIdxs = []int32{
 	1,  // 0: user.RegisterConnectionRequest.requester_pid:type_name -> user.PID
-	16, // 1: user.RegisterConnectionResponse.error:type_name -> common.ErrorDetail
-	16, // 2: user.JoinRoomResponse.error:type_name -> common.ErrorDetail
-	16, // 3: user.LeaveRoomResponse.error:type_name -> common.ErrorDetail
-	17, // 4: user.SendMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
-	16, // 5: user.SendMessageResponse.error:type_name -> common.ErrorDetail
-	18, // 6: user.ForwardMessageRequest.room:type_name -> common.RoomRef
-	19, // 7: user.ForwardMessageRequest.sender:type_name -> common.UserRef
-	17, // 8: user.ForwardMessageRequest.timestamp:type_name -> google.protobuf.Timestamp
-	18, // 9: user.NotifyRoomEventRequest.room:type_name -> common.RoomRef
-	19, // 10: user.NotifyRoomEventRequest.user:type_name -> common.UserRef
+	20, // 1: user.RegisterConnectionResponse.error:type_name -> common.ErrorDetail
+	20, // 2: user.JoinRoomResponse.error:type_name -> common.ErrorDetail
+	20, // 3: user.LeaveRoomResponse.error:type_name -> common.ErrorDetail
+	21, // 4: user.SendMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
+	20, // 5: user.SendMessageResponse.error:type_name -> common.ErrorDetail
+	22, // 6: user.ForwardMessageRequest.room:type_name -> common.RoomRef
+	23, // 7: user.ForwardMessageRequest.sender:type_name -> common.UserRef
+	21, // 8: user.ForwardMessageRequest.timestamp:type_name -> google.protobuf.Timestamp
+	22, // 9: user.NotifyRoomEventRequest.room:type_name -> common.RoomRef
+	23, // 10: user.NotifyRoomEventRequest.user:type_name -> common.UserRef
 	0,  // 11: user.NotifyRoomEventRequest.event_type:type_name -> user.RoomEventType
-	17, // 12: user.NotifyRoomEventRequest.timestamp:type_name -> google.protobuf.Timestamp
-	18, // 13: user.GetJoinedRoomsResponse.rooms:type_name -> common.RoomRef
-	2,  // 14: user.UserGrain.RegisterConnection:input_type -> user.RegisterConnectionRequest
-	4,  // 15: user.UserGrain.JoinRoom:input_type -> user.JoinRoomRequest
-	6,  // 16: user.UserGrain.LeaveRoom:input_type -> user.LeaveRoomRequest
-	8,  // 17: user.UserGrain.SendMessage:input_type -> user.SendMessageRequest
-	10, // 18: user.UserGrain.ForwardMessage:input_type -> user.ForwardMessageRequest
-	12, // 19: user.UserGrain.NotifyRoomEvent:input_type -> user.NotifyRoomEventRequest
-	14, // 20: user.UserGrain.GetJoinedRooms:input_type -> user.GetJoinedRoomsRequest
-	3,  // 21: user.UserGrain.RegisterConnection:output_type -> user.RegisterConnectionResponse
-	5,  // 22: user.UserGrain.JoinRoom:output_type -> user.JoinRoomResponse
-	7,  // 23: user.UserGrain.LeaveRoom:output_type -> user.LeaveRoomResponse
-	9,  // 24: user.UserGrain.SendMessage:output_type -> user.SendMessageResponse
-	11, // 25: user.UserGrain.ForwardMessage:output_type -> user.ForwardMessageResponse
-	13, // 26: user.UserGrain.NotifyRoomEvent:output_type -> user.NotifyRoomEventResponse
-	15, // 27: user.UserGrain.GetJoinedRooms:output_type -> user.GetJoinedRoomsResponse
-	21, // [21:28] is the sub-list for method output_type
-	14, // [14:21] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	21, // 12: user.NotifyRoomEventRequest.timestamp:type_name -> google.protobuf.Timestamp
+	22, // 13: user.GetJoinedRoomsResponse.rooms:type_name -> common.RoomRef
+	20, // 14: user.SetRoomMemberRoleResponse.error:type_name -> common.ErrorDetail
+	20, // 15: user.TransferRoomOwnershipResponse.error:type_name -> common.ErrorDetail
+	2,  // 16: user.UserGrain.RegisterConnection:input_type -> user.RegisterConnectionRequest
+	4,  // 17: user.UserGrain.JoinRoom:input_type -> user.JoinRoomRequest
+	6,  // 18: user.UserGrain.LeaveRoom:input_type -> user.LeaveRoomRequest
+	8,  // 19: user.UserGrain.SendMessage:input_type -> user.SendMessageRequest
+	10, // 20: user.UserGrain.ForwardMessage:input_type -> user.ForwardMessageRequest
+	12, // 21: user.UserGrain.NotifyRoomEvent:input_type -> user.NotifyRoomEventRequest
+	14, // 22: user.UserGrain.GetJoinedRooms:input_type -> user.GetJoinedRoomsRequest
+	16, // 23: user.UserGrain.SetRoomMemberRole:input_type -> user.SetRoomMemberRoleRequest
+	18, // 24: user.UserGrain.TransferRoomOwnership:input_type -> user.TransferRoomOwnershipRequest
+	3,  // 25: user.UserGrain.RegisterConnection:output_type -> user.RegisterConnectionResponse
+	5,  // 26: user.UserGrain.JoinRoom:output_type -> user.JoinRoomResponse
+	7,  // 27: user.UserGrain.LeaveRoom:output_type -> user.LeaveRoomResponse
+	9,  // 28: user.UserGrain.SendMessage:output_type -> user.SendMessageResponse
+	11, // 29: user.UserGrain.ForwardMessage:output_type -> user.ForwardMessageResponse
+	13, // 30: user.UserGrain.NotifyRoomEvent:output_type -> user.NotifyRoomEventResponse
+	15, // 31: user.UserGrain.GetJoinedRooms:output_type -> user.GetJoinedRoomsResponse
+	17, // 32: user.UserGrain.SetRoomMemberRole:output_type -> user.SetRoomMemberRoleResponse
+	19, // 33: user.UserGrain.TransferRoomOwnership:output_type -> user.TransferRoomOwnershipResponse
+	25, // [25:34] is the sub-list for method output_type
+	16, // [16:25] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_user_user_proto_init() }
@@ -981,7 +1215,7 @@ func file_user_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_user_proto_rawDesc), len(file_user_user_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   15,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

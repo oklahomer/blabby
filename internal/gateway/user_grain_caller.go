@@ -16,6 +16,8 @@ type userGrainCaller interface {
 	LeaveRoom(req *userpb.LeaveRoomRequest) (*userpb.LeaveRoomResponse, error)
 	SendMessage(req *userpb.SendMessageRequest) (*userpb.SendMessageResponse, error)
 	GetJoinedRooms(req *userpb.GetJoinedRoomsRequest) (*userpb.GetJoinedRoomsResponse, error)
+	SetRoomMemberRole(req *userpb.SetRoomMemberRoleRequest) (*userpb.SetRoomMemberRoleResponse, error)
+	TransferRoomOwnership(req *userpb.TransferRoomOwnershipRequest) (*userpb.TransferRoomOwnershipResponse, error)
 }
 
 // clusterUserGrainCaller wraps the generated cluster client to satisfy
@@ -59,4 +61,12 @@ func (u *userGrainClient) SendMessage(req *userpb.SendMessageRequest) (*userpb.S
 
 func (u *userGrainClient) GetJoinedRooms(req *userpb.GetJoinedRoomsRequest) (*userpb.GetJoinedRoomsResponse, error) {
 	return u.client.GetJoinedRooms(req)
+}
+
+func (u *userGrainClient) SetRoomMemberRole(req *userpb.SetRoomMemberRoleRequest) (*userpb.SetRoomMemberRoleResponse, error) {
+	return u.client.SetRoomMemberRole(req)
+}
+
+func (u *userGrainClient) TransferRoomOwnership(req *userpb.TransferRoomOwnershipRequest) (*userpb.TransferRoomOwnershipResponse, error) {
+	return u.client.TransferRoomOwnership(req)
 }
