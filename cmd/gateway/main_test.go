@@ -18,6 +18,8 @@ func TestParseConfig(t *testing.T) {
 
 		wantListen         string
 		wantInternalListen string
+		wantGCSchedule     string
+		wantGCDisabled     bool
 		wantSecret         string
 		wantUsingDev       bool
 		wantMultiNode      bool
@@ -90,6 +92,30 @@ func TestParseConfig(t *testing.T) {
 			errMatch: "must differ",
 		},
 		{
+			name:           "custom gc schedule",
+			args:           []string{"--gc-schedule", "*/5 * * * *"},
+			wantListen:     defaultListenAddr,
+			wantGCSchedule: "*/5 * * * *",
+			wantSecret:     devJWTSecret,
+			wantUsingDev:   true,
+			wantMultiNode:  true,
+		},
+		{
+			name:           "gc schedule off disables the local cron",
+			args:           []string{"--gc-schedule", "off"},
+			wantListen:     defaultListenAddr,
+			wantGCDisabled: true,
+			wantSecret:     devJWTSecret,
+			wantUsingDev:   true,
+			wantMultiNode:  true,
+		},
+		{
+			name:     "invalid gc schedule rejected",
+			args:     []string{"--gc-schedule", "every minute please"},
+			wantErr:  true,
+			errMatch: "gc-schedule",
+		},
+		{
 			name:     "unknown flag rejected",
 			args:     []string{"--nope"},
 			wantErr:  true,
@@ -130,6 +156,13 @@ func TestParseConfig(t *testing.T) {
 			}
 			if gotCfg.internalListenAddr != wantInternal {
 				t.Errorf("internalListenAddr = %q, want %q", gotCfg.internalListenAddr, wantInternal)
+			}
+			wantGC := tc.wantGCSchedule
+			if wantGC == "" && !tc.wantGCDisabled {
+				wantGC = defaultGCSchedule
+			}
+			if gotCfg.gcSchedule != wantGC {
+				t.Errorf("gcSchedule = %q, want %q", gotCfg.gcSchedule, wantGC)
 			}
 			if gotCfg.jwtSecret != tc.wantSecret {
 				t.Errorf("jwtSecret = %q, want %q", gotCfg.jwtSecret, tc.wantSecret)

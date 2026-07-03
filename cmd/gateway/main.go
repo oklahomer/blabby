@@ -12,10 +12,12 @@
 // operational endpoints — scheduled-job triggers under /internal/ — on a second
 // listener, loopback 127.0.0.1:9090 by default (--internal-listen). The internal
 // listener is unauthenticated and must stay network-restricted; never expose it
-// through the public ingress. Override the JWT signing secret with --jwt-secret;
-// when no secret is supplied a built-in development key is used (and a warning is
-// logged). Every gateway in a real deployment MUST share the same signing secret.
-// See docs/multi-node-cluster.md.
+// through the public ingress. A gateway-local cron POSTs the pending-account GC
+// trigger to that listener on --gc-schedule (default "@every 1m"); pass "off" to
+// hand the trigger to an external scheduler. Override the JWT signing secret with
+// --jwt-secret; when no secret is supplied a built-in development key is used (and
+// a warning is logged). Every gateway in a real deployment MUST share the same
+// signing secret. See docs/multi-node-cluster.md.
 package main
 
 import (
@@ -51,6 +53,17 @@ const (
 	// /internal/* routes are not reachable off-host out of the box; a multi-host
 	// deployment binds it to an internal interface and firewalls it.
 	defaultInternalListenAddr = "127.0.0.1:9090"
+
+	// defaultGCSchedule is the gateway-local cron cadence for triggering the
+	// pending-account GC. One trigger per minute keeps the demo snappy (an
+	// abandoned registration is reclaimed within about a minute of leaving its
+	// grace window) while the backend grain coalesces the redundant triggers that
+	// multiple gateways produce.
+	defaultGCSchedule = "@every 1m"
+
+	// gcScheduleOff is the --gc-schedule value that disables the local cron, for
+	// deployments where an external scheduler owns the trigger.
+	gcScheduleOff = "off"
 
 	// devJWTSecret is the fallback signing key used when --jwt-secret is not
 	// provided, so a fresh clone runs with zero configuration. It is
@@ -95,8 +108,11 @@ func gatewayClusterDefaults() clusterboot.Defaults {
 type config struct {
 	listenAddr         string
 	internalListenAddr string
-	jwtSecret          string
-	usingDevSecret     bool
+	// gcSchedule is the local pending-account GC cron spec; empty means the local
+	// cron is disabled (--gc-schedule off).
+	gcSchedule     string
+	jwtSecret      string
+	usingDevSecret bool
 }
 
 func main() {
@@ -123,6 +139,7 @@ func parseConfig(args []string) (config, postgres.Config, clusterboot.Config, er
 	fs := flag.NewFlagSet("blabby-gateway", flag.ContinueOnError)
 	listen := fs.String("listen", defaultListenAddr, "public HTTP listen address (host:port)")
 	internalListen := fs.String("internal-listen", defaultInternalListenAddr, "internal listen address (host:port) for operational endpoints; keep network-restricted")
+	gcSchedule := fs.String("gc-schedule", defaultGCSchedule, `pending-account GC trigger schedule (cron spec or @every duration); "off" disables the local cron`)
 	secret := fs.String("jwt-secret", "", "JWT signing secret; a development default is used when empty")
 	dbCfg := postgres.BindFlags(fs)
 	clusterCfg := clusterboot.BindFlags(fs, gatewayClusterDefaults())
@@ -130,7 +147,7 @@ func parseConfig(args []string) (config, postgres.Config, clusterboot.Config, er
 		return config{}, postgres.Config{}, clusterboot.Config{}, err
 	}
 
-	cfg, err := newConfig(*listen, *internalListen, *secret)
+	cfg, err := newConfig(*listen, *internalListen, *gcSchedule, *secret)
 	if err != nil {
 		return config{}, postgres.Config{}, clusterboot.Config{}, err
 	}
@@ -146,9 +163,11 @@ func parseConfig(args []string) (config, postgres.Config, clusterboot.Config, er
 }
 
 // newConfig validates raw flag values into a config (parse, don't validate).
-// Both listen addresses must be well-formed host:port. An empty signing secret
-// falls back to devJWTSecret and flags usingDevSecret so run can warn.
-func newConfig(listen, internalListen, secret string) (config, error) {
+// Both listen addresses must be well-formed host:port; the GC schedule must be a
+// parseable cron spec or the literal "off" (normalized to empty, meaning
+// disabled). An empty signing secret falls back to devJWTSecret and flags
+// usingDevSecret so run can warn.
+func newConfig(listen, internalListen, gcSchedule, secret string) (config, error) {
 	listen, err := validateListenAddr("--listen", listen)
 	if err != nil {
 		return config{}, err
@@ -163,8 +182,12 @@ func newConfig(listen, internalListen, secret string) (config, error) {
 	if listen == internalListen {
 		return config{}, fmt.Errorf("--internal-listen must differ from --listen (both %q)", listen)
 	}
+	gcSchedule, err = validateGCSchedule(gcSchedule)
+	if err != nil {
+		return config{}, err
+	}
 
-	cfg := config{listenAddr: listen, internalListenAddr: internalListen}
+	cfg := config{listenAddr: listen, internalListenAddr: internalListen, gcSchedule: gcSchedule}
 	if s := strings.TrimSpace(secret); s != "" {
 		cfg.jwtSecret = s
 	} else {
@@ -289,6 +312,22 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 		Addr:              cfg.internalListenAddr,
 		Handler:           gw.RegisterInternalRoutes(),
 		ReadHeaderTimeout: readHeaderTimeout,
+	}
+
+	// The local cron periodically POSTs to this process's own internal endpoint —
+	// the same trigger contract an external scheduler would use, so disabling the
+	// cron (--gc-schedule off) hands the job over without touching the backend.
+	// Stop() prevents new ticks; an in-flight trigger POST is not awaited, which is
+	// harmless — the sweep itself runs on the backend, and the next scheduler run
+	// re-triggers.
+	if cfg.gcSchedule == "" {
+		slog.Info("server.gc_cron.disabled")
+	} else {
+		gcCron, err := startPendingAccountGCCron(cfg.gcSchedule, cfg.internalListenAddr)
+		if err != nil {
+			return fmt.Errorf("start GC cron: %w", err)
+		}
+		defer gcCron.Stop()
 	}
 
 	return serve(srv, internalSrv)
