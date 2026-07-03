@@ -38,7 +38,10 @@ import (
 	"github.com/oklahomer/blabby/internal/clusterboot"
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/logging"
+	"github.com/oklahomer/blabby/internal/persistence/journal"
+	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
+	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
 	"github.com/oklahomer/blabby/internal/persistence/userrepo"
 	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/persistence/workerlease"
@@ -273,6 +276,17 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 		gateway.DefaultRegistrationPolicy(),
 	)
 
+	// Room creation mints the RoomID, public_code, and founding-event id from the
+	// same lease, writing the room, its owner membership, and the member_joined
+	// timeline event in one transaction.
+	roomCreation := gateway.NewRoomCreationService(
+		roomrepo.New(leaseManager),
+		userrepo.New(leaseManager),
+		membershiprepo.New(),
+		journal.New(leaseManager),
+		postgres.NewTransactor(pool),
+	)
+
 	// The gateway joins as a cluster client: it registers no grain kinds (a
 	// client routes to grains via the topology that members advertise) and never
 	// hosts an activation.
@@ -294,6 +308,7 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 		Authenticator: authenticator,
 		Rooms:         roomDir,
 		Users:         userDir,
+		RoomCreation:  roomCreation,
 		Registration:  registration,
 		Verification:  registration,
 		Maintenance:   gateway.NewClusterMaintenanceTrigger(c),

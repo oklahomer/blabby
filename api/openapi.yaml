@@ -316,6 +316,65 @@ paths:
                     name: Random
         '401':
           $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createRoom
+      tags:
+        - Rooms
+      summary: Create a room.
+      description: |
+        Creates an active room owned by the authenticated caller: the room, the
+        caller's owner membership, and the founding `member_joined` timeline
+        event commit together, so the room's timeline explains its owner like
+        any later member. The new room appears in the caller's
+        `GET /rooms/joined` immediately. Room names are display labels — not
+        unique, any printable characters — and the returned `R…` code is the
+        room's identity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoomRequest'
+            example:
+              name: Team Standup
+      responses:
+        '201':
+          description: The room exists; the body carries its descriptor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomDescriptor'
+              example:
+                id: RK000000042
+                name: Team Standup
+        '400':
+          description: |
+            The body was malformed, or `name` was missing, blank, longer than
+            64 bytes, or contained control or invisible formatting characters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4001
+                  status: INVALID_REQUEST
+                  message: name must be 1-64 bytes of printable characters
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: The request body exceeded the 1 KiB limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4003
+                  status: PAYLOAD_TOO_LARGE
+                  message: request body exceeds maximum size
+        '500':
+          $ref: '#/components/responses/InternalError'
   /rooms/joined:
     get:
       operationId: listJoinedRooms
@@ -810,6 +869,20 @@ components:
           pattern: '\S'
           x-max-utf8-bytes: 4096
           description: The message body. Required, non-blank, at most 4 KiB.
+    CreateRoomRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          x-max-utf8-bytes: 64
+          description: |
+            The room's display name: trimmed, non-blank, at most 64 bytes of
+            printable characters (spaces included; control and invisible
+            formatting characters are rejected). It is a label, not an
+            address, and names are deliberately non-unique.
     SetRoleRequest:
       type: object
       required:
