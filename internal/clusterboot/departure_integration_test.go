@@ -29,6 +29,7 @@ import (
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
+	"github.com/oklahomer/blabby/internal/persistence/accountgc"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 	"github.com/oklahomer/blabby/internal/persistence/workerlease"
 )
@@ -325,11 +326,17 @@ func newDatabaseDeps(t *testing.T, pool *pgxpool.Pool, member int) GrainDeps {
 	}
 	t.Cleanup(manager.Stop)
 
+	sweeper, err := accountgc.NewSweeper(postgres.NewTransactor(pool), 5*time.Minute)
+	if err != nil {
+		t.Fatalf("build sweeper %d: %v", member, err)
+	}
+
 	return GrainDeps{
 		Directory:   user.NewRepoDirectory(pool),
 		RoomLoader:  room.NewRoomRepoLoader(pool),
 		Membership:  room.NewMembershipStore(pool, manager),
 		JoinedRooms: user.NewJoinedRoomLoader(pool),
+		Sweeper:     sweeper,
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/asynkron/protoactor-go/cluster/identitylookup/disthash"
 	"github.com/asynkron/protoactor-go/remote"
 
+	"github.com/oklahomer/blabby/internal/grain/maintenance"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
 )
@@ -36,16 +37,21 @@ type GrainDeps struct {
 	Membership room.MembershipStore
 	// JoinedRooms hydrates each User grain's joined-rooms cache on activation.
 	JoinedRooms user.JoinedRoomLoader
+	// Sweeper runs the pending-account GC for the singleton maintenance grain.
+	Sweeper maintenance.Sweeper
 }
 
 // Kinds returns the grain kinds blabby hosts: the User grain (which seeds each
-// activation's display name and hydrates its joined rooms) and the Room grain
-// (which hydrates its RoomRef and member set). Separated from Build so a test
-// can assert the registered kinds without standing up an actor system.
+// activation's display name and hydrates its joined rooms), the Room grain (which
+// hydrates its RoomRef and member set), and the singleton maintenance grain (which
+// runs periodic system jobs such as the pending-account sweep). Separated from
+// Build so a test can assert the registered kinds without standing up an actor
+// system.
 func Kinds(deps GrainDeps) []*cluster.Kind {
 	return []*cluster.Kind{
 		user.NewKind(deps.Directory, user.WithJoinedRooms(deps.JoinedRooms)),
 		room.NewKind(deps.RoomLoader, room.WithMembership(deps.Membership)),
+		maintenance.NewKind(deps.Sweeper),
 	}
 }
 
