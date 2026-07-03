@@ -81,6 +81,12 @@ func (s *stubRoomGrain) PostMessage(*roompb.PostMessageRequest, cluster.GrainCon
 	atomic.AddInt64(s.postCount, 1)
 	return &roompb.PostMessageResponse{Timestamp: timestamppb.New(s.postTime)}, nil
 }
+func (s *stubRoomGrain) SetMemberRole(*roompb.SetMemberRoleRequest, cluster.GrainContext) (*roompb.SetMemberRoleResponse, error) {
+	return &roompb.SetMemberRoleResponse{}, nil
+}
+func (s *stubRoomGrain) TransferOwnership(*roompb.TransferOwnershipRequest, cluster.GrainContext) (*roompb.TransferOwnershipResponse, error) {
+	return &roompb.TransferOwnershipResponse{}, nil
+}
 
 // TestGateway_RoomEndpoints_Integration drives the join → joined →
 // send → leave → joined flow over HTTP through a real Gateway, real

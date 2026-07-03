@@ -65,15 +65,21 @@ func fakeUserCtx(identity string, opts ...graintest.FakeGrainContextOption) clus
 type fakeRoomClient struct {
 	mu sync.Mutex
 
-	joinCalls    []joinCall
-	leaveCalls   []leaveCall
-	postCalls    []postCall
-	joinFn       func(roomID id.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error)
-	leaveFn      func(roomID id.RoomID, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error)
-	postFn       func(roomID id.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error)
-	defaultJoin  *roompb.JoinResponse
-	defaultLeave *roompb.LeaveResponse
-	defaultPost  *roompb.PostMessageResponse
+	joinCalls       []joinCall
+	leaveCalls      []leaveCall
+	postCalls       []postCall
+	setRoleCalls    []setRoleCall
+	transferCalls   []transferOwnershipCall
+	joinFn          func(roomID id.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error)
+	leaveFn         func(roomID id.RoomID, req *roompb.LeaveRequest) (*roompb.LeaveResponse, error)
+	postFn          func(roomID id.RoomID, req *roompb.PostMessageRequest) (*roompb.PostMessageResponse, error)
+	setRoleFn       func(roomID id.RoomID, req *roompb.SetMemberRoleRequest) (*roompb.SetMemberRoleResponse, error)
+	transferFn      func(roomID id.RoomID, req *roompb.TransferOwnershipRequest) (*roompb.TransferOwnershipResponse, error)
+	defaultJoin     *roompb.JoinResponse
+	defaultLeave    *roompb.LeaveResponse
+	defaultPost     *roompb.PostMessageResponse
+	defaultSetRole  *roompb.SetMemberRoleResponse
+	defaultTransfer *roompb.TransferOwnershipResponse
 }
 
 // userRef groups a user's id and display name the way the production proto
@@ -96,6 +102,17 @@ type postCall struct {
 	RoomID string
 	User   userRef
 	Text   string
+}
+type setRoleCall struct {
+	RoomID string
+	Actor  userRef
+	Target string
+	Role   string
+}
+type transferOwnershipCall struct {
+	RoomID   string
+	Actor    userRef
+	NewOwner string
 }
 
 func (f *fakeRoomClient) Join(roomID id.RoomID, req *roompb.JoinRequest) (*roompb.JoinResponse, error) {
@@ -141,6 +158,45 @@ func (f *fakeRoomClient) PostMessage(roomID id.RoomID, req *roompb.PostMessageRe
 		return def, nil
 	}
 	return &roompb.PostMessageResponse{Timestamp: timestamppb.New(time.UnixMilli(12345))}, nil
+}
+
+func (f *fakeRoomClient) SetMemberRole(roomID id.RoomID, req *roompb.SetMemberRoleRequest) (*roompb.SetMemberRoleResponse, error) {
+	f.mu.Lock()
+	f.setRoleCalls = append(f.setRoleCalls, setRoleCall{
+		RoomID: roomID.String(),
+		Actor:  userRef{ID: req.GetActor().GetId(), Name: req.GetActor().GetName()},
+		Target: req.GetTargetUserId(),
+		Role:   req.GetRole(),
+	})
+	fn := f.setRoleFn
+	def := f.defaultSetRole
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(roomID, req)
+	}
+	if def != nil {
+		return def, nil
+	}
+	return &roompb.SetMemberRoleResponse{}, nil
+}
+
+func (f *fakeRoomClient) TransferOwnership(roomID id.RoomID, req *roompb.TransferOwnershipRequest) (*roompb.TransferOwnershipResponse, error) {
+	f.mu.Lock()
+	f.transferCalls = append(f.transferCalls, transferOwnershipCall{
+		RoomID:   roomID.String(),
+		Actor:    userRef{ID: req.GetActor().GetId(), Name: req.GetActor().GetName()},
+		NewOwner: req.GetNewOwnerUserId(),
+	})
+	fn := f.transferFn
+	def := f.defaultTransfer
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(roomID, req)
+	}
+	if def != nil {
+		return def, nil
+	}
+	return &roompb.TransferOwnershipResponse{}, nil
 }
 
 // recordingSender captures every fan-out call so tests can assert delivery

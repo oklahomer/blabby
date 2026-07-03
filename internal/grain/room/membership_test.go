@@ -9,6 +9,7 @@ import (
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
 	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
 
 	roompb "github.com/oklahomer/blabby/gen/room"
@@ -19,13 +20,30 @@ import (
 // the actor of every RecordJoin/RecordLeave, returns a configurable event, and
 // can be made to fail to exercise the grain's fail-closed path.
 type fakeMembershipStore struct {
-	loaded     []id.UserRef
-	loadErr    error
-	event      room.MembershipEvent
-	joinErr    error
-	leaveErr   error
-	joinCalls  []id.UserID
-	leaveCalls []id.UserID
+	loaded        []id.UserRef
+	loadErr       error
+	event         room.MembershipEvent
+	joinErr       error
+	leaveErr      error
+	roleErr       error
+	transferErr   error
+	joinCalls     []id.UserID
+	leaveCalls    []id.UserID
+	roleCalls     []roleChangeCall
+	transferCalls []transferCall
+}
+
+// roleChangeCall records one RecordRoleChange invocation.
+type roleChangeCall struct {
+	actor  id.UserID
+	target id.UserID
+	role   domain.MembershipRole
+}
+
+// transferCall records one RecordOwnershipTransfer invocation.
+type transferCall struct {
+	actor    id.UserID
+	newOwner id.UserID
 }
 
 func (f *fakeMembershipStore) LoadMembers(context.Context, id.RoomID) ([]id.UserRef, error) {
@@ -46,6 +64,16 @@ func (f *fakeMembershipStore) RecordLeave(_ context.Context, _ id.RoomID, actor 
 		return room.MembershipEvent{}, f.leaveErr
 	}
 	return f.event, nil
+}
+
+func (f *fakeMembershipStore) RecordRoleChange(_ context.Context, _ id.RoomID, actor, target id.UserID, role domain.MembershipRole) error {
+	f.roleCalls = append(f.roleCalls, roleChangeCall{actor: actor, target: target, role: role})
+	return f.roleErr
+}
+
+func (f *fakeMembershipStore) RecordOwnershipTransfer(_ context.Context, _ id.RoomID, actor, newOwner id.UserID) error {
+	f.transferCalls = append(f.transferCalls, transferCall{actor: actor, newOwner: newOwner})
+	return f.transferErr
 }
 
 // userRefFor builds a validated UserRef for tests seeding the member cache.
@@ -192,6 +220,29 @@ func TestGrain_Leave_FailClosedOnWriteError(t *testing.T) {
 	}
 	if len(notifier.notifyCalls) != 0 {
 		t.Errorf("notifyCalls after failed delete: got %d, want 0", len(notifier.notifyCalls))
+	}
+}
+
+func TestGrain_Leave_OwnerIsRefused(t *testing.T) {
+	store := &fakeMembershipStore{
+		loaded:   []id.UserRef{userRefFor(t, "1", "Alice")},
+		leaveErr: membershiprepo.ErrOwnerCannotLeave,
+	}
+	g, notifier := newStoreGrain(t, store)
+
+	resp, err := g.Leave(&roompb.LeaveRequest{UserId: "1"}, fakeRoomCtx(testRoomID))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertErrResponse(t, resp.GetError(), 2004, "ROOM_OWNER_CANNOT_LEAVE")
+
+	// The refusal is a business outcome, not a write failure: the member cache
+	// keeps the owner and nothing fans out.
+	if got := g.Members(); !reflect.DeepEqual(got, []id.UserID{mustUserID(t, "1")}) {
+		t.Errorf("Members after refused leave: got %v, want [1] (unchanged)", got)
+	}
+	if len(notifier.notifyCalls) != 0 {
+		t.Errorf("notifyCalls after refused leave: got %d, want 0", len(notifier.notifyCalls))
 	}
 }
 

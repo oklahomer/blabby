@@ -329,6 +329,219 @@ func (x *PostMessageResponse) GetError() *common.ErrorDetail {
 	return nil
 }
 
+// SetMemberRoleRequest changes another member's role. `actor` carries the acting
+// member's server-resolved identity (attached by the User grain, never
+// client-supplied). `target_user_id` is the internal numeric id of the member
+// whose role changes. `role` is the new role label — "admin" or "member"; the
+// owner role never moves through a role change (see TransferOwnership).
+type SetMemberRoleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Actor         *common.UserRef        `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
+	TargetUserId  string                 `protobuf:"bytes,2,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
+	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetMemberRoleRequest) Reset() {
+	*x = SetMemberRoleRequest{}
+	mi := &file_room_room_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetMemberRoleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetMemberRoleRequest) ProtoMessage() {}
+
+func (x *SetMemberRoleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_room_room_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetMemberRoleRequest.ProtoReflect.Descriptor instead.
+func (*SetMemberRoleRequest) Descriptor() ([]byte, []int) {
+	return file_room_room_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SetMemberRoleRequest) GetActor() *common.UserRef {
+	if x != nil {
+		return x.Actor
+	}
+	return nil
+}
+
+func (x *SetMemberRoleRequest) GetTargetUserId() string {
+	if x != nil {
+		return x.TargetUserId
+	}
+	return ""
+}
+
+func (x *SetMemberRoleRequest) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+// SetMemberRoleResponse indicates whether the role change was applied.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
+type SetMemberRoleResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetMemberRoleResponse) Reset() {
+	*x = SetMemberRoleResponse{}
+	mi := &file_room_room_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetMemberRoleResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetMemberRoleResponse) ProtoMessage() {}
+
+func (x *SetMemberRoleResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_room_room_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetMemberRoleResponse.ProtoReflect.Descriptor instead.
+func (*SetMemberRoleResponse) Descriptor() ([]byte, []int) {
+	return file_room_room_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SetMemberRoleResponse) GetError() *common.ErrorDetail {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+// TransferOwnershipRequest hands the room to another member: the current owner
+// (`actor`) is demoted to admin and `new_owner_user_id` becomes the owner. Only
+// the owner may transfer.
+type TransferOwnershipRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Actor          *common.UserRef        `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
+	NewOwnerUserId string                 `protobuf:"bytes,2,opt,name=new_owner_user_id,json=newOwnerUserId,proto3" json:"new_owner_user_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *TransferOwnershipRequest) Reset() {
+	*x = TransferOwnershipRequest{}
+	mi := &file_room_room_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransferOwnershipRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransferOwnershipRequest) ProtoMessage() {}
+
+func (x *TransferOwnershipRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_room_room_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransferOwnershipRequest.ProtoReflect.Descriptor instead.
+func (*TransferOwnershipRequest) Descriptor() ([]byte, []int) {
+	return file_room_room_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *TransferOwnershipRequest) GetActor() *common.UserRef {
+	if x != nil {
+		return x.Actor
+	}
+	return nil
+}
+
+func (x *TransferOwnershipRequest) GetNewOwnerUserId() string {
+	if x != nil {
+		return x.NewOwnerUserId
+	}
+	return ""
+}
+
+// TransferOwnershipResponse indicates whether ownership moved. A nil error
+// indicates success, including the no-op transfer to the current owner. See
+// ADR-013.
+type TransferOwnershipResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransferOwnershipResponse) Reset() {
+	*x = TransferOwnershipResponse{}
+	mi := &file_room_room_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransferOwnershipResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransferOwnershipResponse) ProtoMessage() {}
+
+func (x *TransferOwnershipResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_room_room_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransferOwnershipResponse.ProtoReflect.Descriptor instead.
+func (*TransferOwnershipResponse) Descriptor() ([]byte, []int) {
+	return file_room_room_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *TransferOwnershipResponse) GetError() *common.ErrorDetail {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
 var File_room_room_proto protoreflect.FileDescriptor
 
 const file_room_room_proto_rawDesc = "" +
@@ -348,11 +561,24 @@ const file_room_room_proto_rawDesc = "" +
 	"\x04text\x18\x02 \x01(\tR\x04text\"z\n" +
 	"\x13PostMessageResponse\x128\n" +
 	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12)\n" +
-	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error2\xb0\x01\n" +
+	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"w\n" +
+	"\x14SetMemberRoleRequest\x12%\n" +
+	"\x05actor\x18\x01 \x01(\v2\x0f.common.UserRefR\x05actor\x12$\n" +
+	"\x0etarget_user_id\x18\x02 \x01(\tR\ftargetUserId\x12\x12\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\"B\n" +
+	"\x15SetMemberRoleResponse\x12)\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"l\n" +
+	"\x18TransferOwnershipRequest\x12%\n" +
+	"\x05actor\x18\x01 \x01(\v2\x0f.common.UserRefR\x05actor\x12)\n" +
+	"\x11new_owner_user_id\x18\x02 \x01(\tR\x0enewOwnerUserId\"F\n" +
+	"\x19TransferOwnershipResponse\x12)\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error2\xd0\x02\n" +
 	"\tRoomGrain\x12-\n" +
 	"\x04Join\x12\x11.room.JoinRequest\x1a\x12.room.JoinResponse\x120\n" +
 	"\x05Leave\x12\x12.room.LeaveRequest\x1a\x13.room.LeaveResponse\x12B\n" +
-	"\vPostMessage\x12\x18.room.PostMessageRequest\x1a\x19.room.PostMessageResponseB-Z+github.com/oklahomer/blabby/gen/room;roompbb\x06proto3"
+	"\vPostMessage\x12\x18.room.PostMessageRequest\x1a\x19.room.PostMessageResponse\x12H\n" +
+	"\rSetMemberRole\x12\x1a.room.SetMemberRoleRequest\x1a\x1b.room.SetMemberRoleResponse\x12T\n" +
+	"\x11TransferOwnership\x12\x1e.room.TransferOwnershipRequest\x1a\x1f.room.TransferOwnershipResponseB-Z+github.com/oklahomer/blabby/gen/room;roompbb\x06proto3"
 
 var (
 	file_room_room_proto_rawDescOnce sync.Once
@@ -366,38 +592,50 @@ func file_room_room_proto_rawDescGZIP() []byte {
 	return file_room_room_proto_rawDescData
 }
 
-var file_room_room_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_room_room_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_room_room_proto_goTypes = []any{
-	(*JoinRequest)(nil),           // 0: room.JoinRequest
-	(*JoinResponse)(nil),          // 1: room.JoinResponse
-	(*LeaveRequest)(nil),          // 2: room.LeaveRequest
-	(*LeaveResponse)(nil),         // 3: room.LeaveResponse
-	(*PostMessageRequest)(nil),    // 4: room.PostMessageRequest
-	(*PostMessageResponse)(nil),   // 5: room.PostMessageResponse
-	(*common.UserRef)(nil),        // 6: common.UserRef
-	(*common.ErrorDetail)(nil),    // 7: common.ErrorDetail
-	(*common.RoomRef)(nil),        // 8: common.RoomRef
-	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
+	(*JoinRequest)(nil),               // 0: room.JoinRequest
+	(*JoinResponse)(nil),              // 1: room.JoinResponse
+	(*LeaveRequest)(nil),              // 2: room.LeaveRequest
+	(*LeaveResponse)(nil),             // 3: room.LeaveResponse
+	(*PostMessageRequest)(nil),        // 4: room.PostMessageRequest
+	(*PostMessageResponse)(nil),       // 5: room.PostMessageResponse
+	(*SetMemberRoleRequest)(nil),      // 6: room.SetMemberRoleRequest
+	(*SetMemberRoleResponse)(nil),     // 7: room.SetMemberRoleResponse
+	(*TransferOwnershipRequest)(nil),  // 8: room.TransferOwnershipRequest
+	(*TransferOwnershipResponse)(nil), // 9: room.TransferOwnershipResponse
+	(*common.UserRef)(nil),            // 10: common.UserRef
+	(*common.ErrorDetail)(nil),        // 11: common.ErrorDetail
+	(*common.RoomRef)(nil),            // 12: common.RoomRef
+	(*timestamppb.Timestamp)(nil),     // 13: google.protobuf.Timestamp
 }
 var file_room_room_proto_depIdxs = []int32{
-	6,  // 0: room.JoinRequest.user:type_name -> common.UserRef
-	7,  // 1: room.JoinResponse.error:type_name -> common.ErrorDetail
-	8,  // 2: room.JoinResponse.room:type_name -> common.RoomRef
-	7,  // 3: room.LeaveResponse.error:type_name -> common.ErrorDetail
-	6,  // 4: room.PostMessageRequest.user:type_name -> common.UserRef
-	9,  // 5: room.PostMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
-	7,  // 6: room.PostMessageResponse.error:type_name -> common.ErrorDetail
-	0,  // 7: room.RoomGrain.Join:input_type -> room.JoinRequest
-	2,  // 8: room.RoomGrain.Leave:input_type -> room.LeaveRequest
-	4,  // 9: room.RoomGrain.PostMessage:input_type -> room.PostMessageRequest
-	1,  // 10: room.RoomGrain.Join:output_type -> room.JoinResponse
-	3,  // 11: room.RoomGrain.Leave:output_type -> room.LeaveResponse
-	5,  // 12: room.RoomGrain.PostMessage:output_type -> room.PostMessageResponse
-	10, // [10:13] is the sub-list for method output_type
-	7,  // [7:10] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	10, // 0: room.JoinRequest.user:type_name -> common.UserRef
+	11, // 1: room.JoinResponse.error:type_name -> common.ErrorDetail
+	12, // 2: room.JoinResponse.room:type_name -> common.RoomRef
+	11, // 3: room.LeaveResponse.error:type_name -> common.ErrorDetail
+	10, // 4: room.PostMessageRequest.user:type_name -> common.UserRef
+	13, // 5: room.PostMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
+	11, // 6: room.PostMessageResponse.error:type_name -> common.ErrorDetail
+	10, // 7: room.SetMemberRoleRequest.actor:type_name -> common.UserRef
+	11, // 8: room.SetMemberRoleResponse.error:type_name -> common.ErrorDetail
+	10, // 9: room.TransferOwnershipRequest.actor:type_name -> common.UserRef
+	11, // 10: room.TransferOwnershipResponse.error:type_name -> common.ErrorDetail
+	0,  // 11: room.RoomGrain.Join:input_type -> room.JoinRequest
+	2,  // 12: room.RoomGrain.Leave:input_type -> room.LeaveRequest
+	4,  // 13: room.RoomGrain.PostMessage:input_type -> room.PostMessageRequest
+	6,  // 14: room.RoomGrain.SetMemberRole:input_type -> room.SetMemberRoleRequest
+	8,  // 15: room.RoomGrain.TransferOwnership:input_type -> room.TransferOwnershipRequest
+	1,  // 16: room.RoomGrain.Join:output_type -> room.JoinResponse
+	3,  // 17: room.RoomGrain.Leave:output_type -> room.LeaveResponse
+	5,  // 18: room.RoomGrain.PostMessage:output_type -> room.PostMessageResponse
+	7,  // 19: room.RoomGrain.SetMemberRole:output_type -> room.SetMemberRoleResponse
+	9,  // 20: room.RoomGrain.TransferOwnership:output_type -> room.TransferOwnershipResponse
+	16, // [16:21] is the sub-list for method output_type
+	11, // [11:16] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_room_room_proto_init() }
@@ -411,7 +649,7 @@ func file_room_room_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_room_room_proto_rawDesc), len(file_room_room_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

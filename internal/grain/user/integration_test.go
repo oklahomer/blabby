@@ -62,6 +62,12 @@ func (s *stubRoomGrain) PostMessage(req *roompb.PostMessageRequest, _ cluster.Gr
 	}
 	return &roompb.PostMessageResponse{Timestamp: timestamppb.Now()}, nil
 }
+func (s *stubRoomGrain) SetMemberRole(*roompb.SetMemberRoleRequest, cluster.GrainContext) (*roompb.SetMemberRoleResponse, error) {
+	return &roompb.SetMemberRoleResponse{}, nil
+}
+func (s *stubRoomGrain) TransferOwnership(*roompb.TransferOwnershipRequest, cluster.GrainContext) (*roompb.TransferOwnershipResponse, error) {
+	return &roompb.TransferOwnershipResponse{}, nil
+}
 
 // TestUserGrain_Integration_RoutesCommandsThroughCluster drives the full
 // User grain command surface through the generated cluster client. Uses

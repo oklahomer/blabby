@@ -50,6 +50,12 @@ func (s *stubUserGrain) NotifyRoomEvent(*userpb.NotifyRoomEventRequest, cluster.
 func (s *stubUserGrain) GetJoinedRooms(*userpb.GetJoinedRoomsRequest, cluster.GrainContext) (*userpb.GetJoinedRoomsResponse, error) {
 	return &userpb.GetJoinedRoomsResponse{}, nil
 }
+func (s *stubUserGrain) SetRoomMemberRole(*userpb.SetRoomMemberRoleRequest, cluster.GrainContext) (*userpb.SetRoomMemberRoleResponse, error) {
+	return &userpb.SetRoomMemberRoleResponse{}, nil
+}
+func (s *stubUserGrain) TransferRoomOwnership(*userpb.TransferRoomOwnershipRequest, cluster.GrainContext) (*userpb.TransferRoomOwnershipResponse, error) {
+	return &userpb.TransferRoomOwnershipResponse{}, nil
+}
 
 // TestRoomGrain_Integration brings up an in-process cluster, registers Room
 // grain (production constructor) and a stub User grain, then drives Join

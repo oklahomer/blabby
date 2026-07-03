@@ -51,9 +51,46 @@ message PostMessageResponse {
   common.ErrorDetail error = 2;
 }
 
+// SetMemberRoleRequest changes another member's role. `actor` carries the acting
+// member's server-resolved identity (attached by the User grain, never
+// client-supplied). `target_user_id` is the internal numeric id of the member
+// whose role changes. `role` is the new role label — "admin" or "member"; the
+// owner role never moves through a role change (see TransferOwnership).
+message SetMemberRoleRequest {
+  common.UserRef actor = 1;
+  string target_user_id = 2;
+  string role = 3;
+}
+
+// SetMemberRoleResponse indicates whether the role change was applied.
+// A nil error indicates success; a populated error indicates failure. See ADR-013.
+message SetMemberRoleResponse {
+  common.ErrorDetail error = 1;
+}
+
+// TransferOwnershipRequest hands the room to another member: the current owner
+// (`actor`) is demoted to admin and `new_owner_user_id` becomes the owner. Only
+// the owner may transfer.
+message TransferOwnershipRequest {
+  common.UserRef actor = 1;
+  string new_owner_user_id = 2;
+}
+
+// TransferOwnershipResponse indicates whether ownership moved. A nil error
+// indicates success, including the no-op transfer to the current owner. See
+// ADR-013.
+message TransferOwnershipResponse {
+  common.ErrorDetail error = 1;
+}
+
 // RoomGrain defines the Room virtual actor service.
 service RoomGrain {
   rpc Join(JoinRequest) returns (JoinResponse);
   rpc Leave(LeaveRequest) returns (LeaveResponse);
   rpc PostMessage(PostMessageRequest) returns (PostMessageResponse);
+
+  // Role management. New RPCs append after the originals so the generated
+  // method indexes of the existing calls never shift.
+  rpc SetMemberRole(SetMemberRoleRequest) returns (SetMemberRoleResponse);
+  rpc TransferOwnership(TransferOwnershipRequest) returns (TransferOwnershipResponse);
 }
