@@ -218,6 +218,8 @@ func TestHTTPStatus(t *testing.T) {
 		{"RoomNotMember→403", errcode.RoomNotMember, http.StatusForbidden},
 		{"RoomAlreadyMember→409", errcode.RoomAlreadyMember, http.StatusConflict},
 		{"RoomNotFound→404", errcode.RoomNotFound, http.StatusNotFound},
+		{"RoomOwnerCannotLeave→409", errcode.RoomOwnerCannotLeave, http.StatusConflict},
+		{"RoomPermissionDenied→403", errcode.RoomPermissionDenied, http.StatusForbidden},
 		{"RateLimitExceeded→429", errcode.RateLimitExceeded, http.StatusTooManyRequests},
 		{"VerificationRateLimited→429", errcode.VerificationRateLimited, http.StatusTooManyRequests},
 		{"InvalidRequest→400", errcode.InvalidRequest, http.StatusBadRequest},

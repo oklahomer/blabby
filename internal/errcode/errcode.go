@@ -37,6 +37,8 @@ const (
 	RoomNotMember           Code = 2001
 	RoomAlreadyMember       Code = 2002
 	RoomNotFound            Code = 2003
+	RoomOwnerCannotLeave    Code = 2004
+	RoomPermissionDenied    Code = 2005
 	RateLimitExceeded       Code = 3001
 	VerificationRateLimited Code = 3002
 	InvalidRequest          Code = 4001
@@ -68,6 +70,10 @@ func (c Code) status() (string, bool) {
 		return "ROOM_ALREADY_MEMBER", true
 	case RoomNotFound:
 		return "ROOM_NOT_FOUND", true
+	case RoomOwnerCannotLeave:
+		return "ROOM_OWNER_CANNOT_LEAVE", true
+	case RoomPermissionDenied:
+		return "ROOM_PERMISSION_DENIED", true
 	case RateLimitExceeded:
 		return "RATE_LIMIT_EXCEEDED", true
 	case VerificationRateLimited:

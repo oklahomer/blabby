@@ -20,6 +20,8 @@ var errorMessages = map[string]string{
 	"ROOM_ALREADY_MEMBER":       "Already joined this room",
 	"ROOM_NOT_FOUND":            "Room not found",
 	"ROOM_NOT_MEMBER":           "Not a member of this room",
+	"ROOM_OWNER_CANNOT_LEAVE":   "Transfer ownership before leaving this room",
+	"ROOM_PERMISSION_DENIED":    "You don't have permission to do that in this room",
 	"EMAIL_ALREADY_REGISTERED":  "Email already registered",
 	"HANDLE_ALREADY_TAKEN":      "Handle already taken",
 	"VERIFICATION_INVALID":      "Verification code is invalid or expired",

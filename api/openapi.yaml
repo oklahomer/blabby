@@ -676,6 +676,8 @@ components:
             - ROOM_NOT_MEMBER
             - ROOM_ALREADY_MEMBER
             - ROOM_NOT_FOUND
+            - ROOM_OWNER_CANNOT_LEAVE
+            - ROOM_PERMISSION_DENIED
             - RATE_LIMIT_EXCEEDED
             - VERIFICATION_RATE_LIMITED
             - INVALID_REQUEST

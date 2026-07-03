@@ -19,9 +19,10 @@ func httpStatus(code errcode.Code) int {
 	switch code {
 	case errcode.AuthInvalidToken, errcode.AuthExpiredToken, errcode.AuthMissingToken:
 		return http.StatusUnauthorized
-	case errcode.RoomNotMember:
+	case errcode.RoomNotMember, errcode.RoomPermissionDenied:
 		return http.StatusForbidden
-	case errcode.RoomAlreadyMember, errcode.EmailAlreadyRegistered, errcode.HandleAlreadyTaken:
+	case errcode.RoomAlreadyMember, errcode.RoomOwnerCannotLeave,
+		errcode.EmailAlreadyRegistered, errcode.HandleAlreadyTaken:
 		return http.StatusConflict
 	case errcode.RoomNotFound:
 		return http.StatusNotFound

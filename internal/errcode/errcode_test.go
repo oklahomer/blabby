@@ -18,6 +18,8 @@ var taxonomyCases = []struct {
 	{errcode.RoomNotMember, 2001, "ROOM_NOT_MEMBER"},
 	{errcode.RoomAlreadyMember, 2002, "ROOM_ALREADY_MEMBER"},
 	{errcode.RoomNotFound, 2003, "ROOM_NOT_FOUND"},
+	{errcode.RoomOwnerCannotLeave, 2004, "ROOM_OWNER_CANNOT_LEAVE"},
+	{errcode.RoomPermissionDenied, 2005, "ROOM_PERMISSION_DENIED"},
 	{errcode.RateLimitExceeded, 3001, "RATE_LIMIT_EXCEEDED"},
 	{errcode.VerificationRateLimited, 3002, "VERIFICATION_RATE_LIMITED"},
 	{errcode.InvalidRequest, 4001, "INVALID_REQUEST"},
