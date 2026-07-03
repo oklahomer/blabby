@@ -13,6 +13,8 @@ info:
 
     Every endpoint requires an `Authorization: Bearer <jwt>` header **except**:
 
+    - `POST /users`, `POST /users/verifications`, and
+      `POST /users/verifications/resend` — the pre-login registration flow,
     - `POST /login`, which mints the token and is therefore public, and
     - `GET /ws`, where authentication is the first WebSocket frame after the
       upgrade rather than an HTTP header.
@@ -35,6 +37,8 @@ servers:
 security:
   - bearerAuth: []
 tags:
+  - name: Registration
+    description: Account creation and email-PIN verification.
   - name: Authentication
     description: Token issuance.
   - name: WebSocket
@@ -42,6 +46,169 @@ tags:
   - name: Rooms
     description: Room discovery, membership, and messaging.
 paths:
+  /users:
+    post:
+      operationId: registerUser
+      tags:
+        - Registration
+      summary: Register a new account.
+      description: |
+        Creates a pending account and emails it a 6-digit verification PIN. The
+        account cannot log in until the PIN is confirmed via
+        `POST /users/verifications`. This endpoint is public.
+
+        Re-registering an address that is already pending does not modify the
+        stored account: it re-issues a fresh PIN (rate-limited) and returns the
+        existing account's `public_code`. An address or handle owned by an
+        active account is rejected with `409`.
+
+        The request body is capped at 1 MB.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              mail_address: dana@example.com
+              handle: Dana_99
+              password: a-long-passphrase
+      responses:
+        '201':
+          description: |
+            The account exists in `pending` status and a verification PIN was
+            dispatched. The body carries the account's public code (`U…`) — the
+            identity that appears as the JWT subject once verified and logged in.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+              example:
+                public_code: UA1B2C3D4E5
+        '400':
+          description: |
+            The request body was malformed or a field failed validation: a
+            missing field or malformed handle is `INVALID_REQUEST`, a value that
+            does not parse as a bare email address is `INVALID_EMAIL`, and a
+            password shorter than 12 bytes is `WEAK_PASSWORD`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4005
+                  status: WEAK_PASSWORD
+                  message: password is too short
+        '409':
+          description: |
+            The email address (`EMAIL_ALREADY_REGISTERED`) or handle
+            (`HANDLE_ALREADY_TAKEN`) is already owned by another account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 6001
+                  status: EMAIL_ALREADY_REGISTERED
+                  message: email already registered
+        '429':
+          $ref: '#/components/responses/VerificationRateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /users/verifications:
+    post:
+      operationId: verifyRegistration
+      tags:
+        - Registration
+      summary: Activate a pending account with its emailed PIN.
+      description: |
+        Confirms a pending account by checking the submitted PIN against its
+        challenge. On success the account becomes `active` — it can now log in —
+        and the challenge is cleared. This endpoint is public.
+
+        Failure is deliberately uniform: an unknown or non-pending address, a
+        missing or expired challenge, a wrong PIN, and a challenge locked by too
+        many wrong attempts (5) all return the same `400 VERIFICATION_INVALID`,
+        so the response reveals nothing about which precondition failed. A
+        locked challenge is recovered by requesting a fresh PIN via
+        `POST /users/verifications/resend`, which resets the attempt count.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+            example:
+              mail_address: dana@example.com
+              pin: '482910'
+      responses:
+        '200':
+          description: The account is now active and can log in. The response has no body.
+        '400':
+          description: |
+            The request was malformed (`INVALID_REQUEST`), the email did not
+            parse (`INVALID_EMAIL`), or the verification could not succeed
+            (`VERIFICATION_INVALID` — the uniform failure described above).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 6003
+                  status: VERIFICATION_INVALID
+                  message: verification failed
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /users/verifications/resend:
+    post:
+      operationId: resendVerificationPIN
+      tags:
+        - Registration
+      summary: Re-issue a verification PIN to a pending account.
+      description: |
+        Sends a fresh PIN to a pending account, replacing the previous challenge
+        and resetting its attempt count. This endpoint is public.
+
+        To avoid revealing which addresses are registered, an unknown or
+        already-active address is a silent no-op that still returns `200`. Only
+        a pending account that has exhausted its resend budget returns `429`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResendVerificationRequest'
+            example:
+              mail_address: dana@example.com
+      responses:
+        '200':
+          description: |
+            A fresh PIN was sent — or the address was unknown or already active
+            and nothing happened; the two outcomes are indistinguishable by
+            design. The response has no body.
+        '400':
+          description: |
+            The request body was malformed (`INVALID_REQUEST`) or the email did
+            not parse (`INVALID_EMAIL`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4004
+                  status: INVALID_EMAIL
+                  message: mail address is not a valid email
+        '429':
+          $ref: '#/components/responses/VerificationRateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /login:
     post:
       operationId: login
@@ -333,6 +500,70 @@ components:
         type: string
       example: RG000000004
   schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - mail_address
+        - handle
+        - password
+      properties:
+        mail_address:
+          type: string
+          format: email
+          x-max-utf8-bytes: 254
+          description: |
+            The account's email address. Must be a bare address (no display
+            name); normalized to lowercase. At most 254 bytes.
+        handle:
+          type: string
+          minLength: 3
+          maxLength: 30
+          pattern: '^[A-Za-z0-9_]+$'
+          description: |
+            The account handle: 3–30 characters of letters, digits, or
+            underscore. The submitted casing is kept for display; uniqueness is
+            case-insensitive.
+        password:
+          type: string
+          minLength: 12
+          x-max-utf8-bytes: 256
+          description: The account password. At least 12 bytes, at most 256 bytes.
+    RegisterResponse:
+      type: object
+      required:
+        - public_code
+      properties:
+        public_code:
+          type: string
+          description: |
+            The account's opaque public code: `U` followed by 10 Crockford
+            Base32 symbols. After verification and login it appears as the JWT
+            subject.
+    VerifyRequest:
+      type: object
+      required:
+        - mail_address
+        - pin
+      properties:
+        mail_address:
+          type: string
+          format: email
+          x-max-utf8-bytes: 254
+          description: The email address the account registered with.
+        pin:
+          type: string
+          pattern: '^[0-9]{6}$'
+          description: The 6-digit PIN from the verification email.
+    ResendVerificationRequest:
+      type: object
+      required:
+        - mail_address
+      properties:
+        mail_address:
+          type: string
+          format: email
+          x-max-utf8-bytes: 254
+          description: The email address the account registered with.
     LoginRequest:
       type: object
       required:
@@ -461,6 +692,20 @@ components:
           type: string
           description: A human-readable, client-safe explanation. Never leaks internal detail.
   responses:
+    VerificationRateLimited:
+      description: |
+        The verification-PIN send budget is exhausted: a PIN was sent too
+        recently (minimum interval) or the account has hit its resend cap. Wait
+        before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: 3002
+              status: VERIFICATION_RATE_LIMITED
+              message: too many verification attempts; please wait and try again
     Unauthorized:
       description: |
         The bearer token is missing, malformed, expired, or otherwise invalid

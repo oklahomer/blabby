@@ -28,6 +28,14 @@ services:
         condition: service_healthy
     environment:
       BLABBY_DATABASE_URL: "postgres://${POSTGRES_USER:-blabby}:${POSTGRES_PASSWORD:-blabby}@postgres:5432/${POSTGRES_DB:-blabby}?sslmode=disable"
+      # Verification-mail delivery: console by default (the registration PIN is
+      # printed in this container's logs). Set BLABBY_VERIFICATION_DELIVERY=smtp
+      # to send through the mailpit service instead — its address and the sender
+      # are pre-wired, so the flip is this one variable. Console mode ignores
+      # the SMTP settings.
+      BLABBY_VERIFICATION_DELIVERY: "${BLABBY_VERIFICATION_DELIVERY:-console}"
+      BLABBY_SMTP_ADDR: "mailpit:1025"
+      BLABBY_MAIL_FROM: "no-reply@blabby.example"
     command:
       - /blabby-gateway
       - "--listen=0.0.0.0:8080"
@@ -61,6 +69,20 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Local SMTP catcher for the verification-mail flow. The gateway defaults to
+  # console delivery; flip it to the real SMTP sender with
+  #
+  #   BLABBY_VERIFICATION_DELIVERY=smtp docker compose up -d gateway
+  #
+  # and sent mail lands in the Mailpit UI at http://localhost:8025. The SMTP
+  # port is also published so a host-run gateway (`go run ./cmd/gateway`) can
+  # point BLABBY_SMTP_ADDR at localhost:1025.
+  mailpit:
+    image: axllent/mailpit:v1.30.3
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
 
 volumes:
   db-data:
