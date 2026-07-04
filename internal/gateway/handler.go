@@ -70,6 +70,15 @@ func (g *Gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 		// enumeration. An infrastructure failure (e.g. the account store is
 		// unreachable) is a 500, not a misleading 401. Never log the mail address
 		// or password.
+		if errors.Is(err, auth.ErrAccountPending) {
+			// The password verified, so naming the pending state reveals nothing
+			// an account owner does not already know; the client uses the
+			// distinct status to route the user to email verification.
+			slog.Warn("login rejected", "reason", "account_pending")
+			WriteErrorResponse(w, http.StatusUnauthorized,
+				ErrAuthAccountPending("verify your email to finish creating your account"))
+			return
+		}
 		if errors.Is(err, auth.ErrInvalidCredentials) {
 			slog.Warn("login rejected", "reason", "invalid_credentials")
 			WriteErrorResponse(w, http.StatusUnauthorized, ErrAuthInvalidToken("invalid credentials"))

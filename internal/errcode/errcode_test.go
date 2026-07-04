@@ -15,6 +15,7 @@ var taxonomyCases = []struct {
 	{errcode.AuthInvalidToken, 1001, "AUTH_INVALID_TOKEN"},
 	{errcode.AuthExpiredToken, 1002, "AUTH_EXPIRED_TOKEN"},
 	{errcode.AuthMissingToken, 1003, "AUTH_MISSING_TOKEN"},
+	{errcode.AuthAccountPending, 1004, "AUTH_ACCOUNT_PENDING"},
 	{errcode.RoomNotMember, 2001, "ROOM_NOT_MEMBER"},
 	{errcode.RoomAlreadyMember, 2002, "ROOM_ALREADY_MEMBER"},
 	{errcode.RoomNotFound, 2003, "ROOM_NOT_FOUND"},

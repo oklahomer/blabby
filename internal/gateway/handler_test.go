@@ -54,6 +54,17 @@ func TestHandleLogin(t *testing.T) {
 			wantErrorCode: errcode.AuthInvalidToken,
 		},
 		{
+			// The verifier proved the password before classifying the account as
+			// pending, so revealing the state is not an enumeration oracle.
+			name: "pending account with correct password returns 401 with code 1004",
+			body: `{"mail_address":"alice@example.com","password":"secret"}`,
+			authFn: func(context.Context, auth.AuthParams) (*auth.Result, error) {
+				return nil, fmt.Errorf("authenticate: %w", auth.ErrAccountPending)
+			},
+			wantStatus:    http.StatusUnauthorized,
+			wantErrorCode: errcode.AuthAccountPending,
+		},
+		{
 			name:          "empty body returns 400 with code 4001",
 			body:          ``,
 			authFn:        successAuth,

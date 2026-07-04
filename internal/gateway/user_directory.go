@@ -91,10 +91,15 @@ func (d *UserRepoDirectory) VerifyCredentials(ctx context.Context, mailAddress, 
 	if err := auth.VerifyPassword(user.PasswordHash, password); err != nil {
 		return auth.VerifiedUser{}, auth.ErrInvalidCredentials
 	}
+	if user.Status == domain.UserStatusPending {
+		// The password verified above, so the caller proved account ownership:
+		// revealing the pending state is not an enumeration oracle, and it lets
+		// the client route the user to email verification.
+		return auth.VerifiedUser{}, auth.ErrAccountPending
+	}
 	if user.Status != domain.UserStatusActive {
-		// Pending and disabled accounts cannot log in. The pending case earns a
-		// friendly "verify your email" hint once registration ships; until then it
-		// is a generic rejection so status is not an enumeration oracle.
+		// A disabled account stays a generic rejection even to its password
+		// holder.
 		return auth.VerifiedUser{}, auth.ErrInvalidCredentials
 	}
 

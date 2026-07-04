@@ -20,10 +20,16 @@ var (
 	ErrTokenExpired = errors.New("auth: token expired")
 
 	// ErrInvalidCredentials is returned by a CredentialVerifier for any login
-	// rejection — unknown email, wrong password, or a non-active account. The
-	// single sentinel keeps those cases indistinguishable to the caller (and the
-	// client), so the login response cannot be used to enumerate accounts.
+	// rejection that must stay indistinguishable to the caller (and the client) —
+	// unknown email, wrong password, or a disabled account — so the login
+	// response cannot be used to enumerate accounts.
 	ErrInvalidCredentials = errors.New("auth: invalid credentials")
+
+	// ErrAccountPending is returned by a CredentialVerifier when the password is
+	// correct but the account has not completed email verification. Revealing the
+	// state is safe here — the caller proved account ownership with the password —
+	// and lets the client guide the user to the verification step.
+	ErrAccountPending = errors.New("auth: account pending verification")
 
 	// ErrPublicCodeUnknown is returned by a PublicCodeResolver when a public_code
 	// maps to no account. ValidateToken folds it into ErrTokenInvalid — a token
