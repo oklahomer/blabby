@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -58,7 +57,7 @@ func gatewayForCreate(rc RoomCreator, fake userGrainCaller) *Gateway {
 func TestHandleRoomCreate(t *testing.T) {
 	const pattern = "POST /rooms"
 
-	t.Run("creates the room and warms the joined cache", func(t *testing.T) {
+	t.Run("creates the room and attempts joined-cache warm-up", func(t *testing.T) {
 		creator := &fakeRoomCreator{info: createdInfo(t)}
 		grain := &fakeUserGrainCaller{joinResp: &userpb.JoinRoomResponse{}}
 		g := gatewayForCreate(creator, grain)
@@ -71,9 +70,7 @@ func TestHandleRoomCreate(t *testing.T) {
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		}
-		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-			t.Fatalf("decode response: %v", err)
-		}
+		decodeSuccess(t, rec.Body, &resp)
 		if resp.ID != "RK000000042" || resp.Name != "Standup" {
 			t.Errorf("response = %+v, want RK000000042 / Standup", resp)
 		}

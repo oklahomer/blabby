@@ -166,7 +166,7 @@ func TestCreateRoom_RetriesPublicCodeCollision(t *testing.T) {
 }
 
 func TestCreateRoom_ExhaustsCollisionRetries(t *testing.T) {
-	results := make([]roomResult, roomCreateCollisionRetries+1)
+	results := make([]roomResult, roomCreateCollisionRetryLimit+1)
 	for i := range results {
 		results[i] = roomResult{err: roomrepo.ErrPublicCodeCollision}
 	}

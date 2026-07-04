@@ -40,9 +40,9 @@ type creationJournal interface {
 	AppendMembership(ctx context.Context, q postgres.Querier, roomID id.RoomID, actor id.UserRef, kind journal.MemberEventKind) (id.EventID, time.Time, error)
 }
 
-// roomCreateCollisionRetries bounds re-running the creation transaction when a
+// roomCreateCollisionRetryLimit bounds re-running the creation transaction when a
 // minted public_code collides with an existing room.
-const roomCreateCollisionRetries = 3
+const roomCreateCollisionRetryLimit = 3
 
 // RoomCreationService creates rooms: the room row, the creator's owner
 // membership, and the founding member_joined timeline event commit in one
@@ -72,7 +72,7 @@ func NewRoomCreationService(rooms creationRooms, users creationUsers, membership
 
 // CreateRoom creates an active room owned by actor and returns its descriptor.
 // A public_code collision re-runs the whole transaction with a freshly minted
-// code, bounded by roomCreateCollisionRetries.
+// code, bounded by roomCreateCollisionRetryLimit.
 func (s *RoomCreationService) CreateRoom(ctx context.Context, actor id.UserID, name domain.RoomName) (RoomInfo, error) {
 	var result RoomInfo
 
@@ -112,7 +112,7 @@ func (s *RoomCreationService) CreateRoom(ctx context.Context, actor id.UserID, n
 		if !errors.Is(err, roomrepo.ErrPublicCodeCollision) {
 			return RoomInfo{}, err
 		}
-		if attempt >= roomCreateCollisionRetries {
+		if attempt >= roomCreateCollisionRetryLimit {
 			return RoomInfo{}, fmt.Errorf("room creation: public_code collisions exhausted after %d retries: %w", attempt, err)
 		}
 	}
