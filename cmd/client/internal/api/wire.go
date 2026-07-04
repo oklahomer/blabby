@@ -93,10 +93,20 @@ type Room struct {
 }
 
 // RoomListResponse mirrors internal/gateway/handler_room_query.go
-// roomListResponse for HTTP 200 outcomes of GET /rooms and GET /rooms/joined:
-// both return room descriptors (opaque R… id + name).
+// roomCataloguePage / roomListResponse for HTTP 200 outcomes of GET /rooms and
+// GET /rooms/joined: both return room descriptors (opaque R… id + name). Next
+// is the catalogue's continuation cursor — the `after` value for the next
+// page, nil when the listing is exhausted (and always nil for /rooms/joined,
+// which is unpaginated).
 type RoomListResponse struct {
-	Rooms []Room `json:"rooms"`
+	Rooms []Room  `json:"rooms"`
+	Next  *string `json:"next"`
+}
+
+// CreateRoomRequest mirrors internal/gateway/handler_room_create.go
+// createRoomRequest.
+type CreateRoomRequest struct {
+	Name string `json:"name"`
 }
 
 // JoinSuccessResponse mirrors internal/gateway/handler_room.go

@@ -38,10 +38,25 @@ type JoinedRoomsLoadFailed struct {
 	HTTPStatus int
 }
 
-// RoomsLoaded is emitted by LoadRoomsCmd on HTTP 200 with the full
-// server catalogue. Order matches the response body verbatim.
+// RoomQuery filters and paginates a LoadRoomsCmd catalogue request. The zero
+// value asks for the unfiltered first page. Query maps to the server's `q`
+// (room-name substring) parameter; After to its keyset cursor.
+type RoomQuery struct {
+	Query string
+	After string
+}
+
+// RoomsLoaded is emitted by LoadRoomsCmd on HTTP 200 with one page of the
+// server catalogue. Order matches the response body verbatim. Next is the
+// `after` value for the following page ("" when the listing is exhausted).
+// Query and After echo the dispatched RoomQuery so the search modal can drop
+// results that no longer match what the user has typed since, and distinguish
+// a fresh page (After == "") from an appended one.
 type RoomsLoaded struct {
 	Rooms []Room
+	Next  string
+	Query string
+	After string
 }
 
 // RoomsLoadFailed is emitted by LoadRoomsCmd for every non-success
@@ -89,7 +104,7 @@ func LoadJoinedRoomsCmd(client *http.Client, server, token string, timeout time.
 					HTTPStatus: httpStatus,
 				}
 			}
-			return JoinedRoomsLoaded(resp)
+			return JoinedRoomsLoaded{Rooms: resp.Rooms}
 		}
 		status, message := parseErrorEnvelope(raw, httpStatus)
 		return JoinedRoomsLoadFailed{
@@ -100,12 +115,24 @@ func LoadJoinedRoomsCmd(client *http.Client, server, token string, timeout time.
 	}
 }
 
-// LoadRoomsCmd performs GET {server}/rooms with the bearer header and
-// emits exactly one outbound tea.Msg describing the outcome. The token
-// never appears outside the Authorization header.
-func LoadRoomsCmd(client *http.Client, server, token string, timeout time.Duration) tea.Cmd {
+// LoadRoomsCmd performs GET {server}/rooms with the bearer header and emits
+// exactly one outbound tea.Msg describing the outcome. query narrows and
+// pages the catalogue via the server's q/after parameters. The token never
+// appears outside the Authorization header.
+func LoadRoomsCmd(client *http.Client, server, token string, query RoomQuery, timeout time.Duration) tea.Cmd {
 	return func() tea.Msg {
-		raw, httpStatus, err := doRoomRequest(client, http.MethodGet, server, "/rooms", token, nil, timeout)
+		path := "/rooms"
+		params := url.Values{}
+		if query.Query != "" {
+			params.Set("q", query.Query)
+		}
+		if query.After != "" {
+			params.Set("after", query.After)
+		}
+		if len(params) > 0 {
+			path += "?" + params.Encode()
+		}
+		raw, httpStatus, err := doRoomRequest(client, http.MethodGet, server, path, token, nil, timeout)
 		if err != nil {
 			return RoomsLoadFailed{Message: err.Error()}
 		}
@@ -117,7 +144,11 @@ func LoadRoomsCmd(client *http.Client, server, token string, timeout time.Durati
 					HTTPStatus: httpStatus,
 				}
 			}
-			return RoomsLoaded(resp)
+			next := ""
+			if resp.Next != nil {
+				next = *resp.Next
+			}
+			return RoomsLoaded{Rooms: resp.Rooms, Next: next, Query: query.Query, After: query.After}
 		}
 		status, message := parseErrorEnvelope(raw, httpStatus)
 		return RoomsLoadFailed{
@@ -153,6 +184,100 @@ func JoinRoomCmd(client *http.Client, server, token, roomID, roomName string, ti
 		}
 		status, message := parseErrorEnvelope(raw, httpStatus)
 		return RoomJoinFailed{
+			RoomID:     roomID,
+			Status:     status,
+			Message:    message,
+			HTTPStatus: httpStatus,
+		}
+	}
+}
+
+// RoomCreated is emitted by CreateRoomCmd on HTTP 201 with the new room's
+// descriptor. The server has already seeded the caller as the room's owner,
+// so downstream code treats this like a completed join.
+type RoomCreated struct {
+	Room Room
+}
+
+// RoomCreateFailed is emitted by CreateRoomCmd for every non-success outcome.
+// Fields follow the same convention as RoomsLoadFailed.
+type RoomCreateFailed struct {
+	Status     string
+	Message    string
+	HTTPStatus int
+}
+
+// RoomLeft is emitted by LeaveRoomCmd on HTTP 200. RoomName is captured at
+// dispatch time, like RoomJoined, so downstream copy can name the room.
+type RoomLeft struct {
+	RoomID   string
+	RoomName string
+}
+
+// RoomLeaveFailed is emitted by LeaveRoomCmd for every non-success outcome.
+// RoomID is echoed back so the pane can render the failure against the row
+// that produced it.
+type RoomLeaveFailed struct {
+	RoomID     string
+	Status     string
+	Message    string
+	HTTPStatus int
+}
+
+// CreateRoomCmd performs POST {server}/rooms with the bearer header and emits
+// exactly one outbound tea.Msg describing the outcome.
+func CreateRoomCmd(client *http.Client, server, token, name string, timeout time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		body, err := json.Marshal(CreateRoomRequest{Name: name})
+		if err != nil {
+			return RoomCreateFailed{Message: fmt.Sprintf("encode create-room request: %s", err.Error())}
+		}
+		raw, httpStatus, err := doRoomRequest(client, http.MethodPost, server, "/rooms", token, body, timeout)
+		if err != nil {
+			return RoomCreateFailed{Message: err.Error()}
+		}
+		if httpStatus == http.StatusCreated {
+			var room Room
+			if err := json.Unmarshal(raw, &room); err != nil || room.ID == "" {
+				return RoomCreateFailed{
+					Message:    "server reported creation with no room descriptor",
+					HTTPStatus: httpStatus,
+				}
+			}
+			return RoomCreated{Room: room}
+		}
+		status, message := parseErrorEnvelope(raw, httpStatus)
+		return RoomCreateFailed{
+			Status:     status,
+			Message:    message,
+			HTTPStatus: httpStatus,
+		}
+	}
+}
+
+// LeaveRoomCmd performs DELETE {server}/rooms/{roomID}/membership with the
+// bearer header and emits exactly one outbound tea.Msg describing the
+// outcome. roomName is echoed back inside RoomLeft, mirroring JoinRoomCmd.
+func LeaveRoomCmd(client *http.Client, server, token, roomID, roomName string, timeout time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		path := "/rooms/" + url.PathEscape(roomID) + "/membership"
+		raw, httpStatus, err := doRoomRequest(client, http.MethodDelete, server, path, token, nil, timeout)
+		if err != nil {
+			return RoomLeaveFailed{RoomID: roomID, Message: err.Error()}
+		}
+		if httpStatus == http.StatusOK {
+			var resp JoinSuccessResponse
+			if err := json.Unmarshal(raw, &resp); err != nil || !resp.Success {
+				return RoomLeaveFailed{
+					RoomID:     roomID,
+					Message:    "server reported leave with no success flag",
+					HTTPStatus: httpStatus,
+				}
+			}
+			return RoomLeft{RoomID: roomID, RoomName: roomName}
+		}
+		status, message := parseErrorEnvelope(raw, httpStatus)
+		return RoomLeaveFailed{
 			RoomID:     roomID,
 			Status:     status,
 			Message:    message,

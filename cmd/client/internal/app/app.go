@@ -181,7 +181,7 @@ func (m Model) joinRoomSubmitter() roomsearch.Submitter {
 // to fetch the server catalogue. Same seam pattern as loginSubmitter.
 func (m Model) roomsLoader() roomsearch.Loader {
 	return func() tea.Cmd {
-		return api.LoadRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout)
+		return api.LoadRoomsCmd(m.httpClient, m.server.String(), m.token, api.RoomQuery{}, api.DefaultRoomCallTimeout)
 	}
 }
 
