@@ -177,11 +177,12 @@ func (m Model) joinRoomSubmitter() roomsearch.Submitter {
 	}
 }
 
-// roomsLoader returns the closure the search modal invokes from Init
-// to fetch the server catalogue. Same seam pattern as loginSubmitter.
+// roomsLoader returns the closure the search modal invokes to fetch one
+// catalogue page (initial load, debounced q search, keyset paging). Same
+// seam pattern as loginSubmitter.
 func (m Model) roomsLoader() roomsearch.Loader {
-	return func() tea.Cmd {
-		return api.LoadRoomsCmd(m.httpClient, m.server.String(), m.token, api.RoomQuery{}, api.DefaultRoomCallTimeout)
+	return func(query api.RoomQuery) tea.Cmd {
+		return api.LoadRoomsCmd(m.httpClient, m.server.String(), m.token, query, api.DefaultRoomCallTimeout)
 	}
 }
 
