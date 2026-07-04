@@ -63,6 +63,15 @@ type LoginTransportError struct {
 	Err error
 }
 
+// LoginProtocolError reports that the server responded but not with
+// the login protocol: a 200 whose body is not a login response, or a
+// body exceeding the read cap. Split from LoginTransportError so the
+// modal does not render a misleading "Cannot reach server" for a
+// server that was reached and misbehaved.
+type LoginProtocolError struct {
+	Err error
+}
+
 // Outbound tea.Msg types emitted by DialAndAuthCmd.
 
 // SessionGeneration identifies the login session that started an
@@ -160,16 +169,22 @@ func LoginCmd(client *http.Client, server, email, password string, timeout time.
 		defer func() { _ = resp.Body.Close() }()
 
 		// Cap the body we'll read so a hostile or buggy server cannot
-		// stall the TUI with an unbounded payload.
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, defaultReadLimitBytes))
+		// stall the TUI with an unbounded payload. MaxBytesReader (rather
+		// than a silent LimitReader truncation) surfaces the overrun as a
+		// typed error, classified as a protocol violation below.
+		raw, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, defaultReadLimitBytes))
 		if err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				return LoginProtocolError{Err: fmt.Errorf("login response exceeds %d bytes", defaultReadLimitBytes)}
+			}
 			return LoginTransportError{Err: fmt.Errorf("read login response: %w", err)}
 		}
 
 		if resp.StatusCode == http.StatusOK {
 			var lr LoginResponse
 			if err := json.Unmarshal(raw, &lr); err != nil || lr.Token == "" {
-				return LoginTransportError{Err: errors.New("malformed login response from server")}
+				return LoginProtocolError{Err: errors.New("malformed login response from server")}
 			}
 			return LoginSucceeded{Token: lr.Token, Email: strings.TrimSpace(email)}
 		}

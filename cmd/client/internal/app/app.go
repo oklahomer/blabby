@@ -219,7 +219,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout),
 		)
 
-	case api.LoginRejected, api.LoginTransportError:
+	case api.LoginRejected, api.LoginTransportError, api.LoginProtocolError:
 		if m.modal != nil {
 			nextModal, cmd := m.modal.Update(msg)
 			m.modal = nextModal

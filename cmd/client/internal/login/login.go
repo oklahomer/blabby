@@ -117,6 +117,8 @@ func (m Model) Update(msg tea.Msg) (modal.Modal, tea.Cmd) {
 		return m.handleRejection(api.Humanise(v.Status, v.Message), ""), nil
 	case api.LoginTransportError:
 		return m.handleRejection("Cannot reach server at "+m.server, "("+v.Err.Error()+")"), nil
+	case api.LoginProtocolError:
+		return m.handleRejection("Server sent an unexpected response", "("+v.Err.Error()+")"), nil
 	case api.WSAuthRejected:
 		return m.handleRejection(api.Humanise(v.Status, v.Message), ""), nil
 	case api.WSDialFailed:
