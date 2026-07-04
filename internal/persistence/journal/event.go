@@ -3,9 +3,9 @@
 // appender per room, so the Snowflake event id is monotonic per room and orders
 // the timeline.
 //
-// This package currently implements the membership half (member_joined /
-// member_left). Message append (with client_key idempotency), timeline
-// pagination, and full-text search arrive with the message-journaling work.
+// Timeline pagination and full-text search arrive with the timeline read API;
+// client_key send idempotency is a separate arc (its schema and unique index are
+// already in place).
 package journal
 
 import "fmt"
@@ -40,4 +40,12 @@ func (k MemberEventKind) eventType() (string, error) {
 // The actor's public code joins this payload once userrepo lands.
 type memberEventPayload struct {
 	DisplayName string `json:"display_name"`
+}
+
+// messagePayload is the JSONB payload for a message_posted event: the text only.
+// The author's id lives in the event's user_id column; author display metadata
+// is joined from service_user at read time, so the payload stays minimal. The
+// text key is what the PGroonga message-search index covers (payload->>'text').
+type messagePayload struct {
+	Text string `json:"text"`
 }

@@ -335,6 +335,7 @@ func newDatabaseDeps(t *testing.T, pool *pgxpool.Pool, member int) GrainDeps {
 		Directory:   user.NewRepoDirectory(pool),
 		RoomLoader:  room.NewRoomRepoLoader(pool),
 		Membership:  room.NewMembershipStore(pool, manager),
+		Messages:    room.NewMessageStore(pool, manager),
 		JoinedRooms: user.NewJoinedRoomLoader(pool),
 		Sweeper:     sweeper,
 	}

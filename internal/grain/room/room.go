@@ -48,6 +48,7 @@ const (
 	eventRoomOwnershipTransferRejected = "room.ownership.transfer_rejected"
 	eventRoomMessagePosted             = "room.message.posted"
 	eventRoomMessagePostRejected       = "room.message.post_rejected"
+	eventRoomMessageWriteFailed        = "room.message.write_failed"
 	eventRoomFanoutSupervision         = "room.fanout.supervision"
 	eventRoomActivationRejected        = "room.activation.rejected"
 	eventRoomMembershipWriteFailed     = "room.membership.write_failed"
@@ -98,6 +99,7 @@ type Grain struct {
 	state      roomState
 	loader     RoomLoader
 	membership MembershipStore
+	messages   MessageStore
 	notifier   userNotifier
 	now        func() time.Time
 	fanout     fanoutDispatcher
@@ -115,6 +117,7 @@ type Option func(*kindConfig)
 type kindConfig struct {
 	loader     RoomLoader
 	membership MembershipStore
+	messages   MessageStore
 }
 
 // WithMembership injects the DB-authoritative membership store. Production wires
@@ -122,6 +125,13 @@ type kindConfig struct {
 // (no durability), which is the behavior unit tests rely on unless they opt in.
 func WithMembership(store MembershipStore) Option {
 	return func(c *kindConfig) { c.membership = store }
+}
+
+// WithMessages injects the durable message store. Production wires it (via
+// clusterboot); a grain built without it keeps messages in memory only (no
+// durability), mirroring WithMembership's convention for unit tests.
+func WithMessages(store MessageStore) Option {
+	return func(c *kindConfig) { c.messages = store }
 }
 
 // NewKind registers Room grain with a proto.actor cluster, returning a
@@ -141,7 +151,7 @@ func NewKind(loader RoomLoader, opts ...Option) *cluster.Kind {
 		opt(&cfg)
 	}
 	return roompb.NewRoomGrainKind(func() roompb.RoomGrain {
-		return &Grain{loader: cfg.loader, membership: cfg.membership}
+		return &Grain{loader: cfg.loader, membership: cfg.membership, messages: cfg.messages}
 	}, passivationTimeout,
 		actor.WithReceiverMiddleware(middleware.GrainLogging(roomGrainKind)),
 		// Govern the fan-out worker child: protoactor resolves a child's
@@ -411,6 +421,27 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 	return &roompb.LeaveResponse{}, nil
 }
 
+// recordMessage durably appends the message_posted event and returns its
+// identity, whose occurred_at becomes the message's timestamp on the response
+// and every fan-out copy. With no message store wired it is a no-op returning a
+// zero event; production always wires one.
+func (g *Grain) recordMessage(ctx cluster.GrainContext, author id.UserID, text string) (MessageEvent, error) {
+	if g.messages == nil {
+		return MessageEvent{}, nil
+	}
+	evt, err := g.messages.RecordMessage(context.Background(), g.state.roomRef().ID, author, text)
+	if err != nil {
+		slog.Error(eventRoomMessageWriteFailed,
+			"grain_type", ctx.Kind(),
+			"grain_id", ctx.Identity(),
+			"user_id", author,
+			"error", err,
+		)
+		return MessageEvent{}, err
+	}
+	return evt, nil
+}
+
 // recordJoin durably persists a join (membership row + member_joined event in one
 // transaction) and returns the event identity for fan-out. With no membership
 // store wired it is a no-op returning a zero event; production always wires one.
@@ -500,11 +531,21 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 		return postErr(errcode.RoomNotMember, "not a member of this room"), nil
 	}
 
+	// Fail-closed: every state change — the roster's display-name refresh, the
+	// recent-message cache, the fan-out — happens only once the message is
+	// durable. Without a store (memory-only unit tests) the grain clock stands
+	// in for the DB's occurred_at.
+	evt, err := g.recordMessage(ctx, userID, req.GetText())
+	if err != nil {
+		return postErr(errcode.InternalError, "failed to record message"), nil
+	}
+	timestamp := evt.OccurredAt
+	if evt.IsZero() {
+		timestamp = g.now()
+	}
 	// Refresh the cached name from the value carried on this message, so the
 	// room's roster reflects the sender's current display name.
 	g.state.refreshMember(sender)
-
-	timestamp := g.now()
 	g.state.recordMessage(chatMessage{
 		senderID:  userID,
 		text:      req.GetText(),

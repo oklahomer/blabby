@@ -24,6 +24,21 @@ func TestNewEventID(t *testing.T) {
 	}
 }
 
+func TestParseEventID(t *testing.T) {
+	e, err := ParseEventID("9007199254740993")
+	if err != nil {
+		t.Fatalf("ParseEventID: %v", err)
+	}
+	if e.Int64() != 9007199254740993 {
+		t.Errorf("Int64() = %d, want 9007199254740993", e.Int64())
+	}
+	for _, raw := range []string{"", "abc", "1.5", "0", "-1", "9223372036854775808"} {
+		if _, err := ParseEventID(raw); err == nil {
+			t.Errorf("ParseEventID(%q): want an error", raw)
+		}
+	}
+}
+
 func TestEventIDMarshalsAsDecimalString(t *testing.T) {
 	// A 63-bit-ish value that loses precision as a JSON number.
 	e, err := NewEventID(9007199254740993)

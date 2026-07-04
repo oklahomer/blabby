@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -15,26 +16,78 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
-// fakeQuerier is an in-memory postgres.Querier; the journal only uses QueryRow.
+// fakeQuerier is an in-memory postgres.Querier: queryRow drives the append
+// paths, query drives the timeline read path.
 type fakeQuerier struct {
 	queryRow func(sql string, args ...any) pgx.Row
+	query    func(sql string, args ...any) (pgx.Rows, error)
 }
 
 var _ postgres.Querier = (*fakeQuerier)(nil)
 
 func (f *fakeQuerier) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
-	panic("journal append does not use Exec")
+	panic("the journal does not use Exec")
 }
-func (f *fakeQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	panic("journal append does not use Query")
+func (f *fakeQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if f.query == nil {
+		panic("unexpected Query call")
+	}
+	return f.query(sql, args...)
 }
 func (f *fakeQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	if f.queryRow == nil {
+		panic("unexpected QueryRow call")
+	}
 	return f.queryRow(sql, args...)
 }
 
 type fakeRow struct{ scan func(dest ...any) error }
 
 func (r fakeRow) Scan(dest ...any) error { return r.scan(dest...) }
+
+// fakeRows replays a fixed set of rows (each a slice of column values in the
+// timeline scan order) through the pgx.Rows contract the reader depends on.
+type fakeRows struct {
+	rows [][]any
+	idx  int
+	err  error
+}
+
+func (f *fakeRows) Close()                                       {}
+func (f *fakeRows) Err() error                                   { return f.err }
+func (f *fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (f *fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (f *fakeRows) Values() ([]any, error)                       { return nil, nil }
+func (f *fakeRows) RawValues() [][]byte                          { return nil }
+func (f *fakeRows) Conn() *pgx.Conn                              { return nil }
+
+func (f *fakeRows) Next() bool {
+	if f.idx >= len(f.rows) {
+		return false
+	}
+	f.idx++
+	return true
+}
+
+func (f *fakeRows) Scan(dest ...any) error {
+	values := f.rows[f.idx-1]
+	if len(dest) != len(values) {
+		return fmt.Errorf("fake scan: %d destinations, %d values", len(dest), len(values))
+	}
+	for i := range dest {
+		switch d := dest[i].(type) {
+		case *int64:
+			*d = values[i].(int64)
+		case *string:
+			*d = values[i].(string)
+		case *time.Time:
+			*d = values[i].(time.Time)
+		default:
+			return fmt.Errorf("fake scan: unsupported destination %T", dest[i])
+		}
+	}
+	return nil
+}
 
 // stubIDSource mints a fixed id, or an error to drive the mint-failure path.
 type stubIDSource struct {
@@ -60,6 +113,15 @@ func mustUserRef(t *testing.T, rawID int64, name string) id.UserRef {
 		t.Fatalf("NewUserRef: %v", err)
 	}
 	return ref
+}
+
+func mustUserID(t *testing.T, v int64) id.UserID {
+	t.Helper()
+	uid, err := id.NewUserID(v)
+	if err != nil {
+		t.Fatalf("NewUserID(%d): %v", v, err)
+	}
+	return uid
 }
 
 func mustRoomID(t *testing.T, v int64) id.RoomID {
@@ -125,6 +187,65 @@ func TestAppendMembership(t *testing.T) {
 				t.Errorf("append SQL must cast the type param to the enum: %s", gotSQL)
 			}
 		})
+	}
+}
+
+func TestAppendMessage(t *testing.T) {
+	occurred := time.Unix(1700000000, 0).UTC()
+	var gotSQL string
+	var gotArgs []any
+	fq := &fakeQuerier{queryRow: func(sql string, args ...any) pgx.Row {
+		gotSQL, gotArgs = sql, args
+		return fakeRow{scan: func(dest ...any) error {
+			*(dest[0].(*time.Time)) = occurred
+			return nil
+		}}
+	}}
+
+	eventID, ts, err := New(stubIDSource{id: 9002}).AppendMessage(
+		context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 1), "hello 世界")
+	if err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if eventID.Int64() != 9002 {
+		t.Errorf("event id = %d, want 9002 (minted)", eventID.Int64())
+	}
+	if !ts.Equal(occurred) {
+		t.Errorf("occurred_at = %v, want %v (server clock)", ts, occurred)
+	}
+	// args: id, room_id, user_id, payload — the type is a literal in the SQL.
+	if gotArgs[0].(int64) != 9002 || gotArgs[1].(int64) != 4 || gotArgs[2].(int64) != 1 {
+		t.Errorf("args = %v, want [9002 4 1 <payload>]", gotArgs)
+	}
+	var payload messagePayload
+	if err := json.Unmarshal(gotArgs[3].([]byte), &payload); err != nil {
+		t.Fatalf("payload unmarshal: %v", err)
+	}
+	if payload.Text != "hello 世界" {
+		t.Errorf("payload.text = %q, want the message text", payload.Text)
+	}
+	// occurred_at is the server clock; client_key stays null until send
+	// idempotency is wired.
+	if !strings.Contains(gotSQL, "'message_posted'") || !strings.Contains(gotSQL, "now()") ||
+		strings.Contains(gotSQL, "client_key") {
+		t.Errorf("unexpected append SQL: %s", gotSQL)
+	}
+}
+
+func TestAppendMessage_MintErrorSkipsDB(t *testing.T) {
+	sentinel := errors.New("lease expired")
+	called := false
+	fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
+		called = true
+		return fakeRow{scan: func(...any) error { return nil }}
+	}}
+	_, _, err := New(stubIDSource{err: sentinel}).AppendMessage(
+		context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 1), "hello")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("AppendMessage: got %v, want the mint error", err)
+	}
+	if called {
+		t.Error("must not touch the DB when minting fails")
 	}
 }
 
