@@ -13,6 +13,7 @@ import (
 
 	"github.com/oklahomer/blabby/cmd/client/internal/api"
 	"github.com/oklahomer/blabby/cmd/client/internal/chrome"
+	"github.com/oklahomer/blabby/cmd/client/internal/createroom"
 	"github.com/oklahomer/blabby/cmd/client/internal/login"
 	"github.com/oklahomer/blabby/cmd/client/internal/modal"
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/info"
@@ -184,6 +185,19 @@ func (m Model) roomsLoader() roomsearch.Loader {
 	return func(query api.RoomQuery) tea.Cmd {
 		return api.LoadRoomsCmd(m.httpClient, m.server.String(), m.token, query, api.DefaultRoomCallTimeout)
 	}
+}
+
+// createRoomSubmitter returns the closure the create-room modal calls when
+// the user submits a valid name.
+func (m Model) createRoomSubmitter() createroom.Submitter {
+	return func(name string) tea.Cmd {
+		return api.CreateRoomCmd(m.httpClient, m.server.String(), m.token, name, api.DefaultRoomCallTimeout)
+	}
+}
+
+// openRoomSearchModal builds a fresh search modal wired to this session.
+func (m Model) openRoomSearchModal() modal.Modal {
+	return roomsearch.New(m.joinRoomSubmitter(), m.roomsLoader(), m.server.String())
 }
 
 // Update routes incoming messages through the state-machine
@@ -407,6 +421,64 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// not own this state.
 		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout)
 
+	case roomsearch.CreateRoomRequested:
+		m.modal = createroom.New(m.createRoomSubmitter(), m.server.String())
+		return m, m.modal.Init()
+
+	case createroom.Cancelled:
+		m.modal = m.openRoomSearchModal()
+		return m, m.modal.Init()
+
+	case api.RoomCreated:
+		if m.token == "" || m.conn == nil {
+			// Creation completed after the session ended; the user is already
+			// looking at a fresh login modal.
+			return m, nil
+		}
+		// The server seeded the caller as the room's owner, so this is a
+		// completed join: activate the room and reload the authoritative list.
+		if m.nameForID == nil {
+			m.nameForID = map[string]string{}
+		}
+		m.nameForID[v.Room.ID] = v.Room.Name
+		m.roomsState.NameForID = m.nameForID
+		m.activeRoomID = v.Room.ID
+		m.mainviewState.RoomLabel = v.Room.Name
+		m.modal = nil
+		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout)
+
+	case api.RoomCreateFailed:
+		if v.HTTPStatus == http.StatusUnauthorized {
+			return m.handleSessionExpiry()
+		}
+		if m.modal != nil {
+			next, cmd := m.modal.Update(msg)
+			m.modal = next
+			return m, cmd
+		}
+		return m, nil
+
+	case api.RoomLeft:
+		if m.token == "" || m.conn == nil {
+			return m, nil
+		}
+		if m.activeRoomID == v.RoomID {
+			// The active room is gone from the user's set; the Main pane
+			// returns to its no-room placeholder.
+			m.activeRoomID = ""
+			m.mainviewState.RoomLabel = ""
+			m.mainError = ""
+		}
+		m.roomsState.ActionError = ""
+		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout)
+
+	case api.RoomLeaveFailed:
+		if v.HTTPStatus == http.StatusUnauthorized {
+			return m.handleSessionExpiry()
+		}
+		m.roomsState.ActionError = api.Humanise(v.Status, v.Message)
+		return m, nil
+
 	case api.RoomsLoaded:
 		if m.modal != nil {
 			next, cmd := m.modal.Update(msg)
@@ -541,7 +613,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// `/` opens the room search globally, except while the composer is
 	// focused — there it is a literal character of the message.
 	if k.String() == "/" && m.focus != focusMainInput {
-		m.modal = roomsearch.New(m.joinRoomSubmitter(), m.roomsLoader(), m.server.String())
+		m.modal = m.openRoomSearchModal()
 		return m, m.modal.Init()
 	}
 
@@ -577,6 +649,13 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.roomsState.Loading = true
 			m.roomsState.LoadError = ""
 			return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout)
+		case rooms.OutcomeLeaveRoom:
+			id := nextState.ActiveID()
+			if id == "" {
+				return m, nil
+			}
+			return m, api.LeaveRoomCmd(m.httpClient, m.server.String(), m.token,
+				id, nextState.ResolveName(id), api.DefaultRoomCallTimeout)
 		}
 		return m, nil
 	}

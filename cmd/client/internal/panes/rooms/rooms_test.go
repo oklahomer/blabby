@@ -145,3 +145,101 @@ func TestResolveNameFallsBackToID(t *testing.T) {
 		t.Errorf("got %q, want random (verbatim fallback)", got)
 	}
 }
+
+func TestLeaveGestureTwoPressConfirm(t *testing.T) {
+	s := State{JoinedIDs: []string{"general", "random"}, Cursor: 1}
+
+	// First x arms the confirmation for the room under the cursor.
+	s, outcome := HandleKey(s, "x")
+	if outcome != OutcomeNone || s.PendingLeaveID != "random" {
+		t.Fatalf("first x: outcome=%v pending=%q, want armed for random", outcome, s.PendingLeaveID)
+	}
+	// Second x on the same room confirms.
+	s, outcome = HandleKey(s, "x")
+	if outcome != OutcomeLeaveRoom {
+		t.Fatalf("second x: outcome=%v, want OutcomeLeaveRoom", outcome)
+	}
+	if s.PendingLeaveID != "" {
+		t.Fatalf("pending not cleared after confirm: %q", s.PendingLeaveID)
+	}
+	if s.ActiveID() != "random" {
+		t.Fatalf("ActiveID = %q, want the confirmed room", s.ActiveID())
+	}
+}
+
+func TestLeaveGestureDisarmedByOtherKeys(t *testing.T) {
+	s := State{JoinedIDs: []string{"general", "random"}, Cursor: 0}
+	s, _ = HandleKey(s, "x")
+	if s.PendingLeaveID != "general" {
+		t.Fatalf("setup: pending=%q", s.PendingLeaveID)
+	}
+	// Moving the cursor disarms; the x that follows re-arms for the new row
+	// instead of confirming the old one.
+	s, _ = HandleKey(s, "down")
+	if s.PendingLeaveID != "" {
+		t.Fatalf("movement must disarm, pending=%q", s.PendingLeaveID)
+	}
+	s, outcome := HandleKey(s, "x")
+	if outcome != OutcomeNone || s.PendingLeaveID != "random" {
+		t.Fatalf("re-arm: outcome=%v pending=%q", outcome, s.PendingLeaveID)
+	}
+}
+
+func TestLeaveOnEmptyListIsNoOp(t *testing.T) {
+	s, outcome := HandleKey(State{}, "x")
+	if outcome != OutcomeNone || s.PendingLeaveID != "" {
+		t.Fatalf("x on empty list: outcome=%v pending=%q", outcome, s.PendingLeaveID)
+	}
+}
+
+func TestKeyClearsActionError(t *testing.T) {
+	s := State{JoinedIDs: []string{"general"}, ActionError: "Transfer ownership before leaving this room"}
+	s, _ = HandleKey(s, "down")
+	if s.ActionError != "" {
+		t.Fatalf("ActionError not cleared: %q", s.ActionError)
+	}
+}
+
+func TestPageAndEdgeNavigation(t *testing.T) {
+	ids := make([]string, 25)
+	for i := range ids {
+		ids[i] = string(rune('a' + i))
+	}
+	s := State{JoinedIDs: ids}
+
+	s, _ = HandleKey(s, "pgdown")
+	if s.Cursor != 10 {
+		t.Fatalf("pgdown cursor = %d, want 10", s.Cursor)
+	}
+	s, _ = HandleKey(s, "end")
+	if s.Cursor != 24 {
+		t.Fatalf("end cursor = %d, want 24", s.Cursor)
+	}
+	s, _ = HandleKey(s, "pgup")
+	if s.Cursor != 14 {
+		t.Fatalf("pgup cursor = %d, want 14", s.Cursor)
+	}
+	s, _ = HandleKey(s, "home")
+	if s.Cursor != 0 {
+		t.Fatalf("home cursor = %d, want 0", s.Cursor)
+	}
+}
+
+func TestViewRendersLeaveConfirmAndActionError(t *testing.T) {
+	s := State{
+		JoinedIDs:      []string{"general"},
+		NameForID:      map[string]string{"general": "General"},
+		PendingLeaveID: "general",
+	}
+	out := View(s, true, 0, 0)
+	if !strings.Contains(out, "press x again to leave") || !strings.Contains(out, "General") {
+		t.Fatalf("confirm rows missing:\n%s", out)
+	}
+
+	s.PendingLeaveID = ""
+	s.ActionError = "Transfer ownership before leaving this room"
+	out = View(s, true, 0, 0)
+	if !strings.Contains(out, "Transfer ownership") {
+		t.Fatalf("action error missing:\n%s", out)
+	}
+}
