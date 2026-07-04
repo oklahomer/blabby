@@ -10,6 +10,11 @@ import (
 // (case-insensitive, substring match). The server's return order is
 // preserved across the filtered subset — never re-sorted.
 //
+// Local narrowing is deliberately a superset of the server's `q` (which
+// matches names only): it keeps every row the debounced re-query could
+// return visible in the instant between keystroke and server reply, and
+// additionally lets an R… id fragment match.
+//
 // An empty query is treated as "match all" and returns the slice
 // verbatim so the caller can share the backing array. A non-empty
 // query that matches nothing returns nil (zero-length, nil backing

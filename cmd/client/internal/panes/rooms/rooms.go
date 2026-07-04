@@ -119,9 +119,11 @@ func HandleKey(state State, key string) (State, Outcome) {
 		state.Cursor = 0
 		return state, OutcomeNone
 	case "end":
-		if last := len(state.JoinedIDs) - 1; last > 0 {
-			state.Cursor = last
+		last := len(state.JoinedIDs) - 1
+		if last < 0 {
+			last = 0
 		}
+		state.Cursor = last
 		return state, OutcomeNone
 	case "enter":
 		if len(state.JoinedIDs) == 0 {

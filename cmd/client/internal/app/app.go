@@ -386,6 +386,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.roomsState.NameForID = m.nameForID
 		m.roomsState.Loading = false
 		m.roomsState.LoadError = ""
+		// A reload replaces the list a half-armed leave gesture referred to;
+		// disarm it so the confirm banner cannot name a stale room.
+		m.roomsState.PendingLeaveID = ""
 		if len(ids) == 0 {
 			m.roomsState.Cursor = 0
 		} else if m.roomsState.Cursor > len(ids)-1 {
