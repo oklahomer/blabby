@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -45,14 +44,22 @@ type LoginSucceeded struct {
 	Email string
 }
 
+// StatusAccountPending is the login rejection status for a correct password
+// against an account that has not completed email verification. The root
+// Model routes it to the verify modal instead of rendering it as an error.
+const StatusAccountPending = "AUTH_ACCOUNT_PENDING"
+
 // LoginRejected reports that the server returned a parseable error
 // envelope. Status is the gateway's status string (e.g.
 // AUTH_INVALID_TOKEN); Message is the server-supplied fallback text
-// used when the status is unknown to the client.
+// used when the status is unknown to the client. Email echoes the
+// attempted address so the pending-account route can hand it to the
+// verify modal.
 type LoginRejected struct {
 	Status     string
 	Message    string
 	HTTPStatus int
+	Email      string
 }
 
 // LoginTransportError reports a network-level failure before the
@@ -60,6 +67,15 @@ type LoginRejected struct {
 // timeout). Err is preserved verbatim so the login modal can surface
 // the underlying reason in parentheses.
 type LoginTransportError struct {
+	Err error
+}
+
+// LoginProtocolError reports that the server responded but not with
+// the login protocol: a 200 whose body is not a login response, or a
+// body exceeding the read cap. Split from LoginTransportError so the
+// modal does not render a misleading "Cannot reach server" for a
+// server that was reached and misbehaved.
+type LoginProtocolError struct {
 	Err error
 }
 
@@ -159,33 +175,29 @@ func LoginCmd(client *http.Client, server, email, password string, timeout time.
 		}
 		defer func() { _ = resp.Body.Close() }()
 
-		// Cap the body we'll read so a hostile or buggy server cannot
-		// stall the TUI with an unbounded payload.
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, defaultReadLimitBytes))
+		raw, err := readBoundedResponseBody(resp.Body)
 		if err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				return LoginProtocolError{Err: fmt.Errorf("login response exceeds %d bytes", defaultReadLimitBytes)}
+			}
 			return LoginTransportError{Err: fmt.Errorf("read login response: %w", err)}
 		}
 
 		if resp.StatusCode == http.StatusOK {
 			var lr LoginResponse
 			if err := json.Unmarshal(raw, &lr); err != nil || lr.Token == "" {
-				return LoginTransportError{Err: errors.New("malformed login response from server")}
+				return LoginProtocolError{Err: errors.New("malformed login response from server")}
 			}
 			return LoginSucceeded{Token: lr.Token, Email: strings.TrimSpace(email)}
 		}
 
-		var env ErrorEnvelope
-		if err := json.Unmarshal(raw, &env); err != nil || env.Error.Status == "" {
-			return LoginRejected{
-				Status:     "",
-				Message:    fmt.Sprintf("server returned %s", resp.Status),
-				HTTPStatus: resp.StatusCode,
-			}
-		}
+		status, message := decodeErrorEnvelope(raw, resp.Status)
 		return LoginRejected{
-			Status:     env.Error.Status,
-			Message:    env.Error.Message,
+			Status:     status,
+			Message:    message,
 			HTTPStatus: resp.StatusCode,
+			Email:      strings.TrimSpace(email),
 		}
 	}
 }

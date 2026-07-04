@@ -17,7 +17,8 @@ import (
 // calls it so the mapping cannot drift across endpoints.
 func httpStatus(code errcode.Code) int {
 	switch code {
-	case errcode.AuthInvalidToken, errcode.AuthExpiredToken, errcode.AuthMissingToken:
+	case errcode.AuthInvalidToken, errcode.AuthExpiredToken, errcode.AuthMissingToken,
+		errcode.AuthAccountPending:
 		return http.StatusUnauthorized
 	case errcode.RoomNotMember, errcode.RoomPermissionDenied:
 		return http.StatusForbidden
@@ -111,6 +112,12 @@ func ErrAuthExpiredToken(msg string) ErrorDetail {
 // ErrAuthMissingToken builds an ErrorDetail for a request carrying no auth token.
 func ErrAuthMissingToken(msg string) ErrorDetail {
 	return NewErrorDetail(errcode.AuthMissingToken, msg)
+}
+
+// ErrAuthAccountPending builds an ErrorDetail for a correct-password login
+// against an account that has not completed email verification.
+func ErrAuthAccountPending(msg string) ErrorDetail {
+	return NewErrorDetail(errcode.AuthAccountPending, msg)
 }
 
 // ErrRoomNotMember builds an ErrorDetail for an action that requires a room

@@ -8,6 +8,7 @@ var errorMessages = map[string]string{
 	"AUTH_INVALID_TOKEN":        "Invalid credentials",
 	"AUTH_EXPIRED_TOKEN":        "Session expired — please sign in again",
 	"AUTH_MISSING_TOKEN":        "Authentication timed out",
+	"AUTH_ACCOUNT_PENDING":      "Verify your email to finish creating your account",
 	"INVALID_REQUEST":           "Invalid request",
 	"MISSING_FIELD":             "A required field is missing",
 	"PAYLOAD_TOO_LARGE":         "Request too large",

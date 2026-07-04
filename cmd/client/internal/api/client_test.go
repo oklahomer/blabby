@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -122,6 +123,8 @@ func TestLoginCmdTransportError(t *testing.T) {
 }
 
 func TestLoginCmdMalformedSuccessResponse(t *testing.T) {
+	// The server responded, so this is a protocol violation, not a transport
+	// failure — the modal must not render "Cannot reach server".
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"token":""}`))
@@ -129,8 +132,22 @@ func TestLoginCmdMalformedSuccessResponse(t *testing.T) {
 	defer srv.Close()
 
 	msg := LoginCmd(srv.Client(), srv.URL, "rina@example.com", "hunter2", 2*time.Second)()
-	if _, ok := msg.(LoginTransportError); !ok {
-		t.Fatalf("expected LoginTransportError, got %T", msg)
+	if _, ok := msg.(LoginProtocolError); !ok {
+		t.Fatalf("expected LoginProtocolError, got %T", msg)
+	}
+}
+
+func TestLoginCmdOversizeResponseIsProtocolError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// One byte past the cap so the bounded reader trips.
+		_, _ = w.Write(bytes.Repeat([]byte("a"), defaultReadLimitBytes+1))
+	}))
+	defer srv.Close()
+
+	msg := LoginCmd(srv.Client(), srv.URL, "rina@example.com", "hunter2", 2*time.Second)()
+	if _, ok := msg.(LoginProtocolError); !ok {
+		t.Fatalf("expected LoginProtocolError for an oversize body, got %T", msg)
 	}
 }
 

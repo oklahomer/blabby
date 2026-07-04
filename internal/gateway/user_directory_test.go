@@ -74,6 +74,11 @@ func scanUserDirectoryRow(dest []any, values []any) error {
 
 func activeUserDirectoryRow(t *testing.T, userID int64, code id.PublicCode, mailAddress, password string) pgx.Row {
 	t.Helper()
+	return userDirectoryRowWithStatus(t, userID, code, mailAddress, password, "active")
+}
+
+func userDirectoryRowWithStatus(t *testing.T, userID int64, code id.PublicCode, mailAddress, password, status string) pgx.Row {
+	t.Helper()
 	hash, err := auth.HashPassword(password)
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
@@ -88,11 +93,57 @@ func activeUserDirectoryRow(t *testing.T, userID int64, code id.PublicCode, mail
 			"alice",
 			"Alice",
 			hash,
-			"active",
+			status,
 			now,
 			now,
 		})
 	}}
+}
+
+func TestUserRepoDirectoryVerifyCredentialsClassifiesAccountStatus(t *testing.T) {
+	const password = "hunter2"
+	code, err := id.ParsePublicCode("0123456789")
+	if err != nil {
+		t.Fatalf("ParsePublicCode: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		status   string
+		password string
+		wantErr  error
+	}{
+		{
+			// The password proved account ownership, so the pending state may be
+			// revealed to guide the user to verification.
+			name: "pending with correct password", status: "pending",
+			password: password, wantErr: auth.ErrAccountPending,
+		},
+		{
+			// A wrong password learns nothing: the rejection is generic whatever
+			// the account's state, so login stays enumeration-proof.
+			name: "pending with wrong password", status: "pending",
+			password: "wrong", wantErr: auth.ErrInvalidCredentials,
+		},
+		{
+			// A disabled account stays hidden even to its password holder.
+			name: "disabled with correct password", status: "disabled",
+			password: password, wantErr: auth.ErrInvalidCredentials,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := &userDirectoryQuerier{
+				queryRow: func(string, ...any) pgx.Row {
+					return userDirectoryRowWithStatus(t, 42, code, "alice@example.com", password, tc.status)
+				},
+			}
+			_, err := NewUserRepoDirectory(q).VerifyCredentials(context.Background(), "alice@example.com", tc.password)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("VerifyCredentials err = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
 }
 
 func TestUserRepoDirectoryVerifyCredentialsNormalizesEmail(t *testing.T) {

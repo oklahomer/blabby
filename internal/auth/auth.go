@@ -43,8 +43,9 @@ type VerifiedUser struct {
 // CredentialVerifier checks an email/password pair against the account store and
 // returns the verified identity. It is the login-path collaborator the
 // JWTAuthenticator depends on. Implementations return ErrInvalidCredentials for
-// any rejection (unknown email, wrong password, non-active account) so the caller
-// cannot distinguish the cases, and a wrapped error for an infrastructure failure.
+// rejections that must stay indistinguishable (unknown email, wrong password, or
+// disabled account), ErrAccountPending after a correct password proves ownership
+// of an unverified account, and a wrapped error for an infrastructure failure.
 //
 // Latency is the implementer's responsibility (see Authenticator): a DB-backed
 // verifier bounds its own work.

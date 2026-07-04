@@ -26,6 +26,25 @@ type LoginResponse struct {
 	Token string `json:"token"`
 }
 
+// RegisterRequest mirrors internal/gateway/handler_register.go RegisterRequest.
+type RegisterRequest struct {
+	MailAddress string `json:"mail_address"`
+	Handle      string `json:"handle"`
+	Password    string `json:"password"`
+}
+
+// VerifyRequest mirrors internal/gateway/handler_verify.go VerifyRequest.
+type VerifyRequest struct {
+	MailAddress string `json:"mail_address"`
+	PIN         string `json:"pin"`
+}
+
+// ResendVerificationRequest mirrors internal/gateway/handler_verify.go
+// ResendVerificationRequest.
+type ResendVerificationRequest struct {
+	MailAddress string `json:"mail_address"`
+}
+
 // ErrorDetail mirrors internal/gateway/errors.go ErrorDetail. JSON numbers are
 // decoded into int here because the client does not need the server's internal
 // errcode.Code type.

@@ -256,7 +256,14 @@ paths:
                   status: INVALID_REQUEST
                   message: username and password are required
         '401':
-          description: Invalid credentials. Returned for every authentication failure.
+          description: |
+            The login was refused. Every credential failure — unknown address,
+            wrong password, disabled account — is the uniform
+            `AUTH_INVALID_TOKEN`, so the response cannot be used to enumerate
+            accounts. The one distinguished case is `AUTH_ACCOUNT_PENDING`: the
+            password was correct but the account has not completed email
+            verification (safe to reveal, since the caller proved ownership);
+            finish verification via `POST /users/verifications`.
           content:
             application/json:
               schema:
@@ -1196,6 +1203,7 @@ components:
             - AUTH_INVALID_TOKEN
             - AUTH_EXPIRED_TOKEN
             - AUTH_MISSING_TOKEN
+            - AUTH_ACCOUNT_PENDING
             - ROOM_NOT_MEMBER
             - ROOM_ALREADY_MEMBER
             - ROOM_NOT_FOUND

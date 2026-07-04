@@ -34,6 +34,7 @@ const (
 	AuthInvalidToken        Code = 1001
 	AuthExpiredToken        Code = 1002
 	AuthMissingToken        Code = 1003
+	AuthAccountPending      Code = 1004
 	RoomNotMember           Code = 2001
 	RoomAlreadyMember       Code = 2002
 	RoomNotFound            Code = 2003
@@ -64,6 +65,8 @@ func (c Code) status() (string, bool) {
 		return "AUTH_EXPIRED_TOKEN", true
 	case AuthMissingToken:
 		return "AUTH_MISSING_TOKEN", true
+	case AuthAccountPending:
+		return "AUTH_ACCOUNT_PENDING", true
 	case RoomNotMember:
 		return "ROOM_NOT_MEMBER", true
 	case RoomAlreadyMember:

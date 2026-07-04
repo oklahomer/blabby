@@ -54,6 +54,10 @@ const (
 // package free of HTTP concerns and trivially unit-testable.
 type Submitter func(email, password string) tea.Cmd
 
+// CreateAccountRequested is the typed outcome emitted when the user presses
+// ctrl+n: the root Model maps it to the register modal.
+type CreateAccountRequested struct{}
+
 // Model is the login modal state. It satisfies modal.Modal.
 type Model struct {
 	inputs   [2]textinput.Model
@@ -61,6 +65,7 @@ type Model struct {
 	phase    phase
 	headline string
 	detail   string
+	notice   string
 	server   string
 	submit   Submitter
 }
@@ -117,6 +122,8 @@ func (m Model) Update(msg tea.Msg) (modal.Modal, tea.Cmd) {
 		return m.handleRejection(api.Humanise(v.Status, v.Message), ""), nil
 	case api.LoginTransportError:
 		return m.handleRejection("Cannot reach server at "+m.server, "("+v.Err.Error()+")"), nil
+	case api.LoginProtocolError:
+		return m.handleRejection("Server sent an unexpected response", "("+v.Err.Error()+")"), nil
 	case api.WSAuthRejected:
 		return m.handleRejection(api.Humanise(v.Status, v.Message), ""), nil
 	case api.WSDialFailed:
@@ -144,6 +151,9 @@ func (m Model) View(_, _ int) string {
 		ui.Label().Render("Password:  ") + m.inputs[passwordSlot].View(),
 	}
 
+	if m.notice != "" {
+		body = append(body, "", ui.Success().Render("✓ "+m.notice))
+	}
 	if m.headline != "" {
 		body = append(body, "", ui.Error().Render("✗ "+m.headline))
 		if m.detail != "" {
@@ -158,7 +168,7 @@ func (m Model) View(_, _ int) string {
 	case phaseConnecting:
 		body = append(body, ui.Subtle().Render("Connecting…"))
 	default:
-		body = append(body, ui.Subtle().Render("tab: next field · enter: submit · esc: quit"))
+		body = append(body, ui.Subtle().Render("tab: next field · enter: sign in · ctrl+n: create account · esc: quit"))
 	}
 
 	return ui.ModalBorder().Width(modalWidth).Render(
@@ -187,6 +197,7 @@ func (m Model) ShowError(headline, detail string) Model {
 	m.phase = phaseIdle
 	m.headline = headline
 	m.detail = detail
+	m.notice = ""
 	m.inputs[passwordSlot].SetValue("")
 	m.inputs[emailSlot].Blur()
 	m.inputs[passwordSlot].Focus()
@@ -199,6 +210,17 @@ func (m Model) ShowError(headline, detail string) Model {
 // email they were just signed in as.
 func (m Model) PrefillEmail(email string) Model {
 	m.inputs[emailSlot].SetValue(email)
+	return m
+}
+
+// ShowNotice renders a success row (e.g. "Account verified — sign in")
+// above the error slot, with the password field focused so the user can
+// continue straight into signing in. The notice clears on the next submit.
+func (m Model) ShowNotice(notice string) Model {
+	m.notice = notice
+	m.inputs[emailSlot].Blur()
+	m.inputs[passwordSlot].Focus()
+	m.focused = passwordSlot
 	return m
 }
 
@@ -222,6 +244,8 @@ func (m Model) handleKey(k tea.KeyMsg) (modal.Modal, tea.Cmd) {
 		return m, nil
 	case "esc":
 		return nil, tea.Quit
+	case "ctrl+n":
+		return m, func() tea.Msg { return CreateAccountRequested{} }
 	case "tab", "down":
 		return m.shiftFocus(1), nil
 	case "shift+tab", "up":
@@ -245,6 +269,7 @@ func (m Model) handleKey(k tea.KeyMsg) (modal.Modal, tea.Cmd) {
 		m.phase = phaseSigningIn
 		m.headline = ""
 		m.detail = ""
+		m.notice = ""
 		return m, m.submit(email, password)
 	}
 
