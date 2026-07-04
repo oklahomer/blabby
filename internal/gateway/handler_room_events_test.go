@@ -176,6 +176,21 @@ func TestHandleRoomEvents_RejectsInvalidParams(t *testing.T) {
 	}
 }
 
+func TestHandleRoomEvents_UnknownEntryKindReturns500(t *testing.T) {
+	// The journal is contracted to return known entry kinds; an unknown one
+	// means a kind was added without its wire mapping, so the handler fails
+	// closed rather than emit an untyped event.
+	g, _ := eventsGateway(timelineEntry(t, 101, journal.EntryKind(99), "A000000001", "alice", ""))
+	rec := serveEvents(t, g, "/rooms/RG000000004/events", "1")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (body=%s)", rec.Code, rec.Body.String())
+	}
+	resp := decodeErrorResponse(t, rec.Body)
+	if resp.Error.Code != errcode.InternalError {
+		t.Errorf("error.code = %d, want %d", resp.Error.Code, errcode.InternalError)
+	}
+}
+
 func TestHandleRoomEvents_MembershipCheckErrorReturns503(t *testing.T) {
 	g, stub := eventsGateway()
 	stub.memberErr = errors.New("db down")

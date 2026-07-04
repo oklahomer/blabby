@@ -153,7 +153,18 @@ func (g *Gateway) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := roomEventsPage{Events: toRoomEvents(page.Events)}
+	events, err := toRoomEvents(page.Events)
+	if err != nil {
+		// An unmapped entry kind is a server-side bug (see toRoomEvents), so
+		// fail closed rather than serve a page with an untyped event.
+		slog.Error("room handler internal error",
+			"endpoint", endpointRoomEvents, "method", r.Method,
+			"user_id", userID, "room_id", roomID, "error", err)
+		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("failed to render events"))
+		return
+	}
+
+	resp := roomEventsPage{Events: events}
 	if page.HasMore {
 		next := page.Events[len(page.Events)-1].ID.String()
 		resp.Next = &next
@@ -162,12 +173,15 @@ func (g *Gateway) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// toRoomEvents renders timeline entries in their wire shape: authors as U…
+// toRoomEvents renders timeline entries in their wire shape: users as U…
 // codes, message text on messages only, and the person under sender (message)
-// or user (membership event), mirroring the WS frames.
-func toRoomEvents(entries []journal.Entry) []roomEvent {
-	out := make([]roomEvent, 0, len(entries))
-	for _, entry := range entries {
+// or user (membership event), mirroring the WS frames. An entry kind without a
+// wire mapping — a kind added to the journal but not here — is an error so the
+// caller can fail closed rather than emit an untyped event; the compiler
+// cannot flag the non-exhaustive switch when the enum grows.
+func toRoomEvents(entries []journal.Entry) ([]roomEvent, error) {
+	out := make([]roomEvent, len(entries))
+	for i, entry := range entries {
 		person := &eventPerson{ID: entry.User.Code.FormatUser(), Name: entry.User.Name}
 		event := roomEvent{
 			ID:        entry.ID.String(),
@@ -184,8 +198,10 @@ func toRoomEvents(entries []journal.Entry) []roomEvent {
 		case journal.EntryMemberLeft:
 			event.Type = "member_left"
 			event.User = person
+		default:
+			return nil, fmt.Errorf("journal entry %s has no wire mapping for kind %d", entry.ID, entry.Kind)
 		}
-		out = append(out, event)
+		out[i] = event
 	}
-	return out
+	return out, nil
 }
