@@ -2,6 +2,7 @@ package roomrepo
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -104,13 +105,83 @@ func TestRoomRepoIntegration(t *testing.T) {
 		t.Fatalf("ListByIDs = %v, want both the created room and seed room 4", roomIDs(byIDs))
 	}
 
-	// ListActive includes the freshly created active room.
-	active, err := repo.ListActive(ctx, pool, 0)
+	// ListActive includes the freshly created active room and hides the
+	// archived one.
+	active, _, err := repo.ListActive(ctx, pool, ListActiveParams{Limit: 10000})
 	if err != nil {
 		t.Fatalf("ListActive: %v", err)
 	}
 	if !containsRoom(active, created.ID) {
 		t.Fatalf("ListActive missing the created room; got %v", roomIDs(active))
+	}
+	if containsRoom(active, mustRoomID(t, archivedID)) {
+		t.Fatalf("ListActive surfaced the archived room; got %v", roomIDs(active))
+	}
+
+	// seedRoom inserts an active room directly so the filter/pagination checks
+	// below control both the id order and the display name.
+	seedRoom := func(rid int64, name string) id.RoomID {
+		t.Helper()
+		code, err := id.NewPublicCode()
+		if err != nil {
+			t.Fatalf("NewPublicCode: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), "DELETE FROM room WHERE id = $1", rid)
+		})
+		if _, err := pool.Exec(ctx,
+			"INSERT INTO room (id, public_code, display_name, created_by, status) VALUES ($1, $2, $3, $4, 'active')",
+			rid, code.String(), name, int64(1)); err != nil {
+			t.Fatalf("seed room %d: %v", rid, err)
+		}
+		return mustRoomID(t, rid)
+	}
+	mustQuery := func(raw string) domain.RoomNameQuery {
+		t.Helper()
+		q, err := domain.NewRoomNameQuery(raw)
+		if err != nil {
+			t.Fatalf("NewRoomNameQuery(%q): %v", raw, err)
+		}
+		return q
+	}
+
+	// Substring filtering pages through in id order, case-insensitively. The
+	// marker is unique to this run, so leftover rows cannot interfere.
+	marker := fmt.Sprintf("pager%d", rawID)
+	firstID := seedRoom(rawID+2, "Alpha "+marker)
+	secondID := seedRoom(rawID+3, "Beta "+marker)
+
+	page1, hasMore, err := repo.ListActive(ctx, pool, ListActiveParams{
+		Query: mustQuery(strings.ToUpper(marker)), Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("ListActive(page 1): %v", err)
+	}
+	if len(page1) != 1 || page1[0].ID != firstID || !hasMore {
+		t.Fatalf("page 1 = %v (hasMore=%t), want just room %d with more", roomIDs(page1), hasMore, firstID.Int64())
+	}
+	page2, hasMore, err := repo.ListActive(ctx, pool, ListActiveParams{
+		Query: mustQuery(strings.ToUpper(marker)), AfterID: page1[0].ID, Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("ListActive(page 2): %v", err)
+	}
+	if len(page2) != 1 || page2[0].ID != secondID || hasMore {
+		t.Fatalf("page 2 = %v (hasMore=%t), want just room %d with no more", roomIDs(page2), hasMore, secondID.Int64())
+	}
+
+	// LIKE wildcards in the fragment match literally: "_" must not act as a
+	// single-character wildcard, or the X-variant room would match too.
+	underscoreID := seedRoom(rawID+4, fmt.Sprintf("under_score%d", rawID))
+	seedRoom(rawID+5, fmt.Sprintf("underXscore%d", rawID))
+	escaped, _, err := repo.ListActive(ctx, pool, ListActiveParams{
+		Query: mustQuery(fmt.Sprintf("under_score%d", rawID)), Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListActive(escaped): %v", err)
+	}
+	if len(escaped) != 1 || escaped[0].ID != underscoreID {
+		t.Fatalf("escaped filter = %v, want just room %d", roomIDs(escaped), underscoreID.Int64())
 	}
 }
 

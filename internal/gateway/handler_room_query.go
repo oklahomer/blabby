@@ -24,6 +24,9 @@ type roomListResponse struct {
 	Rooms []roomDescriptor `json:"rooms"`
 }
 
+// roomListMaxLimit caps the catalogue page size.
+const roomListMaxLimit = 200
+
 // handleRoomList returns the active-room catalogue as R… descriptors, resolved
 // through the room directory (the database). The slice is explicitly initialised
 // so an empty result marshals as `[]`, never `null`.
@@ -34,7 +37,7 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 	}
 	logRoomEntry(endpointRoomList, r.Method, userID, id.RoomID{})
 
-	rooms, err := g.rooms.ListActive(r.Context())
+	page, err := g.rooms.ListActive(r.Context(), ListActiveQuery{Limit: roomListMaxLimit})
 	if err != nil {
 		slog.Warn("room handler transport error",
 			"endpoint", endpointRoomList, "method", r.Method,
@@ -44,7 +47,7 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logRoomExit(endpointRoomList, r.Method, userID, id.RoomID{}, outcomeOK, 0)
-	writeJSON(w, http.StatusOK, roomListResponse{Rooms: toDescriptors(rooms)})
+	writeJSON(w, http.StatusOK, roomListResponse{Rooms: toDescriptors(page.Rooms)})
 }
 
 // handleRoomJoined returns the rooms the authenticated user has joined, as R…

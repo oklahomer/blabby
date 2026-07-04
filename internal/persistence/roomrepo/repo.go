@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -163,23 +164,58 @@ func (r *Repo) ListByIDs(ctx context.Context, q postgres.Querier, ids []id.RoomI
 	return collectRooms(rows)
 }
 
-const listActiveSQL = `SELECT ` + roomColumns + ` FROM room WHERE status = 'active' ORDER BY id`
+const listActiveSQL = `SELECT ` + roomColumns + ` FROM room WHERE status = 'active'`
 
-// ListActive returns active rooms ordered by id — the gateway's room catalogue. A
-// positive limit caps the result; a non-positive limit returns all active rooms.
-// (Substring filtering and keyset pagination arrive with the discovery work.)
-func (r *Repo) ListActive(ctx context.Context, q postgres.Querier, limit int) ([]Room, error) {
+// ListActiveParams filters and paginates ListActive. The zero values of Query
+// and AfterID mean "no name filter" and "first page"; Limit is the page size
+// and must be positive.
+type ListActiveParams struct {
+	Query   domain.RoomNameQuery
+	AfterID id.RoomID
+	Limit   int
+}
+
+// ListActive returns one page of active rooms ordered by id — the gateway's
+// room catalogue. Query narrows the page to rooms whose display name contains
+// the fragment, case-insensitively and literally (LIKE wildcards in the
+// fragment do not act as wildcards). AfterID is the keyset cursor: only rooms
+// with a greater id are returned. The boolean reports whether at least one
+// more room follows the page, determined by fetching Limit+1 rows and
+// trimming the look-ahead row.
+func (r *Repo) ListActive(ctx context.Context, q postgres.Querier, params ListActiveParams) ([]Room, bool, error) {
 	query := listActiveSQL
 	var args []any
-	if limit > 0 {
-		query += " LIMIT $1"
-		args = append(args, limit)
+	if !params.Query.IsZero() {
+		args = append(args, likeSubstringPattern(params.Query))
+		query += fmt.Sprintf(" AND display_name ILIKE $%d", len(args))
 	}
+	if params.AfterID != (id.RoomID{}) {
+		args = append(args, params.AfterID.Int64())
+		query += fmt.Sprintf(" AND id > $%d", len(args))
+	}
+	args = append(args, params.Limit+1)
+	query += fmt.Sprintf(" ORDER BY id LIMIT $%d", len(args))
+
 	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("roomrepo: list active: %w", err)
+		return nil, false, fmt.Errorf("roomrepo: list active: %w", err)
 	}
-	return collectRooms(rows)
+	rooms, err := collectRooms(rows)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(rooms) > params.Limit {
+		return rooms[:params.Limit], true, nil
+	}
+	return rooms, false, nil
+}
+
+// likeSubstringPattern renders the fragment as an ILIKE pattern that matches
+// any display name containing it literally: LIKE's wildcards and its escape
+// character are escaped before the fragment is wrapped in %…%.
+func likeSubstringPattern(q domain.RoomNameQuery) string {
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q.String())
+	return "%" + escaped + "%"
 }
 
 // collectRooms scans and parses every row, closing the rows on return.

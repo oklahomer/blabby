@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"strings"
 
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
@@ -48,11 +49,25 @@ func (d *stubRoomDirectory) Resolve(_ context.Context, code id.PublicCode) (id.R
 	return info.ID, nil
 }
 
-func (d *stubRoomDirectory) ListActive(_ context.Context) ([]RoomInfo, error) {
+// ListActive mirrors the production contract in memory: case-insensitive
+// substring filter, id-keyset cursor, and a look-ahead HasMore.
+func (d *stubRoomDirectory) ListActive(_ context.Context, query ListActiveQuery) (RoomPage, error) {
 	if d.err != nil {
-		return nil, d.err
+		return RoomPage{}, d.err
 	}
-	out := make([]RoomInfo, len(d.ordered))
-	copy(out, d.ordered)
-	return out, nil
+	var matched []RoomInfo
+	for _, info := range d.ordered {
+		if !query.Query.IsZero() &&
+			!strings.Contains(strings.ToLower(info.Name), strings.ToLower(query.Query.String())) {
+			continue
+		}
+		if info.ID.Int64() <= query.After.Int64() {
+			continue
+		}
+		matched = append(matched, info)
+	}
+	if len(matched) > query.Limit {
+		return RoomPage{Rooms: matched[:query.Limit], HasMore: true}, nil
+	}
+	return RoomPage{Rooms: matched}, nil
 }

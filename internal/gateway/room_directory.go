@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
@@ -20,6 +21,23 @@ type RoomInfo struct {
 // PublicID renders the room's client-facing R… code.
 func (ri RoomInfo) PublicID() string { return ri.Code.FormatRoom() }
 
+// ListActiveQuery filters and paginates the catalogue listing. The zero values
+// of Query and After mean "no name filter" and "first page"; Limit is the page
+// size and must be positive (the handler parses and caps it at the boundary).
+type ListActiveQuery struct {
+	Query domain.RoomNameQuery
+	After id.RoomID
+	Limit int
+}
+
+// RoomPage is one page of the catalogue. HasMore reports whether at least one
+// more room follows the last entry, so the handler can emit a continuation
+// cursor.
+type RoomPage struct {
+	Rooms   []RoomInfo
+	HasMore bool
+}
+
 // RoomDirectory translates the opaque, client-facing room codes (R…) to internal
 // RoomIDs and lists rooms for the catalogue. It is the gateway's seam over
 // roomrepo, so handlers never touch the database and no internal numeric id
@@ -27,12 +45,8 @@ func (ri RoomInfo) PublicID() string { return ri.Code.FormatRoom() }
 // inactive code.
 type RoomDirectory interface {
 	Resolve(ctx context.Context, code id.PublicCode) (id.RoomID, error)
-	ListActive(ctx context.Context) ([]RoomInfo, error)
+	ListActive(ctx context.Context, query ListActiveQuery) (RoomPage, error)
 }
-
-// catalogueLimit caps GET /rooms until keyset pagination and a query filter land
-// with the discovery work.
-const catalogueLimit = 200
 
 // roomRepoDirectory is the production RoomDirectory: a read-only view of the room
 // table via roomrepo over the gateway's read pool. The gateway never creates
@@ -57,12 +71,16 @@ func (d roomRepoDirectory) Resolve(ctx context.Context, code id.PublicCode) (id.
 	return room.ID, nil
 }
 
-func (d roomRepoDirectory) ListActive(ctx context.Context) ([]RoomInfo, error) {
-	rooms, err := d.repo.ListActive(ctx, d.pool, catalogueLimit)
+func (d roomRepoDirectory) ListActive(ctx context.Context, query ListActiveQuery) (RoomPage, error) {
+	rooms, hasMore, err := d.repo.ListActive(ctx, d.pool, roomrepo.ListActiveParams{
+		Query:   query.Query,
+		AfterID: query.After,
+		Limit:   query.Limit,
+	})
 	if err != nil {
-		return nil, err
+		return RoomPage{}, err
 	}
-	return toRoomInfos(rooms), nil
+	return RoomPage{Rooms: toRoomInfos(rooms), HasMore: hasMore}, nil
 }
 
 func toRoomInfos(rooms []roomrepo.Room) []RoomInfo {

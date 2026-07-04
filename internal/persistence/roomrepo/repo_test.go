@@ -351,20 +351,133 @@ func TestFindByID_NotFound(t *testing.T) {
 	}
 }
 
-func TestListActive(t *testing.T) {
+func mustRoomNameQuery(t *testing.T, raw string) domain.RoomNameQuery {
+	t.Helper()
+	q, err := domain.NewRoomNameQuery(raw)
+	if err != nil {
+		t.Fatalf("NewRoomNameQuery(%q): %v", raw, err)
+	}
+	return q
+}
+
+func TestListActive_FirstPageWithoutFilter(t *testing.T) {
+	var gotSQL string
+	var gotArgs []any
 	fq := &fakeQuerier{query: func(sql string, args ...any) (pgx.Rows, error) {
+		gotSQL, gotArgs = sql, args
 		return &fakeRows{rows: [][]any{
 			roomValues(4, "G000000004", "General", 1, "active"),
 			roomValues(5, "H000000005", "Random", 2, "active"),
 		}}, nil
 	}}
 
-	rooms, err := New(nil).ListActive(context.Background(), fq, 0)
+	rooms, hasMore, err := New(nil).ListActive(context.Background(), fq, ListActiveParams{Limit: 2})
 	if err != nil {
 		t.Fatalf("ListActive: %v", err)
 	}
 	if len(rooms) != 2 || rooms[0].ID.Int64() != 4 || rooms[1].DisplayName != "Random" {
 		t.Fatalf("rooms = %+v", rooms)
+	}
+	// Exactly Limit rows came back, so the Limit+1 look-ahead found no next page.
+	if hasMore {
+		t.Error("hasMore = true, want false when the look-ahead row is absent")
+	}
+	if !strings.Contains(gotSQL, "status = 'active'") {
+		t.Errorf("SQL is missing the active filter: %s", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "ORDER BY id") {
+		t.Errorf("SQL is missing the keyset ordering: %s", gotSQL)
+	}
+	if strings.Contains(gotSQL, "ILIKE") || strings.Contains(gotSQL, "id >") {
+		t.Errorf("SQL carries filter/cursor clauses for zero params: %s", gotSQL)
+	}
+	// The look-ahead row is the only argument: LIMIT Limit+1.
+	if len(gotArgs) != 1 || gotArgs[0].(int) != 3 {
+		t.Errorf("args = %v, want [3] (Limit+1)", gotArgs)
+	}
+}
+
+func TestListActive_LookAheadRowSetsHasMore(t *testing.T) {
+	fq := &fakeQuerier{query: func(sql string, args ...any) (pgx.Rows, error) {
+		return &fakeRows{rows: [][]any{
+			roomValues(4, "G000000004", "General", 1, "active"),
+			roomValues(5, "H000000005", "Random", 2, "active"),
+			roomValues(6, "J000000006", "Lounge", 1, "active"),
+		}}, nil
+	}}
+
+	rooms, hasMore, err := New(nil).ListActive(context.Background(), fq, ListActiveParams{Limit: 2})
+	if err != nil {
+		t.Fatalf("ListActive: %v", err)
+	}
+	// The look-ahead row proves a next page exists but must not be returned.
+	if len(rooms) != 2 || rooms[1].ID.Int64() != 5 {
+		t.Fatalf("rooms = %+v, want exactly the first 2", rooms)
+	}
+	if !hasMore {
+		t.Error("hasMore = false, want true when the look-ahead row is present")
+	}
+}
+
+func TestListActive_FilterAndCursorClauses(t *testing.T) {
+	var gotSQL string
+	var gotArgs []any
+	fq := &fakeQuerier{query: func(sql string, args ...any) (pgx.Rows, error) {
+		gotSQL, gotArgs = sql, args
+		return &fakeRows{}, nil
+	}}
+
+	_, _, err := New(nil).ListActive(context.Background(), fq, ListActiveParams{
+		Query:   mustRoomNameQuery(t, "Gen"),
+		AfterID: mustRoomID(t, 4),
+		Limit:   5,
+	})
+	if err != nil {
+		t.Fatalf("ListActive: %v", err)
+	}
+	if !strings.Contains(gotSQL, "display_name ILIKE $1") {
+		t.Errorf("SQL is missing the name filter: %s", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "id > $2") {
+		t.Errorf("SQL is missing the keyset cursor: %s", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "LIMIT $3") {
+		t.Errorf("SQL is missing the limit: %s", gotSQL)
+	}
+	if len(gotArgs) != 3 || gotArgs[0].(string) != "%Gen%" || gotArgs[1].(int64) != 4 || gotArgs[2].(int) != 6 {
+		t.Errorf("args = %v, want [%%Gen%% 4 6]", gotArgs)
+	}
+}
+
+func TestListActive_EscapesLikeWildcards(t *testing.T) {
+	// LIKE's wildcards and its escape character in the fragment must match
+	// literally, or a q of "%" would match every room.
+	var gotArgs []any
+	fq := &fakeQuerier{query: func(sql string, args ...any) (pgx.Rows, error) {
+		gotArgs = args
+		return &fakeRows{}, nil
+	}}
+
+	_, _, err := New(nil).ListActive(context.Background(), fq, ListActiveParams{
+		Query: mustRoomNameQuery(t, `100%_a\b`),
+		Limit: 5,
+	})
+	if err != nil {
+		t.Fatalf("ListActive: %v", err)
+	}
+	want := `%100\%\_a\\b%`
+	if gotArgs[0].(string) != want {
+		t.Errorf("pattern = %q, want %q", gotArgs[0], want)
+	}
+}
+
+func TestListActive_PropagatesQueryError(t *testing.T) {
+	boom := errors.New("connection reset")
+	fq := &fakeQuerier{query: func(string, ...any) (pgx.Rows, error) { return nil, boom }}
+
+	_, _, err := New(nil).ListActive(context.Background(), fq, ListActiveParams{Limit: 5})
+	if !errors.Is(err, boom) {
+		t.Fatalf("ListActive err = %v, want wrapped %v", err, boom)
 	}
 }
 
