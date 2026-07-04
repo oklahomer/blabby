@@ -16,6 +16,7 @@ const (
 	ColorSubtle        = lipgloss.Color("245") // placeholder / hint text
 	ColorError         = lipgloss.Color("203") // login error rows
 	ColorAccent        = lipgloss.Color("212") // user / id labels
+	ColorSuccess       = lipgloss.Color("78")  // success notices ("account verified")
 )
 
 // PaneBorder returns the border style for a pane. When focused, the
@@ -54,6 +55,11 @@ func Subtle() lipgloss.Style {
 // Error returns the style used for inline error rows.
 func Error() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(ColorError)
+}
+
+// Success returns the style used for inline success notices.
+func Success() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(ColorSuccess)
 }
 
 // Label returns the style used for labelled rows.
