@@ -65,11 +65,11 @@ func (g *Gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Password:    req.Password,
 	})
 	if err != nil {
-		// A credential rejection (unknown email, wrong password, non-active
-		// account) is reported uniformly as invalid credentials to prevent user
-		// enumeration. An infrastructure failure (e.g. the account store is
-		// unreachable) is a 500, not a misleading 401. Never log the mail address
-		// or password.
+		// Most credential rejections are reported uniformly as invalid credentials
+		// to prevent user enumeration. The one distinguished case is a pending
+		// account after a correct password proves ownership; infrastructure
+		// failures are 500s, not misleading 401s. Never log the mail address or
+		// password.
 		if errors.Is(err, auth.ErrAccountPending) {
 			// The password verified, so naming the pending state reveals nothing
 			// an account owner does not already know; the client uses the

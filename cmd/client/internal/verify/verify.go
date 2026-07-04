@@ -7,9 +7,7 @@
 package verify
 
 import (
-	"regexp"
 	"strings"
-	"unicode"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,8 +21,22 @@ import (
 // modalWidth is the width of the rendered modal box, in columns.
 const modalWidth = 54
 
-// pinPattern mirrors the server's PIN rule: exactly six digits.
-var pinPattern = regexp.MustCompile(`^[0-9]{6}$`)
+// validPIN mirrors the server's PIN rule: exactly six ASCII digits.
+func validPIN(pin string) bool {
+	if len(pin) != 6 {
+		return false
+	}
+	for i := range pin {
+		if !isASCIIDigit(pin[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIIDigit(b byte) bool {
+	return b >= '0' && b <= '9'
+}
 
 // Submitter is the function the modal calls when the user presses enter with
 // a well-formed PIN. It is the seam through which the root Model wires in
@@ -168,7 +180,7 @@ func (m Model) handleKey(k tea.KeyMsg) (modal.Modal, tea.Cmd) {
 		return m, m.resend(m.email)
 	case "enter":
 		pin := strings.TrimSpace(m.pin.Value())
-		if !pinPattern.MatchString(pin) {
+		if !validPIN(pin) {
 			m.headline = "Enter the 6-digit code from the email"
 			m.detail = ""
 			m.notice = ""
@@ -181,8 +193,10 @@ func (m Model) handleKey(k tea.KeyMsg) (modal.Modal, tea.Cmd) {
 		return m, m.submit(m.email, pin)
 	}
 
-	if len(k.Runes) == 1 && !unicode.IsDigit(k.Runes[0]) {
-		return m, nil
+	for _, r := range k.Runes {
+		if r < '0' || r > '9' {
+			return m, nil
+		}
 	}
 	updated, cmd := m.pin.Update(k)
 	m.pin = updated

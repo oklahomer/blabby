@@ -77,16 +77,16 @@ func NewJWTAuthenticator(signingKey []byte, verifier CredentialVerifier, resolve
 
 // Authenticate verifies the email/password and returns a signed JWT whose subject
 // is the user's opaque public_code (U…), never the internal numeric id. It
-// preserves the verifier's error classification for the caller: a credential
-// rejection wraps ErrInvalidCredentials (the gateway answers a generic 401), while
-// an infrastructure failure is returned with its detail intact (answered with a
-// 500). Scrubbing detail from the client response is the gateway handler's job.
+// preserves the verifier's error classification for the caller: generic
+// credential rejections wrap ErrInvalidCredentials, pending accounts wrap
+// ErrAccountPending, and infrastructure failures keep their detail intact.
+// Scrubbing detail from the client response is the gateway handler's job.
 func (a *JWTAuthenticator) Authenticate(ctx context.Context, params AuthParams) (*Result, error) {
 	user, err := a.verifier.VerifyCredentials(ctx, params.MailAddress, params.Password)
 	if err != nil {
-		// Preserve the verifier's classification: ErrInvalidCredentials stays
-		// matchable so the caller answers a generic 401, while an infrastructure
-		// failure keeps its detail for the caller to log and answer with a 500.
+		// Preserve the verifier's classification so the gateway can distinguish a
+		// pending account from a generic credential rejection, while infrastructure
+		// failures stay available for logging and 500 mapping.
 		return nil, fmt.Errorf("authenticate: %w", err)
 	}
 

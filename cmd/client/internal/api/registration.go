@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -164,20 +163,14 @@ func postRegistrationJSON(client *http.Client, server, path string, payload any,
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	raw, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, defaultReadLimitBytes))
+	raw, err := readBoundedResponseBody(resp.Body)
 	if err != nil {
 		return registrationOutcome{}, fmt.Errorf("read response: %w", err)
 	}
 
 	outcome := registrationOutcome{httpStatus: resp.StatusCode}
 	if resp.StatusCode >= http.StatusBadRequest {
-		var env ErrorEnvelope
-		if err := json.Unmarshal(raw, &env); err != nil || env.Error.Status == "" {
-			outcome.message = fmt.Sprintf("server returned %s", resp.Status)
-		} else {
-			outcome.status = env.Error.Status
-			outcome.message = env.Error.Message
-		}
+		outcome.status, outcome.message = decodeErrorEnvelope(raw, resp.Status)
 	}
 	return outcome, nil
 }

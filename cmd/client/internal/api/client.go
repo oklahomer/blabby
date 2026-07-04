@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -176,11 +175,7 @@ func LoginCmd(client *http.Client, server, email, password string, timeout time.
 		}
 		defer func() { _ = resp.Body.Close() }()
 
-		// Cap the body we'll read so a hostile or buggy server cannot
-		// stall the TUI with an unbounded payload. MaxBytesReader (rather
-		// than a silent LimitReader truncation) surfaces the overrun as a
-		// typed error, classified as a protocol violation below.
-		raw, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, defaultReadLimitBytes))
+		raw, err := readBoundedResponseBody(resp.Body)
 		if err != nil {
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
@@ -197,18 +192,10 @@ func LoginCmd(client *http.Client, server, email, password string, timeout time.
 			return LoginSucceeded{Token: lr.Token, Email: strings.TrimSpace(email)}
 		}
 
-		var env ErrorEnvelope
-		if err := json.Unmarshal(raw, &env); err != nil || env.Error.Status == "" {
-			return LoginRejected{
-				Status:     "",
-				Message:    fmt.Sprintf("server returned %s", resp.Status),
-				HTTPStatus: resp.StatusCode,
-				Email:      strings.TrimSpace(email),
-			}
-		}
+		status, message := decodeErrorEnvelope(raw, resp.Status)
 		return LoginRejected{
-			Status:     env.Error.Status,
-			Message:    env.Error.Message,
+			Status:     status,
+			Message:    message,
 			HTTPStatus: resp.StatusCode,
 			Email:      strings.TrimSpace(email),
 		}

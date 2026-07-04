@@ -60,8 +60,10 @@ func NewUserRepoDirectory(pool postgres.Querier) *UserRepoDirectory {
 
 // VerifyCredentials looks up the account by normalized email and checks the
 // password under the stored bcrypt scheme. It returns auth.ErrInvalidCredentials
-// for every rejection (unknown email, wrong password, non-active account) so the
-// cases are indistinguishable, and a wrapped error for an infrastructure failure.
+// for rejections that must stay indistinguishable (unknown email, wrong password,
+// malformed email, or disabled account). A pending account is reported as
+// auth.ErrAccountPending only after the password verifies, so revealing that
+// state is not an enumeration oracle. Infrastructure failures are wrapped.
 // On a successful login whose stored hash is below the target cost it re-hashes
 // synchronously, best-effort.
 func (d *UserRepoDirectory) VerifyCredentials(ctx context.Context, mailAddress, password string) (auth.VerifiedUser, error) {
