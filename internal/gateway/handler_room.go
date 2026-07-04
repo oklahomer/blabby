@@ -227,8 +227,9 @@ func (g *Gateway) requireRoomID(w http.ResponseWriter, r *http.Request, endpoint
 }
 
 // roomBodyError carries both the user-facing gateway ErrorDetail and a
-// coarse classifier for the structured-log "reason" field. It is internal
-// to this file; decodeSendMessageRequest is the only producer.
+// coarse classifier for the structured-log "reason" field. It is produced
+// by the room handlers' request parsers (decodeSendMessageRequest,
+// parseRoomListQuery).
 //
 // The classifier is distinct from the canonical status string so
 // operators can grep logs by cause ("malformed_body" vs "trailing_garbage"
