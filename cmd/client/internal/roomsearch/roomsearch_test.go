@@ -513,3 +513,67 @@ func TestPageAndEdgeNavigation(t *testing.T) {
 		t.Fatalf("home cursor = %d, want 0", m.cursor)
 	}
 }
+
+func TestAppendRacingReplaceIsDropped(t *testing.T) {
+	// The user pages the more row, then a debounced same-query replace lands
+	// with different content before the append arrives. The append no longer
+	// continues the listing on screen and must be dropped whole.
+	r := &recorder{}
+	m := New(r.submit, r.load, "http://localhost:8080")
+	m, _ = updateAs(t, m, api.RoomsLoaded{
+		Rooms: []api.Room{{ID: "a", Name: "A"}},
+		Next:  "cursor-1",
+	})
+	next, _ := m.Update(keyMsg("down")) // onto the more row
+	m = asModel(t, next)
+	next, _ = m.Update(keyMsg("enter")) // append for cursor-1 now in flight
+	m = asModel(t, next)
+
+	// The replace lands first: fresh first page, cursor moved.
+	m, _ = updateAs(t, m, api.RoomsLoaded{
+		Rooms: []api.Room{{ID: "a2", Name: "A2"}},
+		Next:  "cursor-9",
+	})
+
+	// The stale append arrives for the old cursor.
+	next, _ = m.Update(api.RoomsLoaded{
+		Rooms: []api.Room{{ID: "b", Name: "B"}},
+		Next:  "cursor-2", After: "cursor-1",
+	})
+	got := asModel(t, next)
+	if len(got.all) != 1 || got.all[0].ID != "a2" {
+		t.Fatalf("stale append corrupted the list: %#v", got.all)
+	}
+	if got.next != "cursor-9" {
+		t.Fatalf("next = %q, want the fresh listing's cursor", got.next)
+	}
+	if got.loadingMore {
+		t.Fatal("loadingMore must settle when the stale append is dropped")
+	}
+}
+
+func TestMoreRowIgnoredWhileFilterOutrunsListing(t *testing.T) {
+	// The user typed past the loaded fragment; a debounced replace is on its
+	// way, so paging the outgoing listing is refused.
+	r := &recorder{}
+	m := New(r.submit, r.load, "http://localhost:8080")
+	m, _ = updateAs(t, m, api.RoomsLoaded{
+		Rooms: []api.Room{{ID: "alpha", Name: "Alpha"}},
+		Next:  "cursor-1",
+	})
+	for _, ch := range "alp" {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		m = asModel(t, next)
+	}
+	next, _ := m.Update(keyMsg("down"))
+	m = asModel(t, next)
+	if !m.onMoreRow(Visible(m.all, m.filter.Value())) {
+		t.Fatalf("setup: cursor = %d, want the more row", m.cursor)
+	}
+	loadsBefore := r.loadCount
+	next, cmd := m.Update(keyMsg("enter"))
+	m = asModel(t, next)
+	if cmd != nil || r.loadCount != loadsBefore || m.loadingMore {
+		t.Fatal("paging must be refused while the filter has outrun the listing")
+	}
+}

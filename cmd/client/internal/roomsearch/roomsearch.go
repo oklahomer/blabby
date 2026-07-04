@@ -81,7 +81,8 @@ type searchTick struct {
 // Model is the search modal state. It implements modal.Modal.
 type Model struct {
 	filter      textinput.Model // focused; placeholder "filter…"
-	all         []api.Room      // last-loaded server page(s) for the current query
+	all         []api.Room      // last-loaded server page(s) for loadedQuery
+	loadedQuery string          // the fragment all was fetched with — the listing's identity
 	next        string          // server cursor for the next page ("" = exhausted)
 	cursor      int             // index into the row domain: visible rooms + the more row
 	phase       phase
@@ -138,15 +139,25 @@ func (m Model) Update(msg tea.Msg) (modal.Modal, tea.Cmd) {
 		}
 		return m, m.loadAgain(api.RoomQuery{Query: m.trimmedFilter()})
 	case api.RoomsLoaded:
-		// A page for a fragment the user has typed past is stale: results
-		// for the current fragment are already on their way.
-		if v.Query != m.trimmedFilter() {
-			return m, nil
-		}
 		if v.After != "" {
+			// An append belongs to the listing on screen only if it continues
+			// the same fragment at the current cursor. Anything else — the
+			// user typed past it, or a first-page replace landed while the
+			// page request was in flight — is a stale page whose rooms would
+			// duplicate or gap the fresh list.
+			if v.Query != m.loadedQuery || v.After != m.next {
+				m.loadingMore = false
+				return m, nil
+			}
 			m.all = append(m.all, v.Rooms...)
 		} else {
+			// A first page for a fragment the user has typed past is stale:
+			// results for the current fragment are already on their way.
+			if v.Query != m.trimmedFilter() {
+				return m, nil
+			}
 			m.all = v.Rooms
+			m.loadedQuery = v.Query
 			m.cursor = 0
 		}
 		m.next = v.Next
@@ -245,11 +256,16 @@ func (m Model) handleKey(k tea.KeyMsg) (modal.Modal, tea.Cmd) {
 		return m, nil
 	case "enter":
 		if m.onMoreRow(visible) {
-			if m.loadingMore {
+			// Paging is a continuation of the listing on screen, so it fetches
+			// with loadedQuery, not the live filter. When the user has typed
+			// past the loaded fragment, a debounced replace is already on its
+			// way and paging the outgoing listing would only produce a page
+			// the RoomsLoaded guard drops.
+			if m.loadingMore || m.trimmedFilter() != m.loadedQuery {
 				return m, nil
 			}
 			m.loadingMore = true
-			return m, m.loadAgain(api.RoomQuery{Query: m.trimmedFilter(), After: m.next})
+			return m, m.loadAgain(api.RoomQuery{Query: m.loadedQuery, After: m.next})
 		}
 		if len(visible) == 0 {
 			return m, nil
