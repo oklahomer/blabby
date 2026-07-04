@@ -62,6 +62,15 @@ func mustUserRef(t *testing.T, rawID int64, name string) id.UserRef {
 	return ref
 }
 
+func mustUserID(t *testing.T, v int64) id.UserID {
+	t.Helper()
+	uid, err := id.NewUserID(v)
+	if err != nil {
+		t.Fatalf("NewUserID(%d): %v", v, err)
+	}
+	return uid
+}
+
 func mustRoomID(t *testing.T, v int64) id.RoomID {
 	t.Helper()
 	rid, err := id.NewRoomID(v)
@@ -125,6 +134,65 @@ func TestAppendMembership(t *testing.T) {
 				t.Errorf("append SQL must cast the type param to the enum: %s", gotSQL)
 			}
 		})
+	}
+}
+
+func TestAppendMessage(t *testing.T) {
+	occurred := time.Unix(1700000000, 0).UTC()
+	var gotSQL string
+	var gotArgs []any
+	fq := &fakeQuerier{queryRow: func(sql string, args ...any) pgx.Row {
+		gotSQL, gotArgs = sql, args
+		return fakeRow{scan: func(dest ...any) error {
+			*(dest[0].(*time.Time)) = occurred
+			return nil
+		}}
+	}}
+
+	eventID, ts, err := New(stubIDSource{id: 9002}).AppendMessage(
+		context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 1), "hello 世界")
+	if err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if eventID.Int64() != 9002 {
+		t.Errorf("event id = %d, want 9002 (minted)", eventID.Int64())
+	}
+	if !ts.Equal(occurred) {
+		t.Errorf("occurred_at = %v, want %v (server clock)", ts, occurred)
+	}
+	// args: id, room_id, user_id, payload — the type is a literal in the SQL.
+	if gotArgs[0].(int64) != 9002 || gotArgs[1].(int64) != 4 || gotArgs[2].(int64) != 1 {
+		t.Errorf("args = %v, want [9002 4 1 <payload>]", gotArgs)
+	}
+	var payload messagePayload
+	if err := json.Unmarshal(gotArgs[3].([]byte), &payload); err != nil {
+		t.Fatalf("payload unmarshal: %v", err)
+	}
+	if payload.Text != "hello 世界" {
+		t.Errorf("payload.text = %q, want the message text", payload.Text)
+	}
+	// occurred_at is the server clock; client_key stays null until send
+	// idempotency is wired.
+	if !strings.Contains(gotSQL, "'message_posted'") || !strings.Contains(gotSQL, "now()") ||
+		strings.Contains(gotSQL, "client_key") {
+		t.Errorf("unexpected append SQL: %s", gotSQL)
+	}
+}
+
+func TestAppendMessage_MintErrorSkipsDB(t *testing.T) {
+	sentinel := errors.New("lease expired")
+	called := false
+	fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
+		called = true
+		return fakeRow{scan: func(...any) error { return nil }}
+	}}
+	_, _, err := New(stubIDSource{err: sentinel}).AppendMessage(
+		context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 1), "hello")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("AppendMessage: got %v, want the mint error", err)
+	}
+	if called {
+		t.Error("must not touch the DB when minting fails")
 	}
 }
 

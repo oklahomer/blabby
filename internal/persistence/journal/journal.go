@@ -27,6 +27,41 @@ type Journal struct {
 // New returns a Journal that mints event ids from ids.
 func New(ids IDSource) *Journal { return &Journal{ids: ids} }
 
+const appendMessageSQL = `
+INSERT INTO event (id, room_id, type, user_id, occurred_at, payload)
+VALUES ($1, $2, 'message_posted', $3, now(), $4)
+RETURNING occurred_at`
+
+// AppendMessage appends a message_posted event authored by author in roomID and
+// returns the new event's id and server-assigned occurred_at. The id is minted
+// from the Snowflake source; occurred_at is the DB clock (display-only — the
+// timeline orders by id). client_key is left null: send idempotency is a
+// separate arc (the schema and unique index are already in place for it).
+func (j *Journal) AppendMessage(ctx context.Context, q postgres.Querier, roomID id.RoomID, author id.UserID, text string) (id.EventID, time.Time, error) {
+	rawID, err := j.ids.Next()
+	if err != nil {
+		return id.EventID{}, time.Time{}, fmt.Errorf("journal: mint event id: %w", err)
+	}
+	eventID, err := id.NewEventID(rawID)
+	if err != nil {
+		return id.EventID{}, time.Time{}, fmt.Errorf("journal: mint event id: %w", err)
+	}
+
+	payload, err := json.Marshal(messagePayload{Text: text})
+	if err != nil {
+		return id.EventID{}, time.Time{}, fmt.Errorf("journal: marshal payload: %w", err)
+	}
+
+	var occurredAt time.Time
+	err = q.QueryRow(ctx, appendMessageSQL,
+		eventID.Int64(), roomID.Int64(), author.Int64(), payload,
+	).Scan(&occurredAt)
+	if err != nil {
+		return id.EventID{}, time.Time{}, fmt.Errorf("journal: append message: %w", err)
+	}
+	return eventID, occurredAt, nil
+}
+
 const appendMembershipSQL = `
 INSERT INTO event (id, room_id, type, user_id, occurred_at, payload)
 VALUES ($1, $2, $3::event_type, $4, now(), $5)

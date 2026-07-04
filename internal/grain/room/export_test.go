@@ -24,6 +24,10 @@ func (g *Grain) SetLoader(l RoomLoader) { g.loader = l }
 // member cache from the stub.
 func (g *Grain) SetMembershipStore(s MembershipStore) { g.membership = s }
 
+// SetMessageStore injects a MessageStore for tests; production wires it via
+// NewKind's WithMessages option.
+func (g *Grain) SetMessageStore(s MessageStore) { g.messages = s }
+
 // SetNotifier injects a userNotifier for tests; production code uses NewKind.
 func (g *Grain) SetNotifier(n userNotifier) { g.notifier = n }
 

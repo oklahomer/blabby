@@ -26,8 +26,8 @@ const (
 // GrainDeps bundles the collaborators the hosted grains need. Grouped into a
 // struct (not positional args) so call sites read by field name as the set
 // grows. RoomLoader is required; the persistence-backed fields may be nil, in
-// which case the grains keep membership in memory only (the behavior tests rely
-// on) — production wires all four.
+// which case the grains keep membership and messages in memory only (the
+// behavior tests rely on) — production wires them all.
 type GrainDeps struct {
 	// Directory seeds each User grain activation's display name.
 	Directory user.Directory
@@ -35,6 +35,8 @@ type GrainDeps struct {
 	RoomLoader room.RoomLoader
 	// Membership is the Room grain's DB-authoritative membership store.
 	Membership room.MembershipStore
+	// Messages is the Room grain's durable message store.
+	Messages room.MessageStore
 	// JoinedRooms hydrates each User grain's joined-rooms cache on activation.
 	JoinedRooms user.JoinedRoomLoader
 	// Sweeper runs the pending-account GC for the singleton maintenance grain.
@@ -50,7 +52,7 @@ type GrainDeps struct {
 func Kinds(deps GrainDeps) []*cluster.Kind {
 	return []*cluster.Kind{
 		user.NewKind(deps.Directory, user.WithJoinedRooms(deps.JoinedRooms)),
-		room.NewKind(deps.RoomLoader, room.WithMembership(deps.Membership)),
+		room.NewKind(deps.RoomLoader, room.WithMembership(deps.Membership), room.WithMessages(deps.Messages)),
 		maintenance.NewKind(deps.Sweeper),
 	}
 }

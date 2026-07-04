@@ -26,7 +26,10 @@ func TestJournalIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	defer pool.Close()
+	// Registered as the first cleanup so it runs after (LIFO) the row-deleting
+	// cleanups below; a defer would close the pool before t.Cleanup callbacks
+	// fire, turning every delete into a silent no-op.
+	t.Cleanup(pool.Close)
 
 	// A time-based id avoids colliding with seed rows or a prior run.
 	rawID := time.Now().UnixNano()
@@ -60,5 +63,38 @@ func TestJournalIntegration(t *testing.T) {
 	}
 	if gotType != "member_joined" || gotUserID != 1 || gotPayload != "alice" {
 		t.Errorf("event row = {type:%q user_id:%d display_name:%q}, want {member_joined 1 alice}", gotType, gotUserID, gotPayload)
+	}
+
+	// AppendMessage persists a message_posted row whose payload carries the text
+	// under the key the PGroonga search index covers, with a null client_key.
+	msgID := rawID + 1
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM event WHERE id = $1", msgID)
+	})
+	msgEventID, msgOccurredAt, err := New(stubIDSource{id: msgID}).AppendMessage(
+		ctx, pool, mustRoomID(t, 4), mustUserID(t, 1), "hello 世界")
+	if err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if msgEventID.Int64() != msgID {
+		t.Fatalf("message event id = %d, want %d", msgEventID.Int64(), msgID)
+	}
+	if msgOccurredAt.IsZero() {
+		t.Fatal("message occurred_at is zero, want the server clock")
+	}
+	var (
+		gotMsgType string
+		gotText    string
+		gotKeyNull bool
+	)
+	err = pool.QueryRow(ctx,
+		"SELECT type::text, payload->>'text', client_key IS NULL FROM event WHERE id = $1", msgID,
+	).Scan(&gotMsgType, &gotText, &gotKeyNull)
+	if err != nil {
+		t.Fatalf("read back message event: %v", err)
+	}
+	if gotMsgType != "message_posted" || gotText != "hello 世界" || !gotKeyNull {
+		t.Errorf("message row = {type:%q text:%q client_key_null:%t}, want {message_posted, the text, true}",
+			gotMsgType, gotText, gotKeyNull)
 	}
 }

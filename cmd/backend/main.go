@@ -127,6 +127,7 @@ func run(dbCfg postgres.Config, cc clusterboot.Config) error {
 		Directory:   user.NewRepoDirectory(pool),
 		RoomLoader:  room.NewRoomRepoLoader(pool),
 		Membership:  room.NewMembershipStore(pool, leaseManager),
+		Messages:    room.NewMessageStore(pool, leaseManager),
 		JoinedRooms: user.NewJoinedRoomLoader(pool),
 		Sweeper:     sweeper,
 	}
