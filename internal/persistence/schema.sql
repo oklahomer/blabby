@@ -77,6 +77,12 @@ CREATE TABLE IF NOT EXISTS room (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Catalogue search: GET /rooms' q filter runs display_name ILIKE '%…%', whose
+-- leading wildcard no b-tree can serve. PGroonga's operator class covers ILIKE
+-- directly (with an exact recheck) and, unlike trigram indexes, stays effective
+-- for the short CJK fragments room names invite.
+CREATE INDEX IF NOT EXISTS room_display_name_pgroonga_idx
+    ON room USING pgroonga (display_name);
 
 -- room_membership: current-state only (a leave deletes the row). The Room grain is
 -- the sole writer. The partial unique index enforces at-most-one owner; the
