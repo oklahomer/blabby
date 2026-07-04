@@ -226,31 +226,32 @@ func (g *Gateway) requireRoomID(w http.ResponseWriter, r *http.Request, endpoint
 	return roomID, true
 }
 
-// roomBodyError carries both the user-facing gateway ErrorDetail and a
-// coarse classifier for the structured-log "reason" field. It is internal
-// to this file; decodeSendMessageRequest is the only producer.
+// roomRequestError carries both the user-facing gateway ErrorDetail and a
+// coarse classifier for the structured-log "reason" field. It is produced
+// by the room handlers' request parsers (decodeSendMessageRequest,
+// parseRoomListQuery).
 //
 // The classifier is distinct from the canonical status string so
 // operators can grep logs by cause ("malformed_body" vs "trailing_garbage"
 // vs "empty_text" etc.) — the status string alone collapses every 400
 // to "INVALID_REQUEST".
-type roomBodyError struct {
+type roomRequestError struct {
 	reason string
 	detail ErrorDetail
 }
 
-func (e *roomBodyError) Error() string { return e.detail.Message }
+func (e *roomRequestError) Error() string { return e.detail.Message }
 
 // decodeSendMessageRequest parses and validates the POST body for
 // handleRoomSendMessage. It returns the parsed request on success, or a
-// roomBodyError describing the rejection cause on failure.
+// roomRequestError describing the rejection cause on failure.
 //
 // The MaxBytesReader is installed on r.Body before decoding so an
 // oversize body surfaces as *http.MaxBytesError at decode time and is
 // mapped to a "payload_too_large" / 413 response.
-func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (*sendMessageRequest, *roomBodyError) {
+func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (*sendMessageRequest, *roomRequestError) {
 	if !contentTypeIsJSON(r.Header.Get("Content-Type")) {
-		return nil, &roomBodyError{
+		return nil, &roomRequestError{
 			reason: "content_type",
 			detail: ErrInvalidRequest("content-type must be application/json"),
 		}
@@ -262,30 +263,30 @@ func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (*sendMess
 	if err := dec.Decode(&req); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			return nil, &roomBodyError{
+			return nil, &roomRequestError{
 				reason: "payload_too_large",
 				detail: ErrPayloadTooLarge("request body exceeds maximum size"),
 			}
 		}
-		return nil, &roomBodyError{
+		return nil, &roomRequestError{
 			reason: "malformed_body",
 			detail: ErrInvalidRequest("malformed request body"),
 		}
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return nil, &roomBodyError{
+		return nil, &roomRequestError{
 			reason: "trailing_garbage",
 			detail: ErrInvalidRequest("malformed request body"),
 		}
 	}
 	if strings.TrimSpace(req.Text) == "" {
-		return nil, &roomBodyError{
+		return nil, &roomRequestError{
 			reason: "empty_text",
 			detail: ErrInvalidRequest("text is required"),
 		}
 	}
 	if len(req.Text) > maxRoomMessageTextBytes {
-		return nil, &roomBodyError{
+		return nil, &roomRequestError{
 			reason: "text_too_long",
 			detail: ErrInvalidRequest("text exceeds maximum length"),
 		}

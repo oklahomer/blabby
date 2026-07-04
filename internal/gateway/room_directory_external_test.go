@@ -2,6 +2,7 @@ package gateway_test
 
 import (
 	"context"
+	"strings"
 
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/id"
@@ -46,8 +47,25 @@ func (d *stubRoomDirectory) Resolve(_ context.Context, code id.PublicCode) (id.R
 	return info.ID, nil
 }
 
-func (d *stubRoomDirectory) ListActive(_ context.Context) ([]gateway.RoomInfo, error) {
-	out := make([]gateway.RoomInfo, len(d.ordered))
-	copy(out, d.ordered)
-	return out, nil
+// ListActive mirrors the production contract in memory: case-insensitive
+// substring filter, id-keyset cursor, and a look-ahead HasMore.
+func (d *stubRoomDirectory) ListActive(_ context.Context, query gateway.ListActiveQuery) (gateway.RoomPage, error) {
+	needle := ""
+	if !query.Query.IsZero() {
+		needle = strings.ToLower(query.Query.String())
+	}
+	var matched []gateway.RoomInfo
+	for _, info := range d.ordered {
+		if needle != "" && !strings.Contains(strings.ToLower(info.Name), needle) {
+			continue
+		}
+		if info.ID.Int64() <= query.After.Int64() {
+			continue
+		}
+		matched = append(matched, info)
+	}
+	if len(matched) > query.Limit {
+		return gateway.RoomPage{Rooms: matched[:query.Limit], HasMore: true}, nil
+	}
+	return gateway.RoomPage{Rooms: matched}, nil
 }

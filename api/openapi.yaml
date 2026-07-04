@@ -300,22 +300,74 @@ paths:
       tags:
         - Rooms
       summary: List the available rooms.
-      description: Returns the catalogue of rooms a client can join.
+      description: |
+        Returns one page of the catalogue of rooms a client can join, in
+        creation order. `q` narrows the page to rooms whose display name
+        contains the fragment (case-insensitive, literal — no wildcard
+        syntax). Pages continue by echoing the response's `next` cursor back
+        as `after`; a `null` `next` means the listing is exhausted.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            x-max-utf8-bytes: 64
+          description: |
+            A display-name search fragment, following the same character rules
+            as room names: 1-64 bytes of printable characters. A blank value
+            is treated as absent.
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            The keyset cursor: the `R…` id of the last room on the previous
+            page, as returned in `next`. Only rooms created after it are
+            listed. A cursor that matches no active room is rejected with a
+            400; restart from the first page.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: The page size.
       responses:
         '200':
-          description: The room catalogue.
+          description: One page of the room catalogue.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RoomListResponse'
+                $ref: '#/components/schemas/RoomCataloguePage'
               example:
                 rooms:
                   - id: RG000000004
                     name: General
                   - id: RH000000005
                     name: Random
+                next: null
+        '400':
+          description: |
+            `q` was not a valid name fragment, `after` was malformed or matched
+            no active room, or `limit` was not an integer between 1 and 200.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4001
+                  status: INVALID_REQUEST
+                  message: after references an unknown room
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
     post:
       operationId: createRoom
       tags:
@@ -841,9 +893,27 @@ components:
       properties:
         rooms:
           type: array
-          description: The rooms, as descriptors. Used for both the catalogue and the caller's joined rooms.
+          description: The caller's joined rooms, as descriptors.
           items:
             $ref: '#/components/schemas/RoomDescriptor'
+    RoomCataloguePage:
+      type: object
+      required:
+        - rooms
+        - next
+      properties:
+        rooms:
+          type: array
+          description: One page of the catalogue, as descriptors in creation order.
+          items:
+            $ref: '#/components/schemas/RoomDescriptor'
+        next:
+          type:
+            - string
+            - 'null'
+          description: |
+            The `after` value for the next page — the id of the last room in
+            `rooms` — or `null` when the listing is exhausted.
     RoomDescriptor:
       type: object
       required:
