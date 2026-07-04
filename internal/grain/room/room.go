@@ -531,11 +531,8 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 		return postErr(errcode.RoomNotMember, "not a member of this room"), nil
 	}
 
-	// Refresh the cached name from the value carried on this message, so the
-	// room's roster reflects the sender's current display name.
-	g.state.refreshMember(sender)
-
-	// Fail-closed: the message is cached and fanned out only once it is
+	// Fail-closed: every state change — the roster's display-name refresh, the
+	// recent-message cache, the fan-out — happens only once the message is
 	// durable. Without a store (memory-only unit tests) the grain clock stands
 	// in for the DB's occurred_at.
 	evt, err := g.recordMessage(ctx, userID, req.GetText())
@@ -546,6 +543,9 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 	if evt.IsZero() {
 		timestamp = g.now()
 	}
+	// Refresh the cached name from the value carried on this message, so the
+	// room's roster reflects the sender's current display name.
+	g.state.refreshMember(sender)
 	g.state.recordMessage(chatMessage{
 		senderID:  userID,
 		text:      req.GetText(),
