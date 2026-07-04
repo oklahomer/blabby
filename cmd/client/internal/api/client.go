@@ -45,14 +45,22 @@ type LoginSucceeded struct {
 	Email string
 }
 
+// StatusAccountPending is the login rejection status for a correct password
+// against an account that has not completed email verification. The root
+// Model routes it to the verify modal instead of rendering it as an error.
+const StatusAccountPending = "AUTH_ACCOUNT_PENDING"
+
 // LoginRejected reports that the server returned a parseable error
 // envelope. Status is the gateway's status string (e.g.
 // AUTH_INVALID_TOKEN); Message is the server-supplied fallback text
-// used when the status is unknown to the client.
+// used when the status is unknown to the client. Email echoes the
+// attempted address so the pending-account route can hand it to the
+// verify modal.
 type LoginRejected struct {
 	Status     string
 	Message    string
 	HTTPStatus int
+	Email      string
 }
 
 // LoginTransportError reports a network-level failure before the
@@ -195,12 +203,14 @@ func LoginCmd(client *http.Client, server, email, password string, timeout time.
 				Status:     "",
 				Message:    fmt.Sprintf("server returned %s", resp.Status),
 				HTTPStatus: resp.StatusCode,
+				Email:      strings.TrimSpace(email),
 			}
 		}
 		return LoginRejected{
 			Status:     env.Error.Status,
 			Message:    env.Error.Message,
 			HTTPStatus: resp.StatusCode,
+			Email:      strings.TrimSpace(email),
 		}
 	}
 }

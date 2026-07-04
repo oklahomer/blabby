@@ -18,7 +18,9 @@ import (
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/info"
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/mainview"
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/rooms"
+	"github.com/oklahomer/blabby/cmd/client/internal/register"
 	"github.com/oklahomer/blabby/cmd/client/internal/roomsearch"
+	"github.com/oklahomer/blabby/cmd/client/internal/verify"
 )
 
 // Model is the root tea.Model for the TUI client. State transitions
@@ -124,6 +126,35 @@ func (m Model) loginSubmitter() login.Submitter {
 	}
 }
 
+// registerSubmitter returns the function the register modal calls when the
+// user submits a valid account form. Same seam pattern as loginSubmitter.
+func (m Model) registerSubmitter() register.Submitter {
+	return func(email, handle, password string) tea.Cmd {
+		return api.RegisterCmd(m.httpClient, m.server.String(), email, handle, password, api.DefaultRegistrationTimeout)
+	}
+}
+
+// verifySubmitter returns the function the verify modal calls when the user
+// submits a well-formed PIN.
+func (m Model) verifySubmitter() verify.Submitter {
+	return func(email, pin string) tea.Cmd {
+		return api.VerifyEmailCmd(m.httpClient, m.server.String(), email, pin, api.DefaultRegistrationTimeout)
+	}
+}
+
+// verifyResender returns the function the verify modal calls on ctrl+r to
+// request a fresh PIN.
+func (m Model) verifyResender() verify.Resender {
+	return func(email string) tea.Cmd {
+		return api.ResendVerificationCmd(m.httpClient, m.server.String(), email, api.DefaultRegistrationTimeout)
+	}
+}
+
+// openVerifyModal builds the verify modal for the given registered email.
+func (m Model) openVerifyModal(email string) modal.Modal {
+	return verify.New(m.verifySubmitter(), m.verifyResender(), email, m.server.String())
+}
+
 // joinRoomSubmitter returns the closure the search modal calls when
 // the user presses enter on a row. The closure captures the current
 // session's HTTP client + token so the modal does not need to know
@@ -193,6 +224,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// Auth completions only ever arrive while the login modal is showing
+		// its Connecting… phase. Anything else — no modal (a same-generation
+		// duplicate after the session is already up) or a different modal (the
+		// user has moved on, e.g. into registration after a disconnect) — is
+		// stale: close the handed-off conn and change nothing, rather than
+		// silently discarding whatever modal is open.
+		if _, ok := m.modal.(login.Model); !ok {
+			if v.Conn != nil {
+				_ = v.Conn.Close()
+			}
+			return m, nil
+		}
 		// SetProgram is a construction-time contract enforced by
 		// main. A nil program here means the read loop would never
 		// run — fail loudly instead of silently authenticating.
@@ -219,13 +262,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout),
 		)
 
-	case api.LoginRejected, api.LoginTransportError, api.LoginProtocolError:
+	case api.LoginRejected:
+		// A correct password against an unverified account routes to the
+		// verify modal (with the attempted email) instead of rendering as a
+		// login error; every other rejection is the modal's to display.
+		if v.Status == api.StatusAccountPending {
+			m.modal = m.openVerifyModal(v.Email)
+			return m, m.modal.Init()
+		}
 		if m.modal != nil {
 			nextModal, cmd := m.modal.Update(msg)
 			m.modal = nextModal
 			return m, cmd
 		}
 		return m, nil
+
+	case api.LoginTransportError, api.LoginProtocolError:
+		if m.modal != nil {
+			nextModal, cmd := m.modal.Update(msg)
+			m.modal = nextModal
+			return m, cmd
+		}
+		return m, nil
+
+	case login.CreateAccountRequested:
+		m.modal = register.New(m.registerSubmitter(), m.server.String())
+		return m, m.modal.Init()
+
+	case register.Cancelled, verify.Cancelled:
+		m.modal = login.New(m.loginSubmitter(), m.server.String())
+		return m, m.modal.Init()
+
+	case api.RegisterSucceeded:
+		// A pending account exists (fresh or re-registered) and a PIN is on
+		// its way; the verify modal takes over.
+		m.modal = m.openVerifyModal(v.Email)
+		return m, m.modal.Init()
+
+	case api.VerifySucceeded:
+		// The account is active; back to sign-in with the email prefilled so
+		// only the password is left to type.
+		m.modal = login.New(m.loginSubmitter(), m.server.String()).
+			PrefillEmail(v.Email).
+			ShowNotice("Account verified — sign in")
+		return m, m.modal.Init()
 
 	case api.WSAuthRejected:
 		if v.Generation != m.sessionGeneration {
