@@ -454,6 +454,109 @@ paths:
           $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /rooms/{id}/events:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    get:
+      operationId: listRoomEvents
+      tags:
+        - Rooms
+      summary: Read a page of the room's timeline.
+      description: |
+        Returns one newest-first page of the room's durable timeline — chat
+        messages and `member_joined`/`member_left` system events interleaved
+        in id order. The caller must be a current member. `q` narrows the page
+        to messages whose text contains every whitespace-separated term of the
+        fragment (full-text, CJK-aware; terms match literally — no query
+        syntax). Older pages continue by echoing the response's `next` cursor
+        back as `before`; a `null` `next` means the history is exhausted.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            x-max-utf8-bytes: 256
+          description: |
+            A message-text search fragment: 1-256 bytes of valid UTF-8. Every
+            whitespace-separated term must appear in the message. When set,
+            only `message` events are returned. A blank value is treated as
+            absent.
+        - name: before
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            The keyset cursor: the event id of the last entry on the previous
+            page, as returned in `next`. Only older events are listed. A blank
+            value is treated as absent.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: The page size.
+      responses:
+        '200':
+          description: One page of the room timeline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomEventsPage'
+              example:
+                events:
+                  - id: '112233445566778899'
+                    type: message
+                    sender:
+                      id: UA000000001
+                      name: alice
+                    text: hello, world
+                    timestamp: 1718280000000
+                  - id: '112233445566778898'
+                    type: member_joined
+                    user:
+                      id: UA000000001
+                      name: alice
+                    timestamp: 1718279000000
+                next: null
+        '400':
+          description: |
+            The room identifier was invalid, `q` was not a valid search
+            fragment, `before` was not a valid event id, or `limit` was not an
+            integer between 1 and 200.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4001
+                  status: INVALID_REQUEST
+                  message: before is not a valid event id
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The caller is not a member of the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 2001
+                  status: ROOM_NOT_MEMBER
+                  message: not a member of this room
+        '404':
+          $ref: '#/components/responses/RoomNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /rooms/{id}/membership:
     parameters:
       - $ref: '#/components/parameters/RoomId'
@@ -928,6 +1031,75 @@ components:
         name:
           type: string
           description: The room's human-readable display name.
+    RoomEventsPage:
+      type: object
+      required:
+        - events
+        - next
+      properties:
+        events:
+          type: array
+          description: One newest-first page of the room timeline.
+          items:
+            $ref: '#/components/schemas/RoomEvent'
+        next:
+          type:
+            - string
+            - 'null'
+          description: |
+            The `before` value for the next (older) page — the id of the last
+            event in `events` — or `null` when the history is exhausted.
+    RoomEvent:
+      type: object
+      required:
+        - id
+        - type
+        - timestamp
+      properties:
+        id:
+          type: string
+          description: |
+            The event's id as a decimal string — the timeline cursor. Ids are
+            programmatic identifiers, never human-shared.
+        type:
+          type: string
+          enum:
+            - message
+            - member_joined
+            - member_left
+          description: |
+            The event kind. A `message` carries `sender` and `text`;
+            `member_joined`/`member_left` carry `user` — mirroring the
+            WebSocket frames' vocabulary for people.
+        sender:
+          $ref: '#/components/schemas/EventPerson'
+          description: The message's author. Present on `message` events only.
+        user:
+          $ref: '#/components/schemas/EventPerson'
+          description: |
+            The member who joined or left. Present on `member_joined` and
+            `member_left` events only.
+        text:
+          type: string
+          description: The message body. Present on `message` events only.
+        timestamp:
+          type: integer
+          format: int64
+          description: The event's server-assigned time in unix milliseconds.
+    EventPerson:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          description: |
+            The person's opaque public user code (`U…`). The internal numeric
+            user id is never exposed.
+        name:
+          type: string
+          description: The person's current display name.
     SendMessageRequest:
       type: object
       required:

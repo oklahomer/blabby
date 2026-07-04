@@ -312,6 +312,7 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 		Registration:  registration,
 		Verification:  registration,
 		Maintenance:   gateway.NewClusterMaintenanceTrigger(c),
+		Timeline:      gateway.NewRoomTimelineReader(pool),
 		Cluster:       c,
 		ActorRoot:     c.ActorSystem.Root,
 	})

@@ -21,6 +21,7 @@ type Gateway struct {
 	registration Registrar
 	verification VerificationService
 	maintenance  MaintenanceTrigger
+	timeline     RoomTimeline
 	cluster      *cluster.Cluster
 	actorRoot    *actor.RootContext
 
@@ -44,6 +45,7 @@ type Deps struct {
 	Registration  Registrar
 	Verification  VerificationService
 	Maintenance   MaintenanceTrigger
+	Timeline      RoomTimeline
 	Cluster       *cluster.Cluster
 	ActorRoot     *actor.RootContext
 }
@@ -58,6 +60,7 @@ func NewGateway(deps Deps) *Gateway {
 		registration: deps.Registration,
 		verification: deps.Verification,
 		maintenance:  deps.Maintenance,
+		timeline:     deps.Timeline,
 		cluster:      deps.Cluster,
 		actorRoot:    deps.ActorRoot,
 	}
@@ -94,6 +97,7 @@ func (g *Gateway) RegisterRoutes() http.Handler {
 	mux.Handle(endpointRoomList, g.requireAuth(g.handleRoomList))
 	mux.Handle(endpointRoomCreate, g.requireAuth(g.handleRoomCreate))
 	mux.Handle(endpointRoomJoined, g.requireAuth(g.handleRoomJoined))
+	mux.Handle(endpointRoomEvents, g.requireAuth(g.handleRoomEvents))
 	mux.Handle(endpointRoomMembershipPut, g.requireAuth(g.handleRoomMembershipPut))
 	mux.Handle(endpointRoomMembershipDelete, g.requireAuth(g.handleRoomMembershipDelete))
 	mux.Handle(endpointRoomMessage, g.requireAuth(g.handleRoomSendMessage))
