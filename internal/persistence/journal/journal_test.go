@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -15,26 +16,78 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
-// fakeQuerier is an in-memory postgres.Querier; the journal only uses QueryRow.
+// fakeQuerier is an in-memory postgres.Querier: queryRow drives the append
+// paths, query drives the timeline read path.
 type fakeQuerier struct {
 	queryRow func(sql string, args ...any) pgx.Row
+	query    func(sql string, args ...any) (pgx.Rows, error)
 }
 
 var _ postgres.Querier = (*fakeQuerier)(nil)
 
 func (f *fakeQuerier) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
-	panic("journal append does not use Exec")
+	panic("the journal does not use Exec")
 }
-func (f *fakeQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	panic("journal append does not use Query")
+func (f *fakeQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if f.query == nil {
+		panic("unexpected Query call")
+	}
+	return f.query(sql, args...)
 }
 func (f *fakeQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	if f.queryRow == nil {
+		panic("unexpected QueryRow call")
+	}
 	return f.queryRow(sql, args...)
 }
 
 type fakeRow struct{ scan func(dest ...any) error }
 
 func (r fakeRow) Scan(dest ...any) error { return r.scan(dest...) }
+
+// fakeRows replays a fixed set of rows (each a slice of column values in the
+// timeline scan order) through the pgx.Rows contract the reader depends on.
+type fakeRows struct {
+	rows [][]any
+	idx  int
+	err  error
+}
+
+func (f *fakeRows) Close()                                       {}
+func (f *fakeRows) Err() error                                   { return f.err }
+func (f *fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (f *fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (f *fakeRows) Values() ([]any, error)                       { return nil, nil }
+func (f *fakeRows) RawValues() [][]byte                          { return nil }
+func (f *fakeRows) Conn() *pgx.Conn                              { return nil }
+
+func (f *fakeRows) Next() bool {
+	if f.idx >= len(f.rows) {
+		return false
+	}
+	f.idx++
+	return true
+}
+
+func (f *fakeRows) Scan(dest ...any) error {
+	values := f.rows[f.idx-1]
+	if len(dest) != len(values) {
+		return fmt.Errorf("fake scan: %d destinations, %d values", len(dest), len(values))
+	}
+	for i := range dest {
+		switch d := dest[i].(type) {
+		case *int64:
+			*d = values[i].(int64)
+		case *string:
+			*d = values[i].(string)
+		case *time.Time:
+			*d = values[i].(time.Time)
+		default:
+			return fmt.Errorf("fake scan: unsupported destination %T", dest[i])
+		}
+	}
+	return nil
+}
 
 // stubIDSource mints a fixed id, or an error to drive the mint-failure path.
 type stubIDSource struct {

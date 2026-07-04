@@ -29,6 +29,16 @@ func NewEventID(v int64) (EventID, error) {
 	return EventID{value: v}, nil
 }
 
+// ParseEventID decodes the decimal-string form — the on-the-wire event id and
+// timeline cursor — into an EventID.
+func ParseEventID(s string) (EventID, error) {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return EventID{}, fmt.Errorf("event_id: %w", err)
+	}
+	return NewEventID(v)
+}
+
 // Int64 returns the underlying Snowflake, e.g. for binding to a BIGINT column.
 func (e EventID) Int64() int64 { return e.value }
 
@@ -51,11 +61,7 @@ func (e *EventID) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return fmt.Errorf("event_id: expected a decimal string: %w", err)
 	}
-	v, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return fmt.Errorf("event_id: %w", err)
-	}
-	parsed, err := NewEventID(v)
+	parsed, err := ParseEventID(s)
 	if err != nil {
 		return err
 	}
