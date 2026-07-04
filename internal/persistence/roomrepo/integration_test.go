@@ -29,7 +29,10 @@ func TestRoomRepoIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	defer pool.Close()
+	// Registered as the first cleanup so it runs after (LIFO) the row-deleting
+	// cleanups below; a defer would close the pool before t.Cleanup callbacks
+	// fire, turning every delete into a silent no-op.
+	t.Cleanup(pool.Close)
 
 	// A time-based id avoids colliding with the seed rows or a prior run.
 	rawID := time.Now().UnixNano()
