@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
@@ -49,8 +47,10 @@ type messageStore struct {
 }
 
 // NewMessageStore builds the production MessageStore over pool, minting event
-// ids from ids (the worker-lease manager).
-func NewMessageStore(pool *pgxpool.Pool, ids journal.IDSource) MessageStore {
+// ids from ids (the worker-lease manager). It takes the Querier interface —
+// unlike NewMembershipStore, which needs the concrete pool to build its
+// Transactor — because a message append is a single INSERT.
+func NewMessageStore(pool postgres.Querier, ids journal.IDSource) MessageStore {
 	return &messageStore{journal: journal.New(ids), pool: pool}
 }
 
