@@ -175,8 +175,9 @@ func TestSubmitValidationErrors(t *testing.T) {
 	}
 }
 
-func TestEscEmitsCancelled(t *testing.T) {
+func TestEscEmitsCancelledWithTypedEmail(t *testing.T) {
 	m := New((&recorder{}).submit, "srv")
+	m = typeIn(t, m, "dana@example.com")
 	next, cmd := m.Update(keyMsg("esc"))
 	if _, ok := next.(Model); !ok {
 		t.Fatalf("expected the modal to stay until the root swaps it, got %T", next)
@@ -184,8 +185,12 @@ func TestEscEmitsCancelled(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a Cancelled cmd")
 	}
-	if _, ok := cmd().(Cancelled); !ok {
+	got, ok := cmd().(Cancelled)
+	if !ok {
 		t.Fatal("expected Cancelled message")
+	}
+	if got.Email != "dana@example.com" {
+		t.Fatalf("Cancelled.Email = %q, want the typed email", got.Email)
 	}
 }
 

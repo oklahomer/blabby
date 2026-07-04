@@ -45,8 +45,12 @@ var handlePattern = regexp.MustCompile(`^[A-Za-z0-9_]{3,30}$`)
 type Submitter func(email, handle, password string) tea.Cmd
 
 // Cancelled is the typed outcome emitted when the user presses esc: the root
-// Model maps it back to the login modal.
-type Cancelled struct{}
+// Model maps it back to the login modal. Email carries whatever address was
+// typed so the login modal can prefill it — the email is not a secret, and
+// every other login-reopen path preserves it too.
+type Cancelled struct {
+	Email string
+}
 
 // Model is the register modal state. It satisfies modal.Modal.
 type Model struct {
@@ -163,7 +167,8 @@ func (m Model) handleKey(k tea.KeyMsg) (modal.Modal, tea.Cmd) {
 		// shortcuts must not leak behind an open modal.
 		return m, nil
 	case "esc":
-		return m, func() tea.Msg { return Cancelled{} }
+		email := strings.TrimSpace(m.inputs[emailSlot].Value())
+		return m, func() tea.Msg { return Cancelled{Email: email} }
 	case "tab", "down":
 		return m.shiftFocus(1), nil
 	case "shift+tab", "up":

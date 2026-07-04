@@ -37,8 +37,11 @@ type Submitter func(email, pin string) tea.Cmd
 type Resender func(email string) tea.Cmd
 
 // Cancelled is the typed outcome emitted when the user presses esc: the root
-// Model maps it back to the login modal.
-type Cancelled struct{}
+// Model maps it back to the login modal. Email carries the address under
+// verification so the login modal can prefill it.
+type Cancelled struct {
+	Email string
+}
 
 // Model is the verify modal state. It satisfies modal.Modal.
 type Model struct {
@@ -160,7 +163,7 @@ func (m Model) handleKey(k tea.KeyMsg) (modal.Modal, tea.Cmd) {
 	case "ctrl+1", "ctrl+2", "ctrl+3":
 		return m, nil
 	case "esc":
-		return m, func() tea.Msg { return Cancelled{} }
+		return m, func() tea.Msg { return Cancelled{Email: m.email} }
 	case "ctrl+r":
 		return m, m.resend(m.email)
 	case "enter":

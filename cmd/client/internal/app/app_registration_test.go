@@ -27,13 +27,17 @@ func TestCtrlNFromLoginOpensRegisterModal(t *testing.T) {
 	}
 }
 
-func TestRegisterCancelledReturnsToLogin(t *testing.T) {
+func TestRegisterCancelledReturnsToLoginWithEmail(t *testing.T) {
 	m := makeModel(t)
 	m.modal = register.New(m.registerSubmitter(), m.server.String())
 
-	next, _ := m.Update(register.Cancelled{})
-	if _, ok := next.(Model).modal.(login.Model); !ok {
-		t.Fatalf("modal = %T, want login.Model", next.(Model).modal)
+	next, _ := m.Update(register.Cancelled{Email: "dana@example.com"})
+	got := next.(Model)
+	if _, ok := got.modal.(login.Model); !ok {
+		t.Fatalf("modal = %T, want login.Model", got.modal)
+	}
+	if view := got.modal.View(80, 24); !strings.Contains(view, "dana@example.com") {
+		t.Fatalf("typed email not carried back to login: %s", view)
 	}
 }
 
@@ -69,13 +73,17 @@ func TestVerifySucceededReturnsToLoginWithNotice(t *testing.T) {
 	}
 }
 
-func TestVerifyCancelledReturnsToLogin(t *testing.T) {
+func TestVerifyCancelledReturnsToLoginWithEmail(t *testing.T) {
 	m := makeModel(t)
 	m.modal = m.openVerifyModal("dana@example.com")
 
-	next, _ := m.Update(verify.Cancelled{})
-	if _, ok := next.(Model).modal.(login.Model); !ok {
-		t.Fatalf("modal = %T, want login.Model", next.(Model).modal)
+	next, _ := m.Update(verify.Cancelled{Email: "dana@example.com"})
+	got := next.(Model)
+	if _, ok := got.modal.(login.Model); !ok {
+		t.Fatalf("modal = %T, want login.Model", got.modal)
+	}
+	if view := got.modal.View(80, 24); !strings.Contains(view, "dana@example.com") {
+		t.Fatalf("verification email not carried back to login: %s", view)
 	}
 }
 

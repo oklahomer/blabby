@@ -155,6 +155,18 @@ func (m Model) openVerifyModal(email string) modal.Modal {
 	return verify.New(m.verifySubmitter(), m.verifyResender(), email, m.server.String())
 }
 
+// reopenLoginModal returns a fresh login modal, carrying prefillEmail into the
+// email field when non-empty. Used by the register/verify cancel paths so the
+// address the user already typed survives the way back — matching every other
+// login-reopen path.
+func (m Model) reopenLoginModal(prefillEmail string) modal.Modal {
+	base := login.New(m.loginSubmitter(), m.server.String())
+	if prefillEmail != "" {
+		base = base.PrefillEmail(prefillEmail)
+	}
+	return base
+}
+
 // joinRoomSubmitter returns the closure the search modal calls when
 // the user presses enter on a row. The closure captures the current
 // session's HTTP client + token so the modal does not need to know
@@ -289,8 +301,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modal = register.New(m.registerSubmitter(), m.server.String())
 		return m, m.modal.Init()
 
-	case register.Cancelled, verify.Cancelled:
-		m.modal = login.New(m.loginSubmitter(), m.server.String())
+	case register.Cancelled:
+		m.modal = m.reopenLoginModal(v.Email)
+		return m, m.modal.Init()
+
+	case verify.Cancelled:
+		m.modal = m.reopenLoginModal(v.Email)
 		return m, m.modal.Init()
 
 	case api.RegisterSucceeded:

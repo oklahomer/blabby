@@ -191,8 +191,12 @@ func TestEscEmitsCancelled(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a Cancelled cmd")
 	}
-	if _, ok := cmd().(Cancelled); !ok {
+	got, ok := cmd().(Cancelled)
+	if !ok {
 		t.Fatal("expected Cancelled message")
+	}
+	if got.Email != "dana@example.com" {
+		t.Fatalf("Cancelled.Email = %q, want the verification email", got.Email)
 	}
 }
 
