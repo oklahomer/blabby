@@ -118,6 +118,15 @@ func mustUserID(t *testing.T, v int64) id.UserID {
 	return uid
 }
 
+func mustRoomName(t *testing.T, raw string) domain.RoomName {
+	t.Helper()
+	name, err := domain.NewRoomName(raw)
+	if err != nil {
+		t.Fatalf("NewRoomName(%q): %v", raw, err)
+	}
+	return name
+}
+
 func mustRoomID(t *testing.T, v int64) id.RoomID {
 	t.Helper()
 	rid, err := id.NewRoomID(v)
@@ -140,7 +149,7 @@ func TestCreate_Success(t *testing.T) {
 	}}
 
 	room, err := New(&stubIDSource{id: rid}).Create(context.Background(), fq, CreateParams{
-		DisplayName: "General", CreatedBy: mustUserID(t, 1),
+		Name: mustRoomName(t, "General"), CreatedBy: mustUserID(t, 1),
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -177,7 +186,7 @@ func TestCreate_MintErrorSkipsDB(t *testing.T) {
 	}}
 
 	_, err := New(&stubIDSource{err: sentinel}).Create(context.Background(), fq, CreateParams{
-		DisplayName: "x", CreatedBy: mustUserID(t, 1),
+		Name: mustRoomName(t, "x"), CreatedBy: mustUserID(t, 1),
 	})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("Create: got %v, want the mint error", err)
@@ -199,7 +208,7 @@ func TestCreate_ReportsPublicCodeCollision(t *testing.T) {
 	}}
 
 	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, CreateParams{
-		DisplayName: "x", CreatedBy: mustUserID(t, 1),
+		Name: mustRoomName(t, "x"), CreatedBy: mustUserID(t, 1),
 	})
 	if !errors.Is(err, ErrPublicCodeCollision) {
 		t.Fatalf("Create: got %v, want ErrPublicCodeCollision", err)
@@ -222,7 +231,7 @@ func TestCreate_PrimaryKeyCollisionIsHardError(t *testing.T) {
 	}}
 
 	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, CreateParams{
-		DisplayName: "x", CreatedBy: mustUserID(t, 1),
+		Name: mustRoomName(t, "x"), CreatedBy: mustUserID(t, 1),
 	})
 	if err == nil {
 		t.Fatal("Create: want an error for a primary-key collision")
@@ -244,7 +253,7 @@ func TestCreate_PropagatesHardError(t *testing.T) {
 	}}
 
 	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, CreateParams{
-		DisplayName: "x", CreatedBy: mustUserID(t, 1),
+		Name: mustRoomName(t, "x"), CreatedBy: mustUserID(t, 1),
 	})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("Create: got %v, want the db error", err)

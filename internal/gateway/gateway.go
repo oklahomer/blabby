@@ -17,6 +17,7 @@ type Gateway struct {
 	auth         auth.Authenticator
 	rooms        RoomDirectory
 	users        UserResolver
+	roomCreator  RoomCreator
 	registration Registrar
 	verification VerificationService
 	maintenance  MaintenanceTrigger
@@ -39,6 +40,7 @@ type Deps struct {
 	Authenticator auth.Authenticator
 	Rooms         RoomDirectory
 	Users         UserResolver
+	RoomCreation  RoomCreator
 	Registration  Registrar
 	Verification  VerificationService
 	Maintenance   MaintenanceTrigger
@@ -52,6 +54,7 @@ func NewGateway(deps Deps) *Gateway {
 		auth:         deps.Authenticator,
 		rooms:        deps.Rooms,
 		users:        deps.Users,
+		roomCreator:  deps.RoomCreation,
 		registration: deps.Registration,
 		verification: deps.Verification,
 		maintenance:  deps.Maintenance,
@@ -89,6 +92,7 @@ func (g *Gateway) RegisterRoutes() http.Handler {
 	mux.HandleFunc(endpointWS, g.handleWS)
 	mux.HandleFunc(wsPath, g.handleMethodNotAllowed(wsMethod))
 	mux.Handle(endpointRoomList, g.requireAuth(g.handleRoomList))
+	mux.Handle(endpointRoomCreate, g.requireAuth(g.handleRoomCreate))
 	mux.Handle(endpointRoomJoined, g.requireAuth(g.handleRoomJoined))
 	mux.Handle(endpointRoomMembershipPut, g.requireAuth(g.handleRoomMembershipPut))
 	mux.Handle(endpointRoomMembershipDelete, g.requireAuth(g.handleRoomMembershipDelete))

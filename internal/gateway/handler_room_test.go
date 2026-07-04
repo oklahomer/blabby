@@ -72,6 +72,8 @@ func servePath(t *testing.T, g *Gateway, method, pattern, path, body, contentTyp
 		mux.HandleFunc(pattern, g.handleRoomMemberRolePut)
 	case "PUT /rooms/{id}/owner":
 		mux.HandleFunc(pattern, g.handleRoomOwnerPut)
+	case "POST /rooms":
+		mux.HandleFunc(pattern, g.handleRoomCreate)
 	default:
 		t.Fatalf("unsupported pattern: %q", pattern)
 	}
