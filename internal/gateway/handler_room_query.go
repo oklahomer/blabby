@@ -57,24 +57,24 @@ type roomListParams struct {
 // parseRoomListQuery parses and validates the q / after / limit query
 // parameters. A blank q or after is treated as absent; limit defaults to
 // roomListDefaultLimit and is rejected outside [1, roomListMaxLimit].
-func parseRoomListQuery(r *http.Request) (roomListParams, *roomBodyError) {
+func parseRoomListQuery(r *http.Request) (roomListParams, *roomRequestError) {
 	params := roomListParams{limit: roomListDefaultLimit}
 	values := r.URL.Query()
 
-	if raw := values.Get("q"); strings.TrimSpace(raw) != "" {
+	if raw := strings.TrimSpace(values.Get("q")); raw != "" {
 		query, err := domain.NewRoomNameQuery(raw)
 		if err != nil {
-			return roomListParams{}, &roomBodyError{
+			return roomListParams{}, &roomRequestError{
 				reason: "invalid_query",
 				detail: ErrInvalidRequest("q must be 1-64 bytes of printable characters"),
 			}
 		}
 		params.query = query
 	}
-	if raw := values.Get("after"); strings.TrimSpace(raw) != "" {
+	if raw := strings.TrimSpace(values.Get("after")); raw != "" {
 		code, err := id.ParseRoomCode(raw)
 		if err != nil {
-			return roomListParams{}, &roomBodyError{
+			return roomListParams{}, &roomRequestError{
 				reason: "invalid_after",
 				detail: ErrInvalidRequest("after is not a valid room code"),
 			}
@@ -84,7 +84,7 @@ func parseRoomListQuery(r *http.Request) (roomListParams, *roomBodyError) {
 	if raw := values.Get("limit"); raw != "" {
 		limit, err := strconv.Atoi(raw)
 		if err != nil || limit < 1 || limit > roomListMaxLimit {
-			return roomListParams{}, &roomBodyError{
+			return roomListParams{}, &roomRequestError{
 				reason: "invalid_limit",
 				detail: ErrInvalidRequest(fmt.Sprintf("limit must be an integer between 1 and %d", roomListMaxLimit)),
 			}

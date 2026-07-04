@@ -55,10 +55,13 @@ func (d *stubRoomDirectory) ListActive(_ context.Context, query ListActiveQuery)
 	if d.err != nil {
 		return RoomPage{}, d.err
 	}
+	needle := ""
+	if !query.Query.IsZero() {
+		needle = strings.ToLower(query.Query.String())
+	}
 	var matched []RoomInfo
 	for _, info := range d.ordered {
-		if !query.Query.IsZero() &&
-			!strings.Contains(strings.ToLower(info.Name), strings.ToLower(query.Query.String())) {
+		if needle != "" && !strings.Contains(strings.ToLower(info.Name), needle) {
 			continue
 		}
 		if info.ID.Int64() <= query.After.Int64() {

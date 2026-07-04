@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS room (
 -- directly (with an exact recheck) and, unlike trigram indexes, stays effective
 -- for the short CJK fragments room names invite.
 CREATE INDEX IF NOT EXISTS room_display_name_pgroonga_idx
-    ON room USING pgroonga (display_name);
+    ON room USING pgroonga (display_name) WHERE status = 'active';
 
 -- room_membership: current-state only (a leave deletes the row). The Room grain is
 -- the sole writer. The partial unique index enforces at-most-one owner; the

@@ -50,10 +50,13 @@ func (d *stubRoomDirectory) Resolve(_ context.Context, code id.PublicCode) (id.R
 // ListActive mirrors the production contract in memory: case-insensitive
 // substring filter, id-keyset cursor, and a look-ahead HasMore.
 func (d *stubRoomDirectory) ListActive(_ context.Context, query gateway.ListActiveQuery) (gateway.RoomPage, error) {
+	needle := ""
+	if !query.Query.IsZero() {
+		needle = strings.ToLower(query.Query.String())
+	}
 	var matched []gateway.RoomInfo
 	for _, info := range d.ordered {
-		if !query.Query.IsZero() &&
-			!strings.Contains(strings.ToLower(info.Name), strings.ToLower(query.Query.String())) {
+		if needle != "" && !strings.Contains(strings.ToLower(info.Name), needle) {
 			continue
 		}
 		if info.ID.Int64() <= query.After.Int64() {
