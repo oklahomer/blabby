@@ -182,8 +182,8 @@ func TestTimelineIntegration(t *testing.T) {
 	if all[0].Kind != EntryMemberLeft || all[1].Kind != EntryMessage || all[4].Kind != EntryMemberJoined {
 		t.Errorf("kinds = %v/%v/%v, want left/message/joined at the edges", all[0].Kind, all[1].Kind, all[4].Kind)
 	}
-	if all[1].Author.Name != "alice" || all[1].Author.Code.FormatUser() != "UA000000001" {
-		t.Errorf("author = %+v, want alice / UA000000001 (joined from service_user)", all[1].Author)
+	if all[1].User.Name != "alice" || all[1].User.Code.FormatUser() != "UA000000001" {
+		t.Errorf("user = %+v, want alice / UA000000001 (joined from service_user)", all[1].User)
 	}
 
 	// Keyset paging: two per page, cursored by the last id of the prior page.

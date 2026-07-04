@@ -168,7 +168,7 @@ func (g *Gateway) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 func toRoomEvents(entries []journal.Entry) []roomEvent {
 	out := make([]roomEvent, 0, len(entries))
 	for _, entry := range entries {
-		person := &eventPerson{ID: entry.Author.Code.FormatUser(), Name: entry.Author.Name}
+		person := &eventPerson{ID: entry.User.Code.FormatUser(), Name: entry.User.Name}
 		event := roomEvent{
 			ID:        entry.ID.String(),
 			Timestamp: entry.OccurredAt.UnixMilli(),

@@ -41,7 +41,7 @@ func timelineEntry(t *testing.T, eid int64, kind journal.EntryKind, code, name, 
 	return journal.Entry{
 		ID:         eventID,
 		Kind:       kind,
-		Author:     journal.Author{Code: parsed, Name: name},
+		User:       journal.User{Code: parsed, Name: name},
 		Text:       text,
 		OccurredAt: time.UnixMilli(1_700_000_000_000),
 	}

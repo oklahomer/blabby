@@ -41,11 +41,12 @@ func parseEntryKind(s string) (EntryKind, error) {
 	}
 }
 
-// Author is an event author's public reference — the bare public code and the
+// User is the user an event is about — the message's sender or the member who
+// joined or left — as their public reference: the bare public code and the
 // current display name, joined from service_user at read time. Rendering
 // current names keeps the timeline consistent with the roster, and no internal
 // user id leaves the read model.
-type Author struct {
+type User struct {
 	Code id.PublicCode
 	Name string
 }
@@ -55,7 +56,7 @@ type Author struct {
 type Entry struct {
 	ID         id.EventID
 	Kind       EntryKind
-	Author     Author
+	User       User
 	Text       string // message text; empty for membership entries
 	OccurredAt time.Time
 }
@@ -154,12 +155,12 @@ func collectEntries(rows pgx.Rows) ([]Entry, error) {
 		}
 		code, err := id.ParsePublicCode(rawCode)
 		if err != nil {
-			return nil, fmt.Errorf("journal: timeline row %d: author public_code: %w", rawID, err)
+			return nil, fmt.Errorf("journal: timeline row %d: user public_code: %w", rawID, err)
 		}
 		out = append(out, Entry{
 			ID:         eventID,
 			Kind:       kind,
-			Author:     Author{Code: code, Name: name},
+			User:       User{Code: code, Name: name},
 			Text:       text,
 			OccurredAt: occurredAt,
 		})

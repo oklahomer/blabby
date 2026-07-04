@@ -51,11 +51,11 @@ func TestTimeline_FirstPageInterleavesKinds(t *testing.T) {
 	}
 	msg, joined := entries[0], entries[1]
 	if msg.ID.Int64() != 102 || msg.Kind != EntryMessage || msg.Text != "hello 世界" ||
-		msg.Author.Code.String() != "A000000001" || msg.Author.Name != "alice" {
+		msg.User.Code.String() != "A000000001" || msg.User.Name != "alice" {
 		t.Errorf("message entry = %+v", msg)
 	}
 	if joined.ID.Int64() != 101 || joined.Kind != EntryMemberJoined || joined.Text != "" ||
-		joined.Author.Name != "bob" {
+		joined.User.Name != "bob" {
 		t.Errorf("member entry = %+v", joined)
 	}
 	if !strings.Contains(gotSQL, "JOIN service_user") {
@@ -142,12 +142,12 @@ func TestTimeline_UnknownKindFails(t *testing.T) {
 	}
 }
 
-func TestTimeline_MalformedAuthorCodeFails(t *testing.T) {
+func TestTimeline_MalformedUserCodeFails(t *testing.T) {
 	fq := &fakeQuerier{query: func(sql string, args ...any) (pgx.Rows, error) {
 		return &fakeRows{rows: [][]any{timelineRow(101, "message_posted", "hi", "not-a-code", "alice")}}, nil
 	}}
 	if _, _, err := New(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{Limit: 5}); err == nil {
-		t.Fatal("Timeline: want an error for a malformed author public_code")
+		t.Fatal("Timeline: want an error for a malformed user public_code")
 	}
 }
 
