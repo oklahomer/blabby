@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -482,18 +483,22 @@ func chatReadyModel(t *testing.T) Model {
 }
 
 // messageFrameJSON builds a raw {"type":"message"} frame for dispatch
-// tests without threading json.Marshal through every call site.
-func messageFrameJSON(room, sender, text string, ms int64) []byte {
+// tests without threading json.Marshal through every call site. eventID
+// is the ordering key the scrollback sorts and dedups on.
+func messageFrameJSON(room, sender, text string, eventID, ms int64) []byte {
 	return []byte(fmt.Sprintf(
-		`{"type":"message","room_id":%q,"sender":{"id":%q},"text":%q,"timestamp":%d}`,
-		room, sender, text, ms))
+		`{"type":"message","room_id":%q,"event_id":%q,"sender":{"id":%q},"text":%q,"timestamp":%d}`,
+		room, itoa64(eventID), sender, text, ms))
 }
 
-func messageFrameJSONNamed(room, senderID, senderName, text string, ms int64) []byte {
+func messageFrameJSONNamed(room, senderID, senderName, text string, eventID, ms int64) []byte {
 	return []byte(fmt.Sprintf(
-		`{"type":"message","room_id":%q,"sender":{"id":%q,"name":%q},"text":%q,"timestamp":%d}`,
-		room, senderID, senderName, text, ms))
+		`{"type":"message","room_id":%q,"event_id":%q,"sender":{"id":%q,"name":%q},"text":%q,"timestamp":%d}`,
+		room, itoa64(eventID), senderID, senderName, text, ms))
 }
+
+// itoa64 renders a decimal event id for the wire fixtures.
+func itoa64(v int64) string { return strconv.FormatInt(v, 10) }
 
 func chatFrame(m Model, typ string, raw []byte) api.WSFrameReceived {
 	return api.WSFrameReceived{Type: typ, Raw: raw, Generation: m.sessionGeneration}
@@ -501,7 +506,7 @@ func chatFrame(m Model, typ string, raw []byte) api.WSFrameReceived {
 
 func TestUpdateMessageFrameAppendsToActiveBucket(t *testing.T) {
 	m := chatReadyModel(t)
-	next, cmd := m.Update(chatFrame(m, "message", messageFrameJSON("general", "alice", "hello", 1000)))
+	next, cmd := m.Update(chatFrame(m, "message", messageFrameJSON("general", "alice", "hello", 1, 1000)))
 	got := next.(Model)
 	if cmd != nil {
 		t.Fatal("inbound message frame must not dispatch a cmd")
@@ -515,9 +520,9 @@ func TestUpdateMessageFrameAppendsToActiveBucket(t *testing.T) {
 func TestUpdateMessageFrameSortsByTimestamp(t *testing.T) {
 	m := chatReadyModel(t)
 	// Arrive out of order: the later timestamp lands first.
-	n1, _ := m.Update(chatFrame(m, "message", messageFrameJSON("general", "a", "late", 5000)))
+	n1, _ := m.Update(chatFrame(m, "message", messageFrameJSON("general", "a", "late", 5, 5000)))
 	n1Model := n1.(Model)
-	n2, _ := n1Model.Update(chatFrame(n1Model, "message", messageFrameJSON("general", "b", "early", 1000)))
+	n2, _ := n1Model.Update(chatFrame(n1Model, "message", messageFrameJSON("general", "b", "early", 1, 1000)))
 	bucket := n2.(Model).messages["general"]
 	if len(bucket) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(bucket))
@@ -530,7 +535,7 @@ func TestUpdateMessageFrameSortsByTimestamp(t *testing.T) {
 func TestUpdateMessageFrameForOtherRoomRetainedNotShown(t *testing.T) {
 	m := chatReadyModel(t)
 	m.width, m.height = 120, 35
-	next, _ := m.Update(chatFrame(m, "message", messageFrameJSON("random", "a", "hidden-text", 1000)))
+	next, _ := m.Update(chatFrame(m, "message", messageFrameJSON("random", "a", "hidden-text", 1, 1000)))
 	got := next.(Model)
 	if len(got.messages["random"]) != 1 {
 		t.Fatalf("frame for non-active room not retained: %#v", got.messages)
@@ -545,7 +550,7 @@ func TestUpdateMessageFrameForOtherRoomRetainedNotShown(t *testing.T) {
 
 func TestUpdateOwnMessageShowsMutedName(t *testing.T) {
 	m := chatReadyModel(t) // userID == u-rina-1
-	next, _ := m.Update(chatFrame(m, "message", messageFrameJSONNamed("general", "u-rina-1", "Rina", "mine", 1000)))
+	next, _ := m.Update(chatFrame(m, "message", messageFrameJSONNamed("general", "u-rina-1", "Rina", "mine", 1, 1000)))
 	msg := next.(Model).messages["general"][0]
 	// Own messages now show the display name (not "you") and are flagged
 	// Self so mainview mutes the sender.
@@ -559,7 +564,7 @@ func TestUpdateOwnMessageShowsMutedName(t *testing.T) {
 
 func TestUpdateOtherUserMessageNotSelf(t *testing.T) {
 	m := chatReadyModel(t) // userID == u-rina-1
-	next, _ := m.Update(chatFrame(m, "message", messageFrameJSONNamed("general", "u-bob-9", "Bob", "hi", 1000)))
+	next, _ := m.Update(chatFrame(m, "message", messageFrameJSONNamed("general", "u-bob-9", "Bob", "hi", 1, 1000)))
 	msg := next.(Model).messages["general"][0]
 	if msg.Sender != "Bob" {
 		t.Errorf("other sender = %q, want %q", msg.Sender, "Bob")
@@ -736,7 +741,7 @@ func TestUpdateWSFrameReceivedFromOldGenerationDropped(t *testing.T) {
 
 	next, cmd := m.Update(api.WSFrameReceived{
 		Type:       "message",
-		Raw:        messageFrameJSON("general", "bob", "stale", 2000),
+		Raw:        messageFrameJSON("general", "bob", "stale", 2, 2000),
 		Generation: 1,
 	})
 	got := next.(Model)

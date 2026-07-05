@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -128,7 +129,9 @@ func (s *chatStubServer) handleRoomCommand(w http.ResponseWriter, r *http.Reques
 
 // pushMessage writes a server→client {"type":"message"} frame, blocking
 // until the WebSocket is authenticated so the write never races auth_ok.
-func (s *chatStubServer) pushMessage(t *testing.T, room, sender, text string, ms int64) {
+// eventID is carried as the frame's decimal event id so the client can
+// order and dedup it.
+func (s *chatStubServer) pushMessage(t *testing.T, room, sender, text string, eventID, ms int64) {
 	t.Helper()
 	select {
 	case <-s.ready:
@@ -142,7 +145,8 @@ func (s *chatStubServer) pushMessage(t *testing.T, room, sender, text string, ms
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	frame := map[string]any{
-		"type": "message", "room_id": room, "sender": map[string]any{"id": sender}, "text": text, "timestamp": ms,
+		"type": "message", "room_id": room, "event_id": strconv.FormatInt(eventID, 10),
+		"sender": map[string]any{"id": sender}, "text": text, "timestamp": ms,
 	}
 	if err := conn.WriteJSON(frame); err != nil {
 		t.Errorf("push message frame: %v", err)
@@ -227,7 +231,7 @@ func TestChatSendAndEchoRenders(t *testing.T) {
 
 	// The server fans the echo back; it renders with a timestamp. The
 	// rendered frame is captured for the credential-leak scan below.
-	stub.pushMessage(t, "general", "u-rina-1", "hello", echoTimestampMs)
+	stub.pushMessage(t, "general", "u-rina-1", "hello", 1, echoTimestampMs)
 	wantTS := time.UnixMilli(echoTimestampMs).Format("15:04:05")
 	var rendered string
 	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
@@ -283,8 +287,8 @@ func TestChatMessagesRenderInTimestampOrder(t *testing.T) {
 	}, teatest.WithCheckInterval(100*time.Millisecond), teatest.WithDuration(5*time.Second))
 
 	// Inject two frames out of order: the later timestamp arrives first.
-	tm.Send(api.WSFrameReceived{Type: "message", Raw: messageFrameJSON("general", "bob", "bravo-msg", 5000), Generation: 1})
-	tm.Send(api.WSFrameReceived{Type: "message", Raw: messageFrameJSON("general", "alice", "alpha-msg", 1000), Generation: 1})
+	tm.Send(api.WSFrameReceived{Type: "message", Raw: messageFrameJSON("general", "bob", "bravo-msg", 5, 5000), Generation: 1})
+	tm.Send(api.WSFrameReceived{Type: "message", Raw: messageFrameJSON("general", "alice", "alpha-msg", 1, 1000), Generation: 1})
 
 	// Both must reach the rendered scrollback (the render path runs).
 	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
