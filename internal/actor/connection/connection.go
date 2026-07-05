@@ -18,6 +18,7 @@ import (
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
@@ -547,15 +548,11 @@ func (uc *UserConnection) forwardMessage(ctx actor.Context, req *userpb.ForwardM
 	if !ok {
 		return
 	}
-	var timestamp time.Time
-	if ts := req.GetTimestamp(); ts != nil {
-		timestamp = ts.AsTime()
-	}
 	uc.sendOutbound(ctx, &ChatDelivered{
 		RoomID:    roomCode,
 		Sender:    UserRef{ID: senderCode, Name: req.GetSender().GetName()},
 		Text:      req.GetText(),
-		Timestamp: timestamp,
+		Timestamp: protoTime(req.GetTimestamp()),
 		EventID:   req.GetEventId(),
 	})
 	slog.Debug(eventConnectionWriteMessage,
@@ -593,17 +590,20 @@ func (uc *UserConnection) forwardRoomEvent(ctx actor.Context, req *userpb.Notify
 		return
 	}
 	user := UserRef{ID: userCode, Name: req.GetUser().GetName()}
-	var at time.Time
-	if ts := req.GetTimestamp(); ts != nil {
-		at = ts.AsTime()
+	at := protoTime(req.GetTimestamp())
+	switch eventType {
+	case userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED:
+		uc.sendOutbound(ctx, &RoomJoined{RoomID: roomCode, User: user, EventID: req.GetEventId(), At: at})
+	case userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT:
+		uc.sendOutbound(ctx, &RoomLeft{RoomID: roomCode, User: user, EventID: req.GetEventId(), At: at})
 	}
-	var out any
-	if eventType == userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED {
-		out = &RoomJoined{RoomID: roomCode, User: user, EventID: req.GetEventId(), At: at}
-	} else {
-		out = &RoomLeft{RoomID: roomCode, User: user, EventID: req.GetEventId(), At: at}
+}
+
+func protoTime(ts *timestamppb.Timestamp) time.Time {
+	if ts == nil {
+		return time.Time{}
 	}
-	uc.sendOutbound(ctx, out)
+	return ts.AsTime()
 }
 
 // sendOutbound enqueues msg on the outbound channel for the write pump.

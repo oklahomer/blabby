@@ -11,13 +11,15 @@ import (
 // This file holds the Room request factories used across grain unit and
 // integration tests. Add fixtures only when multiple callers need them.
 
+const maxFixturePublicCodeNumber int64 = 10_000_000_000
+
 // BarePublicCodeFor returns a deterministic valid bare public_code for a
 // decimal user id, so a fixture UserRef satisfies the Room grain's
 // public-code requirement and its rendered U… code is predictable in frame
 // assertions. A non-numeric id (used by the reject-path tests, where the id
 // itself fails to parse before the code is read) gets a fixed valid stand-in.
 func BarePublicCodeFor(userID string) string {
-	if n, err := strconv.ParseInt(userID, 10, 64); err == nil && n >= 0 && n < 1e10 {
+	if n, err := strconv.ParseInt(userID, 10, 64); err == nil && n >= 0 && n < maxFixturePublicCodeNumber {
 		return fmt.Sprintf("%010d", n)
 	}
 	return "0000000000"
