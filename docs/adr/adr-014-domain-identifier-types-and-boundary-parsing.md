@@ -1,140 +1,187 @@
 # ADR-014: Domain identifier types and boundary parsing
 
 - **Status:** Accepted
-- **Date:** 2026-05-16
-- **Related:** [ADR-011](adr-011-cross-boundary-pid-propagation.md), [ADR-012](adr-012-watch-based-connection-lifecycle.md), [ADR-013](adr-013-business-errors-as-response-values.md)
+- **Date:** 2026-07-05
+- **Related:** [ADR-007](adr-007-database-authoritative-persistence.md), [ADR-011](adr-011-cross-boundary-pid-propagation.md), [ADR-013](adr-013-business-errors-as-response-values.md), [ADR-019](adr-019-snowflake-ids-and-worker-lease-fencing.md)
 
 ## Context
 
-Two identifiers are load-bearing across every layer of this system: the authenticated user (`user_id`) and the chat room (`room_id`). Both flow through HTTP path captures, JWT subject claims, WebSocket auth frames, cluster proto requests, grain state, and structured log lines. Until now both have been represented as raw `string` everywhere.
+Two identifiers are load-bearing across every layer of this system: the
+authenticated user and the chat room. Both flow through HTTP path captures, JWT
+subject claims, WebSocket auth frames, cluster proto requests, grain state, database
+columns, and structured log lines. Represented as raw `string` (or raw `int64`),
+they invite three problems: a `user`/`room` mix-up that compiles and runs, structural
+validation duplicated and drifting across call sites, and — for a persistent system —
+the question of whether the database's numeric primary key is the thing that should
+travel on the wire to clients at all.
 
-Three problems compound at this representation:
-
-**Mix-ups are caught only by code review.** The User grain's `JoinRoom` handler takes a proto request whose two relevant strings are `room_id` and (implicit, from grain identity) the user. The Room grain's `Join` handler takes a `user_id`. A typo that swaps the two compiles, runs, and produces a wrong-but-plausible result. The type system has nothing to say.
-
-**Structural validation is duplicated and inconsistent.** `gateway.validateRoomID` trims, length-caps, and rejects control characters and Unicode whitespace inside the captured `{id}`. `connection.NewUserID` (the only existing value-object on this axis) trims and checks non-empty — but does not enforce length, control characters, or Unicode whitespace. The HTTP auth middleware accepts any non-blank JWT subject. The grain handlers re-check non-emptiness inline. Six call sites, three different rule sets, no canonical reference.
-
-**One specific structural rule is missing.** Go 1.22+ mux URL-decodes `%2F` to `/` in path captures, so a crafted request can land a `room_id` like `foo/bar` at the User grain. The grain re-validates non-emptiness as defense-in-depth, but neither the gateway nor the grain rejects the slash. The room ultimately addressed at the cluster boundary is not the room the operator sees in the URL.
-
-A related question that *isn't* the problem here, but worth naming so the decision below doesn't overreach: there are no storage-backed `Room` or `User` entities yet. Today every "room" is just an identifier; the description, creation time, member roster, and similar fields exist only on the cluster boundary's proto messages, not as a persistent shape. Any decision about identifier types must not preempt the eventual entity-type design.
+That last question is the one persistence forces. The store keys entities by a
+Snowflake `BIGINT` ([ADR-007](adr-007-database-authoritative-persistence.md),
+[ADR-019](adr-019-snowflake-ids-and-worker-lease-fencing.md)). Exposing that number
+to clients would leak an internal, roughly-enumerable key and weld the wire format to
+the storage key. So the system needs two representations — an internal one for
+routing and storage, and an external one for clients — and a discipline that keeps
+them from being confused for each other.
 
 ## Decision
 
-**Introduce a small `internal/id` package containing two value-object types — `UserID` and `RoomID` — that share a uniform structural rule set, are distinct at the Go type level, and are parsed exactly once at each boundary where their underlying strings enter the system.**
+**Identifiers are value-object types, distinct at the Go type level and parsed once
+at each boundary. Users and rooms carry two: an internal numeric Snowflake id for
+routing and storage, and a separate opaque `PublicCode` — the only user/room
+identifier shown to clients — resolved to the internal id at the gateway.**
 
-Concretely:
+The `internal/id` package (`internal/id/doc.go`) holds these types:
 
-- The package exports two opaque types:
-  ```go
-  type UserID struct{ value string }
-  func NewUserID(raw string) (UserID, error)
-  func (id UserID) String() string
-  func (id UserID) LogValue() slog.Value
+- **Internal ids: `UserID`, `RoomID`, `EventID`.** Each wraps a positive 63-bit
+  `int64` minted by `internal/snowflake`, distinct at the type level so a function
+  taking a `UserID` rejects a `RoomID`, an `EventID`, or a bare `int64` at compile
+  time. `NewUserID`/`NewRoomID`/`NewEventID` wrap a value read from a `BIGINT`
+  column; `ParseUserID`/`ParseRoomID`/`ParseEventID` decode the **decimal-string**
+  form carried in proto fields and JSON. Where an id serialises into JSON it renders
+  as a decimal string, because JavaScript cannot hold a 63-bit integer exactly. A
+  zero value is not valid; the constructors reject non-positive input and never emit
+  one.
+- **External reference: `PublicCode`.** An opaque, user-facing code rendered
+  `U<code>` for users and `R<code>` for rooms (the type letter is added only at the
+  edge). It is stored alongside the entity, is the **only** user/room identifier a
+  client ever sees, and is not part of a `UserID`/`RoomID` value. `EventID` is the
+  one id that itself crosses to clients — as a decimal-string cursor — and so has no
+  public code.
+- **Composed reference: `UserRef`.** Bundles a `UserID` (internal), a `PublicCode`
+  (external), and a display name, for the places that need to render a person
+  without a second lookup (message senders, membership events).
+- Every id type implements [`slog.LogValuer`](https://pkg.go.dev/log/slog#LogValuer)
+  so structured-log call sites pass the typed value directly and it renders as its
+  decimal string (the JSON handler would otherwise reflect over the unexported field
+  and lose it).
 
-  type RoomID struct{ value string }
-  func NewRoomID(raw string) (RoomID, error)
-  func (id RoomID) String() string
-  func (id RoomID) LogValue() slog.Value
-  ```
-- Both types implement [`slog.LogValuer`](https://pkg.go.dev/log/slog#LogValuer) so structured-log call sites pass the typed value directly:
-  ```go
-  slog.Info("room handler enter", "user_id", userID, "room_id", roomID)
-  ```
-  The JSON handler installed at process startup reaches a typed value as `KindAny` and falls through to `encoding/json`, which serialises by reflection over struct fields — an unexported field renders as `{}` and the identifier is lost. `encoding/json` does not honour `fmt.Stringer`; `LogValuer` is the slog-specific bridge that does, and returning `slog.StringValue(id.value)` skips the reflection-based fallback entirely.
-- Both constructors share an unexported `parseIdentifier` helper that enforces a single rule set:
-  1. Trim leading and trailing whitespace.
-  2. After trim, non-empty.
-  3. Length ≤ 256 bytes.
-  4. No ASCII control characters (`< 0x20` or `== 0x7F`).
-  5. No Unicode whitespace anywhere in the trimmed value.
-  6. No `/` (the URL path delimiter).
-- Each constructor wraps the helper's typed error (`ErrEmptyIdentifier`, `ErrIdentifierTooLong`, `ErrIdentifierInvalidChar`) with its own prefix (`user_id: …`, `room_id: …`) so log readers can distinguish causes without losing the structural classification. Callers map any failure to the same on-wire error code (`INVALID_REQUEST`); the distinction is for operators, not clients.
-- The two types are structurally identical but compile-distinct. A function expecting `UserID` rejects `RoomID` at compile time, and vice versa. Map keys, struct fields, and function parameters all carry the typing through to internal state.
-- Inside the system, raw `string` for an identifier appears only at four boundaries:
-  1. **JWT verification.** `auth.Authenticator.ValidateToken` parses the JWT subject claim into `UserID` and returns it on `Claims.UserID`. A structurally invalid subject yields `ErrTokenInvalid` — the JWT itself is treated as malformed.
-  2. **HTTP auth middleware.** `gateway.authMiddleware` receives the already-typed `Claims.UserID` and places it in the request context via `auth.ContextWithUserID(ctx, id.UserID)`. `UserIDFromContext` returns the typed value.
-  3. **HTTP path extraction.** Gateway handlers parse `r.PathValue("id")` into `RoomID`. Failure is `4001 INVALID_REQUEST`.
-  4. **Grain handler entry.** Each grain handler parses incoming proto string fields (`req.GetUserId()`, `req.GetRoomId()`) into typed values at the top of the function. The grain re-validates because its contract is "any caller within the cluster," not "only the gateway." Failure is the existing `INVALID_REQUEST` business error.
-- Proto wire types remain `string`. Crossing the cluster boundary on the way out, typed values are converted via `.String()`. The wire format is not part of this decision; the type discipline is purely an in-process concern.
-- Internal state holds typed values. The User grain's joined-rooms set becomes `map[id.RoomID]struct{}`; the Room grain's member set becomes `map[id.UserID]struct{}`. Cross-keying becomes a compile error.
-- The types prove only their structural invariants. They do *not* claim that a user or a room exists, that the caller is authorized, or that the identifier matches any external taxonomy. Deeper rules (membership, authorization, existence) belong to the grains and handlers that own them, not to the value object.
+Raw scalars for an identifier appear only at these boundaries; internal code holds
+typed values throughout:
+
+1. **JWT verification.** The token's subject is the user's `PublicCode` (`U…`), never
+   the numeric id. `auth.JWTAuthenticator` parses it with `id.ParseUserCode` and
+   resolves it to an internal `UserID` via a `PublicCodeResolver`; an unknown code is
+   an invalid token, a resolver outage is answered `503` rather than treated as
+   invalid.
+2. **HTTP path extraction.** A room path capture (`{id}`) is a client-facing `R…`
+   code; the gateway parses it with `id.ParseRoomCode` and resolves it to a `RoomID`
+   through the room directory (`FindByPublicCode`). A malformed code is `INVALID_REQUEST`,
+   an unknown one `ROOM_NOT_FOUND`.
+3. **Cluster proto entry.** Proto fields carry the internal numeric id as a decimal
+   string; each grain handler parses `req.GetUserId()` / `req.GetRoomId()` into typed
+   values at the top of the function, because its contract is "any caller within the
+   cluster," not "only the gateway."
+4. **Storage.** The repositories wrap `BIGINT` column values with the `New…`
+   constructors and bind typed values back out with `.Int64()`.
+
+Internal state and signatures carry the types through: the User grain's joined set is
+`map[id.RoomID]struct{}`, the Room grain's member set keys on `id.UserID`, and
+cross-keying is a compile error. The types prove only that an id is structurally
+well-formed (a positive Snowflake, or a syntactically valid public code); they do not
+claim the user or room exists, that the caller is authorised, or that membership
+holds — those belong to the grains and handlers that own the rules.
 
 ## Consequences
 
 ### Positive
 
-- **Mix-ups become compile errors.** `func notifyRoom(uid UserID, rid RoomID)` cannot be called with the arguments swapped. The single most common identifier bug in handler code is eliminated by the type system.
-- **One canonical rule set.** Tightening or extending the rules touches one file. The Go 1.22+ `%2F` exposure closes here, not at every handler.
-- **Validation lives at boundaries, not at every internal call.** Once a function parameter is `UserID`, no callee re-validates. The "Parse, don't validate" pattern is enforced by the type system.
-- **Logs gain typed cause classification.** A rejected request logs `reason=identifier_too_long` instead of a generic `invalid_request` collapse, without changing the on-wire error code.
-- **Future entity types slot in without rename.** When `Room` (storage-backed entity) lands, it sits alongside `RoomID` (reference). The two are unambiguously distinct concepts and never collide on name. The package layout in `internal/id` is reserved for identifiers, not entities — entities will own their own packages when they have a real consumer.
+- **Mix-ups become compile errors.** `func notify(uid UserID, rid RoomID)` cannot be
+  called with its arguments swapped, and neither can be passed a bare `int64` — the
+  most common identifier bug is removed by the type system.
+- **Internal keys never leak.** Clients see opaque public codes, not the Snowflake
+  primary key; the wire format is decoupled from the storage key, and the resolution
+  seam lives in one place (the gateway).
+- **Parse once, trust thereafter.** Once a value is a `UserID`, no callee
+  re-validates it. "Parse, don't validate" is enforced by the type system, and the
+  two representations can never be silently interchanged because they are different
+  types.
+- **Logs keep the identifier.** `slog.LogValuer` renders the decimal string on JSON
+  log lines instead of an empty reflected struct.
 
 ### Negative
 
-- **Boilerplate at the proto wire.** Every proto-construction site writes `.String()` and every proto-receipt site re-parses. The cost is constant and concentrated at the cluster boundary; internal code remains typed.
-- **Tightening rules retroactively rejects values that used to pass.** Any test fixture, JWT, or stored identifier that contained a control byte, Unicode whitespace, or `/` previously passed; under this rule set it does not. No live deployment exists today, so the practical cost is limited to test-fixture updates.
-- **Grain handlers re-parse identifiers from incoming proto requests.** A request that goes through the gateway is parsed twice. The grain's contract is the cluster boundary — any future cluster caller (backfill, second gateway) inherits the same checks without the grain trusting the caller's discipline.
+- **Two representations mean a resolution step.** A client-facing public code must be
+  resolved to an internal id at the gateway (a database lookup) before routing. The
+  cost is one indexed read at the boundary, concentrated where the translation
+  belongs; internal hops stay numeric.
+- **Conversions at the proto wire.** Every proto-construction site writes the id's
+  decimal string and every receipt site re-parses. The cost is constant and
+  concentrated at the cluster boundary.
+- **Grain handlers re-parse ids from incoming requests.** A request through the
+  gateway is parsed twice. The grain's contract is the cluster boundary; any future
+  cluster caller inherits the same checks without the grain trusting the caller's
+  discipline.
 
 ### Neutral
 
-- **No effect on the cluster wire format.** Proto fields stay `string`; the cluster client signature is unchanged. The type discipline is a pure in-process property.
-- **No effect on the error taxonomy.** All structural failures continue to map to `4001 INVALID_REQUEST` on the wire. The typed errors are for log clarity, not for clients.
-- **No effect on the cluster identity binding.** `cluster.GetUserGrainGrainClient(c, userID.String())` continues to use a string identity; the typed value's `.String()` is the only conversion needed.
-- **`internal/id` imports `log/slog`.** A non-trivial choice for a value-object package, but slog is part of the standard library and `LogValuer` is the idiomatic way for a custom type to participate in structured logging. The import is one-way; nothing in `log/slog` depends back on `internal/id`.
+- **`EventID` is the deliberate exception.** It crosses to clients directly as a
+  decimal-string cursor, with no public code, because a timeline cursor is already
+  opaque and reveals nothing an attacker can act on; giving it a public code would be
+  ceremony without benefit.
+- **`internal/id` imports `log/slog`.** A non-trivial choice for a value-object
+  package, but slog is standard-library and `LogValuer` is the idiomatic bridge; the
+  import is one-way.
 
 ## Alternatives considered
 
+### Expose the numeric primary key to clients
+
+Send the Snowflake `BIGINT` on the wire and skip the public code. Rejected: it leaks
+an internal, time-ordered, roughly-enumerable key, and binds the external contract to
+the storage key so the two can never evolve independently. The public code is the
+opaque, stable external handle; the numeric id stays internal.
+
 ### Per-package identifier types
 
-Each consumer defines its own `UserID` / `RoomID` (the `connection.UserID` shape, repeated for the gateway and the grains). No shared package.
+Each consumer defines its own `UserID`/`RoomID`. Rejected: it repeats the duplication
+the error-code constants once suffered and loses the cross-boundary equality that map
+keys and typed parameters need — a `connection.UserID` cannot key a grain-side
+`map[grain.UserID]struct{}` without a re-import of the validation question.
 
-Rejected because this is the same duplication pattern the error-code constants already suffer (`codeRoomNotMember = 4101` declared once per package), and it loses the cross-boundary equality that map keys and typed function parameters need. A `connection.UserID` cannot be used as a key in a grain-side `map[gateway.UserID]struct{}` without a conversion that re-imports the validation question.
+### A single generic `Identifier[T]` with phantom types
 
-### Single generic `Identifier[T]` with phantom types
-
-Use a generic value object parameterised by a phantom tag (`type Identifier[T any] struct{ value string }`; `type UserID = Identifier[userTag]`). Identical underlying mechanism, fewer file-level types.
-
-Rejected as too clever for this codebase. Reading `id.NewUserID(raw)` is immediate; reading `id.NewIdentifier[id.UserTag](raw)` requires unpacking the generic. The shared-parser-plus-two-types approach achieves the same compile-time distinction with substantially better local readability.
+`type UserID = Identifier[userTag]`. Identical mechanism, fewer file-level types.
+Rejected as too clever for this codebase: `id.NewUserID(raw)` reads immediately, while
+`id.NewIdentifier[id.UserTag](raw)` asks the reader to unpack a generic for no gain.
 
 ### Proto-typed wire identifiers (`message UserId { string value = 1; }`)
 
-Replace proto `string` fields with a nested message wrapping a single string field. Encodes the identifier kind at the wire level.
+Wrap each id in a nested proto message. Rejected: a nested message is a struct with a
+string field — no constructor, no validation hook, and a parallel hierarchy of "Id
+message types" mirroring the Go types. The wire format is the wire format; the type
+discipline belongs in Go.
 
-Rejected because proto's nested-message shape gives no value-object semantics — it is a struct with a string field, with no language-level constructor or validation hook. The wire cost (extra tag bytes) is small but real; the conceptual cost (parallel hierarchy of "Id message types" mirroring the value-object types) is larger. The wire format is the wire format; the type discipline belongs in Go, not in proto.
+### Storage-backed `Room` / `User` aggregates instead of identifier types
 
-### Per-type shape rules (UUID-shaped UserID, kebab-case RoomID)
-
-Have `NewUserID` enforce UUID format (matching today's JWT authenticator) and `NewRoomID` enforce kebab-case (matching today's `defaultRooms` slice).
-
-Rejected for now as policy masquerading as structure. A value object should prove what it knows; the structural rules above are facts about the wire and the URL. UUID-shape and kebab-case are *current* choices that may change (a future external IdP emits a non-UUID subject; a future room provisioning grain allows capitalised names). Tightening rules later is additive; loosening them is harder. The shared parser keeps the door open.
-
-### Prefix conventions (`user-<body>`, `room-<body>`)
-
-Self-identifying IDs at the wire level, in the style of Stripe (`cus_…`, `pi_…`) or Slack (`U…`, `C…`).
-
-Rejected for the same reason — and additionally because adoption is a breaking change to existing surfaces: JWT subjects, URL paths, the `defaultRooms` slice, and every test fixture. The operational benefit (an opaque ID self-identifies its kind in logs) scales with the number of identifier kinds. Today there are two; the type system distinguishes them in code; the structured-log key (`user_id` vs `room_id`) distinguishes them at the operator's terminal. Revisit when a third or fourth identifier type lands.
-
-### Rely on `fmt.Stringer` for log rendering
-
-Implement `String() string` only and pass typed identifiers to `slog`, expecting the handler to render the string form.
-
-Rejected because `encoding/json` (where the JSON handler falls through for `KindAny`) does not honour `fmt.Stringer`; the identifier is lost at every JSON log line. `slog.TextHandler` honours `fmt.Stringer` via `fmt.Sprint`, but the project ships JSON only. The marginal cost of the second method per type is worth not losing the identifier.
-
-### Storage-backed `Room` and `User` aggregates instead of identifier types
-
-Skip the identifier types and define `Room { ID, Description, CreatedAt, … }` and `User { ID, … }` directly. Pass aggregates around.
-
-Rejected as premature. There is no persistence layer, no storage-backed shape, and no consumer that would benefit from receiving a `Room` aggregate (the join, leave, and post-message commands all care only about the identifier, not the room's description). When persistence lands, the aggregate types will join `RoomID` / `UserID` in the same shape this ADR sets up; there is no rename or migration to do.
+Skip the identifier types and pass whole entities around. Still declined for the hot
+paths: join, leave, and post-message care about the identifier, not the room's
+description. The storage-backed entities now exist in the persistence layer
+([ADR-007](adr-007-database-authoritative-persistence.md)) and sit alongside the
+identifier types without a name collision — `RoomID` (a reference) and the persisted
+room row (an entity) are distinct concepts that never compete for the same name.
 
 ## Scope of applicability
 
-This ADR governs the representation of `user_id` and `room_id` across the codebase. It does **not** govern:
+This ADR governs the representation of user and room identifiers, and the public code
+that fronts them. It does **not** govern:
 
-- **Storage-backed entities.** A future `Room` or `User` type with persistence-derived fields is out of scope; this ADR reserves the `internal/id` package for identifiers only.
-- **Cluster identity strings.** `cluster.GetUserGrainGrainClient(c, identity)` takes a `string` identity opaque to the cluster. The gateway converts `UserID` → `string` at this seam; the grain receives it via `ctx.Identity()` as a `string`. Whether `ctx.Identity()` should be re-parsed inside the grain is left to a future decision when a concrete reason to enforce it arises.
-- **Other domain-significant strings.** Authentication tokens, message text, and similar values are not covered. `connection.AuthToken` already exists with its own value-object discipline and is unaffected.
+- **Cluster identity strings.** `cluster.Get…GrainClient(c, identity)` takes a
+  `string` identity opaque to the framework; the gateway converts a typed id to its
+  decimal string at that seam.
+- **Other domain-significant strings.** Authentication tokens, message text, handles,
+  and email addresses are not covered; each has (or gets) its own value-object
+  discipline where its rules live.
 
 ## References
 
-- [ADR-011](adr-011-cross-boundary-pid-propagation.md) — Cross-boundary PID propagation. Same general principle (parse once at the boundary, hold typed values internally) applied to actor identities; ADR-014 applies it to domain identifiers.
-- [ADR-013](adr-013-business-errors-as-response-values.md) — Business errors as response values. Defines the `INVALID_REQUEST` error code that identifier-parse failures map to on the wire.
+- [ADR-007](adr-007-database-authoritative-persistence.md) — the persistence layer
+  whose `BIGINT` keys are the internal ids and whose `public_code` columns store the
+  external form.
+- [ADR-019](adr-019-snowflake-ids-and-worker-lease-fencing.md) — how the numeric ids
+  are minted across a cluster.
+- [ADR-011](adr-011-cross-boundary-pid-propagation.md) — the same "parse once at the
+  boundary, hold typed values internally" principle applied to actor identities.
+- [ADR-013](adr-013-business-errors-as-response-values.md) — the `INVALID_REQUEST`
+  code that identifier-parse failures map to.
+- `internal/id/` — the value-object types; `internal/auth/jwt.go` and
+  `internal/gateway/handler_room.go` — the public-code resolution boundaries.
