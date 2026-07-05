@@ -63,7 +63,8 @@ const seededDisplayName = "Alice Example"
 type fakeDirectory struct{}
 
 func (fakeDirectory) Resolve(_ context.Context, uid id.UserID) (id.UserRef, error) {
-	return id.NewUserRef(uid, seededDisplayName)
+	code, _ := id.NewPublicCode()
+	return id.NewUserRef(uid, code, seededDisplayName)
 }
 
 func TestMain(m *testing.M) {

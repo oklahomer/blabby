@@ -21,7 +21,8 @@ import (
 type stubDirectory struct{ name string }
 
 func (d stubDirectory) Resolve(_ context.Context, uid id.UserID) (id.UserRef, error) {
-	return id.NewUserRef(uid, d.name)
+	code, _ := id.NewPublicCode()
+	return id.NewUserRef(uid, code, d.name)
 }
 
 // fanoutProbe is a regular actor that records the fan-out messages a User

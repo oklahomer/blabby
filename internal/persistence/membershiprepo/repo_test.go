@@ -110,7 +110,11 @@ func mustUserRef(t *testing.T, rawID int64, name string) id.UserRef {
 	if err != nil {
 		t.Fatalf("NewUserID(%d): %v", rawID, err)
 	}
-	ref, err := id.NewUserRef(uid, name)
+	code, err := id.NewPublicCode()
+	if err != nil {
+		t.Fatalf("NewPublicCode: %v", err)
+	}
+	ref, err := id.NewUserRef(uid, code, name)
 	if err != nil {
 		t.Fatalf("NewUserRef(%d,%q): %v", rawID, name, err)
 	}
@@ -142,8 +146,8 @@ func TestListByRoom(t *testing.T) {
 	fq := &fakeQuerier{query: func(sql string, args ...any) (pgx.Rows, error) {
 		gotSQL, gotArgs = sql, args
 		return &fakeRows{rows: [][]any{
-			{int64(1), "alice", "owner", ts},
-			{int64(2), "bob", "member", ts},
+			{int64(1), "A000000001", "alice", "owner", ts},
+			{int64(2), "B000000002", "bob", "member", ts},
 		}}, nil
 	}}
 
@@ -154,7 +158,8 @@ func TestListByRoom(t *testing.T) {
 	if len(members) != 2 {
 		t.Fatalf("members: got %d, want 2", len(members))
 	}
-	if members[0].User.ID().Int64() != 1 || members[0].User.Name() != "alice" || members[0].Role != domain.MembershipRoleOwner {
+	if members[0].User.ID().Int64() != 1 || members[0].User.Name() != "alice" ||
+		members[0].User.PublicCode().String() != "A000000001" || members[0].Role != domain.MembershipRoleOwner {
 		t.Errorf("members[0] = %+v", members[0])
 	}
 	if members[1].Role != domain.MembershipRoleMember {
@@ -172,7 +177,7 @@ func TestListByRoom(t *testing.T) {
 func TestListByRoom_RowError(t *testing.T) {
 	// A non-positive id in a row is a data-integrity error surfaced, not trusted.
 	fq := &fakeQuerier{query: func(string, ...any) (pgx.Rows, error) {
-		return &fakeRows{rows: [][]any{{int64(0), "ghost", "member", time.Unix(0, 0)}}}, nil
+		return &fakeRows{rows: [][]any{{int64(0), "A000000001", "ghost", "member", time.Unix(0, 0)}}}, nil
 	}}
 	if _, err := New().ListByRoom(context.Background(), fq, mustRoomID(t, 4)); err == nil {
 		t.Fatal("ListByRoom: want an error for a non-positive user id row")

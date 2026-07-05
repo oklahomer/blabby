@@ -36,15 +36,15 @@ type Repo struct{}
 func New() *Repo { return &Repo{} }
 
 const listByRoomSQL = `
-SELECT m.user_id, u.display_name, m.role::text, m.joined_at
+SELECT m.user_id, u.public_code, u.display_name, m.role::text, m.joined_at
 FROM room_membership m
 JOIN service_user u ON u.id = m.user_id
 WHERE m.room_id = $1
 ORDER BY m.joined_at, m.user_id`
 
-// ListByRoom returns the room's members (joined to service_user for the display
-// name), ordered by join time then id for deterministic fan-out. The Room grain
-// calls this on activation to seed its member cache.
+// ListByRoom returns the room's members (joined to service_user for the public
+// code and display name), ordered by join time then id for deterministic
+// fan-out. The Room grain calls this on activation to seed its member cache.
 func (r *Repo) ListByRoom(ctx context.Context, q postgres.Querier, roomID id.RoomID) ([]Member, error) {
 	rows, err := q.Query(ctx, listByRoomSQL, roomID.Int64())
 	if err != nil {
@@ -217,7 +217,7 @@ func collectMembers(rows pgx.Rows) ([]Member, error) {
 	var out []Member
 	for rows.Next() {
 		var mr memberRow
-		if err := rows.Scan(&mr.userID, &mr.displayName, &mr.role, &mr.joinedAt); err != nil {
+		if err := rows.Scan(&mr.userID, &mr.publicCode, &mr.displayName, &mr.role, &mr.joinedAt); err != nil {
 			return nil, fmt.Errorf("membershiprepo: scan member: %w", err)
 		}
 		member, err := mr.toDomain()

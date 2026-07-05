@@ -79,7 +79,11 @@ func (f *fakeMembershipStore) RecordOwnershipTransfer(_ context.Context, _ id.Ro
 // userRefFor builds a validated UserRef for tests seeding the member cache.
 func userRefFor(t *testing.T, rawID, name string) id.UserRef {
 	t.Helper()
-	ref, err := id.NewUserRef(mustUserID(t, rawID), name)
+	code, err := id.NewPublicCode()
+	if err != nil {
+		t.Fatalf("NewPublicCode: %v", err)
+	}
+	ref, err := id.NewUserRef(mustUserID(t, rawID), code, name)
 	if err != nil {
 		t.Fatalf("user ref %s/%s: %v", rawID, name, err)
 	}

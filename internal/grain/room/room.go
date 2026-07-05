@@ -601,16 +601,22 @@ func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []id.UserID, 
 	})
 }
 
-// parseUserRef parses an inbound proto UserRef into a validated id.UserRef (the
-// minimal user identity ref: id + display name) at the grain boundary (parse,
-// don't validate). A nil ref, an invalid id, or an empty name is rejected so
-// handlers can return INVALID_REQUEST.
+// parseUserRef parses an inbound proto UserRef into a validated id.UserRef (id +
+// public code + display name) at the grain boundary (parse, don't validate). A
+// nil ref, an invalid id, a missing/invalid public code, or an empty name is
+// rejected so handlers can return INVALID_REQUEST. Requiring the public code
+// here means a sender/actor whose public identity could not be resolved fails
+// closed rather than fanning its internal id out to clients.
 func parseUserRef(p *commonpb.UserRef) (id.UserRef, error) {
 	userID, err := id.ParseUserID(p.GetId())
 	if err != nil {
 		return id.UserRef{}, err
 	}
-	return id.NewUserRef(userID, p.GetName())
+	code, err := id.ParsePublicCode(p.GetPublicCode())
+	if err != nil {
+		return id.UserRef{}, fmt.Errorf("user_ref: public_code: %w", err)
+	}
+	return id.NewUserRef(userID, code, p.GetName())
 }
 
 func joinErr(code errcode.Code, msg string) *roompb.JoinResponse {

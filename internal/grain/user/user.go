@@ -193,6 +193,10 @@ func (g *Grain) hydrateJoinedRooms(ctx cluster.GrainContext) {
 // reused read-only on every outbound command.
 func (g *Grain) resolveSelf(ctx cluster.GrainContext) *commonpb.UserRef {
 	identity := ctx.Identity()
+	// The degraded self carries the internal id and name for logging but no
+	// public_code: a user whose public identity could not be resolved must not
+	// have their internal id fan out to clients, so the Room grain and the
+	// connection reject/drop any command or frame it produces (fail closed).
 	fallback := &commonpb.UserRef{Id: identity, Name: identity}
 	uid, err := id.ParseUserID(identity)
 	if err != nil {
@@ -204,14 +208,15 @@ func (g *Grain) resolveSelf(ctx cluster.GrainContext) *commonpb.UserRef {
 		ref, err := g.directory.Resolve(context.Background(), uid)
 		switch {
 		case err == nil:
-			return &commonpb.UserRef{Id: ref.ID().String(), Name: ref.Name()}
+			return &commonpb.UserRef{Id: ref.ID().String(), Name: ref.Name(), PublicCode: ref.PublicCode().String()}
 		case errors.Is(err, ErrProfileNotFound):
-			// A genuine miss: no profile for this id. Benign — fall back to the raw id.
+			// A genuine miss: no profile for this id. Benign but public-code-less,
+			// so downstream fan-out of this self fails closed.
 			slog.Warn(eventUserProfileSeedFailed,
 				"grain_type", ctx.Kind(), "grain_id", identity, "reason", "directory_miss")
 		default:
-			// A backend failure silently degrading to the raw id would hide an
-			// outage, so surface the real error class loudly before falling back.
+			// A backend failure silently degrading would hide an outage, so surface
+			// the real error class loudly before falling back to the code-less self.
 			slog.Error(eventUserProfileSeedFailed,
 				"grain_type", ctx.Kind(), "grain_id", identity, "reason", "directory_error", "error", err)
 		}

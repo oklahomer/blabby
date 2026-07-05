@@ -34,6 +34,19 @@ func (activeRoomLoader) LoadRoom(_ context.Context, roomID id.RoomID) (domain.Ro
 	return domain.RoomRef{ID: roomID, PublicCode: code, Name: "Room " + roomID.String(), Status: domain.RoomStatusActive}, nil
 }
 
+// stubDirectory resolves every id to a UserRef with a valid public code, so the
+// User grain's self carries the public identity the Room grain now requires on
+// every command (a code-less self fails closed at the Room boundary).
+type stubDirectory struct{}
+
+func (stubDirectory) Resolve(_ context.Context, uid id.UserID) (id.UserRef, error) {
+	code, err := id.ParsePublicCode("A000000001")
+	if err != nil {
+		return id.UserRef{}, err
+	}
+	return id.NewUserRef(uid, code, "user-"+uid.String())
+}
+
 // syncBuffer is a goroutine-safe *bytes.Buffer wrapper. The slog handler
 // is called from any actor mailbox goroutine, and the integration test
 // asserts on the buffer from the test goroutine — bytes.Buffer is not
@@ -68,7 +81,7 @@ func (s *syncBuffer) String() string {
 func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 	// Cross-grain fan-out can activate several fresh identities, so use a longer
 	// request timeout than the single-grain test default.
-	c := clustertest.StartWithTimeout(t, 10*time.Second, room.NewKind(activeRoomLoader{}), user.NewKind(nil))
+	c := clustertest.StartWithTimeout(t, 10*time.Second, room.NewKind(activeRoomLoader{}), user.NewKind(stubDirectory{}))
 	captureBuf := &syncBuffer{}
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(captureBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))

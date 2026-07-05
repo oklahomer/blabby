@@ -87,7 +87,11 @@ func creationUser(t *testing.T, displayName string) userrepo.User {
 	if err != nil {
 		t.Fatalf("NewUserID: %v", err)
 	}
-	return userrepo.User{ID: uid, DisplayName: displayName}
+	code, err := id.ParsePublicCode("A000000001")
+	if err != nil {
+		t.Fatalf("ParsePublicCode: %v", err)
+	}
+	return userrepo.User{ID: uid, PublicCode: code, DisplayName: displayName}
 }
 
 func createdRoom(t *testing.T, rawID int64, code, name string) roomrepo.Room {

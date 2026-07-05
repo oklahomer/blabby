@@ -41,5 +41,5 @@ func (d repoDirectory) Resolve(ctx context.Context, userID id.UserID) (id.UserRe
 	if err != nil {
 		return id.UserRef{}, fmt.Errorf("user: resolve directory: %w", err)
 	}
-	return id.NewUserRef(userID, user.DisplayName)
+	return id.NewUserRef(userID, user.PublicCode, user.DisplayName)
 }

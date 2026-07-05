@@ -26,9 +26,10 @@ type Member struct {
 }
 
 // memberRow is the raw room_membership⋈service_user row in scan order; toDomain
-// parses it into a Member, enforcing the id/role invariants at the boundary.
+// parses it into a Member, enforcing the id/code/role invariants at the boundary.
 type memberRow struct {
 	userID      int64
+	publicCode  string
 	displayName string
 	role        string
 	joinedAt    time.Time
@@ -39,7 +40,11 @@ func (mr memberRow) toDomain() (Member, error) {
 	if err != nil {
 		return Member{}, fmt.Errorf("membershiprepo: row user_id: %w", err)
 	}
-	ref, err := id.NewUserRef(userID, mr.displayName)
+	code, err := id.ParsePublicCode(mr.publicCode)
+	if err != nil {
+		return Member{}, fmt.Errorf("membershiprepo: row public_code: %w", err)
+	}
+	ref, err := id.NewUserRef(userID, code, mr.displayName)
 	if err != nil {
 		return Member{}, fmt.Errorf("membershiprepo: row user_ref: %w", err)
 	}
