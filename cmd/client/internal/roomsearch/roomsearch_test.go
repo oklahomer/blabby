@@ -425,6 +425,28 @@ func TestStaleRoomsLoadedIsDropped(t *testing.T) {
 	}
 }
 
+func TestStaleRoomsLoadFailedIsDropped(t *testing.T) {
+	r := &recorder{}
+	m := New(r.submit, r.load, "http://localhost:8080")
+	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: []api.Room{{ID: "general", Name: "General"}}})
+	for _, ch := range "xyz" {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		m = asModel(t, next)
+	}
+
+	// A failure for the fragment "gen" arrives after the user typed "xyz".
+	next, _ := m.Update(api.RoomsLoadFailed{
+		Query: "gen", Status: "SERVICE_UNAVAILABLE", Message: "down", HTTPStatus: 503,
+	})
+	got := asModel(t, next)
+	if len(got.all) != 1 || got.all[0].ID != "general" {
+		t.Fatalf("stale failure replaced the list: %#v", got.all)
+	}
+	if got.headline != "" {
+		t.Fatalf("stale failure rendered headline %q", got.headline)
+	}
+}
+
 func TestMoreRowFetchesAndAppendsNextPage(t *testing.T) {
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
@@ -463,6 +485,33 @@ func TestMoreRowFetchesAndAppendsNextPage(t *testing.T) {
 	}
 	if got.next != "" || got.loadingMore {
 		t.Fatalf("next=%q loadingMore=%t, want exhausted and settled", got.next, got.loadingMore)
+	}
+}
+
+func TestMoreRowFailureSettlesLoadingAndShowsError(t *testing.T) {
+	r := &recorder{}
+	m := New(r.submit, r.load, "http://localhost:8080")
+	m, _ = updateAs(t, m, api.RoomsLoaded{
+		Rooms: []api.Room{{ID: "general", Name: "General"}},
+		Next:  "cursor-1",
+	})
+	next, _ := m.Update(keyMsg("down"))
+	m = asModel(t, next)
+	next, _ = m.Update(keyMsg("enter"))
+	m = asModel(t, next)
+	if !m.loadingMore {
+		t.Fatal("setup: expected loadingMore")
+	}
+
+	next, _ = m.Update(api.RoomsLoadFailed{
+		After: "cursor-1", Status: "SERVICE_UNAVAILABLE", Message: "down", HTTPStatus: 503,
+	})
+	got := asModel(t, next)
+	if got.loadingMore {
+		t.Fatal("loadingMore not settled after current append failure")
+	}
+	if !strings.Contains(got.headline, "Server unavailable") {
+		t.Fatalf("headline = %q, want current append failure rendered", got.headline)
 	}
 }
 
@@ -549,6 +598,41 @@ func TestAppendRacingReplaceIsDropped(t *testing.T) {
 	}
 	if got.loadingMore {
 		t.Fatal("loadingMore must settle when the stale append is dropped")
+	}
+}
+
+func TestAppendFailureRacingReplaceIsDropped(t *testing.T) {
+	r := &recorder{}
+	m := New(r.submit, r.load, "http://localhost:8080")
+	m, _ = updateAs(t, m, api.RoomsLoaded{
+		Rooms: []api.Room{{ID: "a", Name: "A"}},
+		Next:  "cursor-1",
+	})
+	next, _ := m.Update(keyMsg("down"))
+	m = asModel(t, next)
+	next, _ = m.Update(keyMsg("enter"))
+	m = asModel(t, next)
+
+	m, _ = updateAs(t, m, api.RoomsLoaded{
+		Rooms: []api.Room{{ID: "a2", Name: "A2"}},
+		Next:  "cursor-9",
+	})
+
+	next, _ = m.Update(api.RoomsLoadFailed{
+		After: "cursor-1", Status: "SERVICE_UNAVAILABLE", Message: "down", HTTPStatus: 503,
+	})
+	got := asModel(t, next)
+	if len(got.all) != 1 || got.all[0].ID != "a2" {
+		t.Fatalf("stale append failure corrupted the list: %#v", got.all)
+	}
+	if got.next != "cursor-9" {
+		t.Fatalf("next = %q, want the fresh listing's cursor", got.next)
+	}
+	if got.headline != "" {
+		t.Fatalf("stale append failure rendered headline %q", got.headline)
+	}
+	if got.loadingMore {
+		t.Fatal("loadingMore must settle when the stale append failure is dropped")
 	}
 }
 

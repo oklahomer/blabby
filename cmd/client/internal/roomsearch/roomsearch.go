@@ -168,6 +168,14 @@ func (m Model) Update(msg tea.Msg) (modal.Modal, tea.Cmd) {
 		m.clampCursor()
 		return m, nil
 	case api.RoomsLoadFailed:
+		if v.After != "" {
+			if v.Query != m.loadedQuery || v.After != m.next {
+				m.loadingMore = false
+				return m, nil
+			}
+		} else if v.Query != m.trimmedFilter() {
+			return m, nil
+		}
 		m.phase = phaseIdle
 		m.loadingMore = false
 		m.applyFailure(v.Status, v.Message, v.HTTPStatus)
