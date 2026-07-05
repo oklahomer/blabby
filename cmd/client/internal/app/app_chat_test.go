@@ -268,7 +268,7 @@ func TestChatSendAndEchoRenders(t *testing.T) {
 	}
 }
 
-func TestChatMessagesRenderInTimestampOrder(t *testing.T) {
+func TestChatMessagesRenderInEventIDOrder(t *testing.T) {
 	stub := newChatStubServer(t)
 	stub.loginToken = validJWT(t, "u-rina-1")
 
@@ -286,7 +286,7 @@ func TestChatMessagesRenderInTimestampOrder(t *testing.T) {
 		return strings.Contains(string(out), "type a message")
 	}, teatest.WithCheckInterval(100*time.Millisecond), teatest.WithDuration(5*time.Second))
 
-	// Inject two frames out of order: the later timestamp arrives first.
+	// Inject two frames out of order: the higher event id arrives first.
 	tm.Send(api.WSFrameReceived{Type: "message", Raw: messageFrameJSON("general", "bob", "bravo-msg", 5, 5000), Generation: 1})
 	tm.Send(api.WSFrameReceived{Type: "message", Raw: messageFrameJSON("general", "alice", "alpha-msg", 1, 1000), Generation: 1})
 
@@ -303,9 +303,9 @@ func TestChatMessagesRenderInTimestampOrder(t *testing.T) {
 	if len(bucket) != 2 {
 		t.Fatalf("expected 2 messages in the bucket, got %d: %#v", len(bucket), bucket)
 	}
-	// Ordered by server timestamp (1000 before 5000), not arrival order.
+	// Ordered by event id (1 before 5), not arrival order.
 	if bucket[0].Text != "alpha-msg" || bucket[1].Text != "bravo-msg" {
-		t.Errorf("messages not ordered by timestamp: %#v", bucket)
+		t.Errorf("messages not ordered by event id: %#v", bucket)
 	}
 }
 

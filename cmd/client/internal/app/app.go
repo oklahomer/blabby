@@ -544,13 +544,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.Generation != m.sessionGeneration {
 			return m, nil
 		}
-		// message and error frames render into the Main pane; joined /
-		// left / ping are delivered but ignored in this phase (see the
-		// deferred-work notes for system lines and pong replies).
+		// message, joined, and left frames render into the active room's
+		// scrollback; error sets the inline Main-pane error; ping is
+		// delivered but not yet answered (the pong reply is parked with the
+		// heartbeat arc). Each decoder fails closed, dropping a frame the
+		// server sent malformed or without an event id.
 		switch v.Type {
 		case "message":
 			if cm, ok := api.DecodeChatMessage(v.Raw); ok {
 				m = m.appendChatMessage(cm)
+			}
+			return m, nil
+		case "joined", "left":
+			if me, ok := api.DecodeMemberEvent(v.Raw); ok {
+				m = m.appendMemberEvent(me)
 			}
 			return m, nil
 		case "error":

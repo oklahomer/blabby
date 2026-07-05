@@ -194,6 +194,96 @@ func TestViewRendersInlineError(t *testing.T) {
 	}
 }
 
+func TestViewRendersJoinedSystemLine(t *testing.T) {
+	at := time.Date(2026, 5, 30, 14, 22, 30, 0, time.Local)
+	out := View(State{
+		RoomLabel: "general",
+		Messages:  []Message{{ID: 1, Kind: KindJoined, Sender: "bob", At: at}},
+	}, false, 60, 20)
+	if !strings.Contains(out, "14:22:30") {
+		t.Errorf("system line missing timestamp:\n%s", out)
+	}
+	if !strings.Contains(out, "— bob joined —") {
+		t.Errorf("expected joined system line body:\n%s", out)
+	}
+}
+
+func TestViewRendersLeftSystemLine(t *testing.T) {
+	at := time.Date(2026, 5, 30, 14, 22, 30, 0, time.Local)
+	out := View(State{
+		RoomLabel: "general",
+		Messages:  []Message{{ID: 1, Kind: KindLeft, Sender: "bob", At: at}},
+	}, false, 60, 20)
+	if !strings.Contains(out, "— bob left —") {
+		t.Errorf("expected left system line body:\n%s", out)
+	}
+}
+
+func TestLinesInsertsSeparatorOnDateChange(t *testing.T) {
+	day1 := time.Date(2026, 5, 30, 9, 0, 0, 0, time.Local)
+	day2 := time.Date(2026, 5, 31, 9, 0, 0, 0, time.Local)
+	lines := Lines([]Message{
+		{ID: 1, At: day1},
+		{ID: 2, At: day1.Add(time.Minute)},
+		{ID: 3, At: day2},
+	})
+	// Two same-day messages, then a separator, then the next day's message.
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines (3 messages + 1 separator), got %d: %#v", len(lines), lines)
+	}
+	if lines[0].Separator || lines[1].Separator {
+		t.Fatalf("no separator should precede the first day's messages: %#v", lines)
+	}
+	if !lines[2].Separator || lines[2].Date != "2026-05-31" {
+		t.Fatalf("expected a 2026-05-31 separator at index 2: %#v", lines[2])
+	}
+	if lines[3].Separator || lines[3].Msg.ID != 3 {
+		t.Fatalf("expected day-2 message after the separator: %#v", lines[3])
+	}
+}
+
+func TestLinesNoSeparatorWithinOneDay(t *testing.T) {
+	at := time.Date(2026, 5, 30, 9, 0, 0, 0, time.Local)
+	lines := Lines([]Message{{ID: 1, At: at}, {ID: 2, At: at.Add(time.Hour)}})
+	for _, ln := range lines {
+		if ln.Separator {
+			t.Fatalf("no separator expected within a single day: %#v", lines)
+		}
+	}
+}
+
+func TestLinesZeroTimestampNeitherStartsNorBreaksARun(t *testing.T) {
+	day1 := time.Date(2026, 5, 30, 9, 0, 0, 0, time.Local)
+	day2 := time.Date(2026, 5, 31, 9, 0, 0, 0, time.Local)
+	// A zero-At entry sits between two dated entries of different days: it
+	// must not trigger its own separator, and the day change is still marked
+	// against the last dated entry.
+	lines := Lines([]Message{
+		{ID: 1, At: day1},
+		{ID: 2}, // zero At
+		{ID: 3, At: day2},
+	})
+	sepCount := 0
+	for _, ln := range lines {
+		if ln.Separator {
+			sepCount++
+			if ln.Date != "2026-05-31" {
+				t.Fatalf("separator date = %q, want 2026-05-31", ln.Date)
+			}
+		}
+	}
+	if sepCount != 1 {
+		t.Fatalf("expected exactly one separator, got %d: %#v", sepCount, lines)
+	}
+}
+
+func TestFormatMessageLineSanitizesControlRuns(t *testing.T) {
+	line := formatMessageLine(Message{Sender: "a\tb", Text: "one\ntwo\rthree", Kind: KindChat}, 0)
+	if strings.ContainsAny(line, "\n\r\t") {
+		t.Fatalf("control runs not sanitized to spaces: %q", line)
+	}
+}
+
 // countVisibleBracketed returns how many of the bracketed message
 // bodies "[0]".."[n-1]" appear in the rendered output.
 func countVisibleBracketed(rendered string, n int) int {

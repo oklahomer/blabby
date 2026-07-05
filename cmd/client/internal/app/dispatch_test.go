@@ -497,6 +497,13 @@ func messageFrameJSONNamed(room, senderID, senderName, text string, eventID, ms 
 		room, itoa64(eventID), senderID, senderName, text, ms))
 }
 
+// memberFrameJSON builds a raw {"type":"joined"|"left"} membership frame.
+func memberFrameJSON(kind, room, userID, userName string, eventID, ms int64) []byte {
+	return []byte(fmt.Sprintf(
+		`{"type":%q,"room_id":%q,"event_id":%q,"user":{"id":%q,"name":%q},"timestamp":%d}`,
+		kind, room, itoa64(eventID), userID, userName, ms))
+}
+
 // itoa64 renders a decimal event id for the wire fixtures.
 func itoa64(v int64) string { return strconv.FormatInt(v, 10) }
 
@@ -517,18 +524,59 @@ func TestUpdateMessageFrameAppendsToActiveBucket(t *testing.T) {
 	}
 }
 
-func TestUpdateMessageFrameSortsByTimestamp(t *testing.T) {
+func TestUpdateMessageFrameSortsByEventID(t *testing.T) {
 	m := chatReadyModel(t)
-	// Arrive out of order: the later timestamp lands first.
-	n1, _ := m.Update(chatFrame(m, "message", messageFrameJSON("general", "a", "late", 5, 5000)))
+	// event_id order and timestamp order disagree: "first" has the smaller
+	// event id but the later timestamp. Ordering by event id must win.
+	n1, _ := m.Update(chatFrame(m, "message", messageFrameJSON("general", "a", "second", 20, 1000)))
 	n1Model := n1.(Model)
-	n2, _ := n1Model.Update(chatFrame(n1Model, "message", messageFrameJSON("general", "b", "early", 1, 1000)))
+	n2, _ := n1Model.Update(chatFrame(n1Model, "message", messageFrameJSON("general", "b", "first", 10, 9000)))
 	bucket := n2.(Model).messages["general"]
 	if len(bucket) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(bucket))
 	}
-	if bucket[0].Text != "early" || bucket[1].Text != "late" {
-		t.Fatalf("messages not sorted by timestamp: %#v", bucket)
+	if bucket[0].Text != "first" || bucket[1].Text != "second" {
+		t.Fatalf("messages not sorted by event id: %#v", bucket)
+	}
+}
+
+func TestUpdateMessageFrameDedupsByEventID(t *testing.T) {
+	m := chatReadyModel(t)
+	// The same event id arriving twice (e.g. a live frame that also lands
+	// via backfill) is inserted once.
+	n1, _ := m.Update(chatFrame(m, "message", messageFrameJSON("general", "a", "hello", 42, 1000)))
+	n1Model := n1.(Model)
+	n2, _ := n1Model.Update(chatFrame(n1Model, "message", messageFrameJSON("general", "a", "hello", 42, 1000)))
+	bucket := n2.(Model).messages["general"]
+	if len(bucket) != 1 {
+		t.Fatalf("expected 1 deduped message, got %d: %#v", len(bucket), bucket)
+	}
+}
+
+func TestUpdateMemberFramesAppendSystemLines(t *testing.T) {
+	m := chatReadyModel(t)
+	n1, cmd := m.Update(chatFrame(m, "joined", memberFrameJSON("joined", "general", "U9", "Bob", 5, 1000)))
+	if cmd != nil {
+		t.Fatal("a membership frame must not dispatch a cmd")
+	}
+	n2, _ := n1.(Model).Update(chatFrame(n1.(Model), "left", memberFrameJSON("left", "general", "U9", "Bob", 6, 2000)))
+	bucket := n2.(Model).messages["general"]
+	if len(bucket) != 2 {
+		t.Fatalf("expected 2 system lines, got %d: %#v", len(bucket), bucket)
+	}
+	if bucket[0].Kind != mainview.KindJoined || bucket[0].Sender != "Bob" {
+		t.Fatalf("first entry not a joined system line: %#v", bucket[0])
+	}
+	if bucket[1].Kind != mainview.KindLeft {
+		t.Fatalf("second entry not a left system line: %#v", bucket[1])
+	}
+}
+
+func TestUpdateMemberFrameMalformedIgnored(t *testing.T) {
+	m := chatReadyModel(t)
+	next, _ := m.Update(chatFrame(m, "joined", []byte(`{"type":"joined"}`))) // no event_id
+	if len(next.(Model).messages["general"]) != 0 {
+		t.Fatal("a membership frame without an event id must not append")
 	}
 }
 
