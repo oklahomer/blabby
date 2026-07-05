@@ -13,6 +13,7 @@ import (
 
 	"github.com/oklahomer/blabby/cmd/client/internal/api"
 	"github.com/oklahomer/blabby/cmd/client/internal/chrome"
+	"github.com/oklahomer/blabby/cmd/client/internal/createroom"
 	"github.com/oklahomer/blabby/cmd/client/internal/login"
 	"github.com/oklahomer/blabby/cmd/client/internal/modal"
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/info"
@@ -173,16 +174,30 @@ func (m Model) reopenLoginModal(prefillEmail string) modal.Modal {
 // about them.
 func (m Model) joinRoomSubmitter() roomsearch.Submitter {
 	return func(roomID, roomName string) tea.Cmd {
-		return api.JoinRoomCmd(m.httpClient, m.server.String(), m.token, roomID, roomName, api.DefaultRoomCallTimeout)
+		return api.JoinRoomCmd(m.httpClient, m.server.String(), m.token, roomID, roomName, m.sessionGeneration, api.DefaultRoomCallTimeout)
 	}
 }
 
-// roomsLoader returns the closure the search modal invokes from Init
-// to fetch the server catalogue. Same seam pattern as loginSubmitter.
+// roomsLoader returns the closure the search modal invokes to fetch one
+// catalogue page (initial load, debounced q search, keyset paging). Same
+// seam pattern as loginSubmitter.
 func (m Model) roomsLoader() roomsearch.Loader {
-	return func() tea.Cmd {
-		return api.LoadRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout)
+	return func(query api.RoomQuery) tea.Cmd {
+		return api.LoadRoomsCmd(m.httpClient, m.server.String(), m.token, query, m.sessionGeneration, api.DefaultRoomCallTimeout)
 	}
+}
+
+// createRoomSubmitter returns the closure the create-room modal calls when
+// the user submits a valid name.
+func (m Model) createRoomSubmitter() createroom.Submitter {
+	return func(name string) tea.Cmd {
+		return api.CreateRoomCmd(m.httpClient, m.server.String(), m.token, name, m.sessionGeneration, api.DefaultRoomCallTimeout)
+	}
+}
+
+// openRoomSearchModal builds a fresh search modal wired to this session.
+func (m Model) openRoomSearchModal() modal.Modal {
+	return roomsearch.New(m.joinRoomSubmitter(), m.roomsLoader(), m.server.String())
 }
 
 // Update routes incoming messages through the state-machine
@@ -271,7 +286,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Conn:       m.conn,
 				Generation: m.sessionGeneration,
 			}),
-			api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout),
+			api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout),
 		)
 
 	case api.LoginRejected:
@@ -357,6 +372,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case api.JoinedRoomsLoaded:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
 		// Descriptors carry the name alongside the id, so the Rooms pane shows
 		// real names after a reload without relying on an in-session capture.
 		if m.nameForID == nil {
@@ -371,6 +389,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.roomsState.NameForID = m.nameForID
 		m.roomsState.Loading = false
 		m.roomsState.LoadError = ""
+		// A reload replaces the list a half-armed leave gesture referred to;
+		// disarm it so the confirm banner cannot name a stale room.
+		m.roomsState.PendingLeaveID = ""
 		if len(ids) == 0 {
 			m.roomsState.Cursor = 0
 		} else if m.roomsState.Cursor > len(ids)-1 {
@@ -379,6 +400,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case api.JoinedRoomsLoadFailed:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
 		if v.HTTPStatus == http.StatusUnauthorized {
 			return m.handleSessionExpiry()
 		}
@@ -387,10 +411,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case api.RoomJoined:
-		if m.token == "" || m.conn == nil {
-			// Join HTTP completed after the session ended
-			// (WSDisconnected raced the response). Drop the message —
-			// the user is already looking at a fresh login modal.
+		if !m.liveRoomResult(v.Generation) {
 			return m, nil
 		}
 		if m.nameForID == nil {
@@ -404,9 +425,86 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload from the server so the Rooms pane reflects the
 		// authoritative membership; the modal's optimistic-add does
 		// not own this state.
-		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout)
+		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout)
+
+	case roomsearch.CreateRoomRequested:
+		if !m.hasLiveSession() {
+			return m, nil
+		}
+		if _, ok := m.modal.(roomsearch.Model); !ok {
+			return m, nil
+		}
+		m.modal = createroom.New(m.createRoomSubmitter(), m.server.String())
+		return m, m.modal.Init()
+
+	case createroom.Cancelled:
+		if !m.hasLiveSession() {
+			return m, nil
+		}
+		if _, ok := m.modal.(createroom.Model); !ok {
+			return m, nil
+		}
+		m.modal = m.openRoomSearchModal()
+		return m, m.modal.Init()
+
+	case api.RoomCreated:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
+		// The server seeded the caller as the room's owner, so this is a
+		// completed join: activate the room and reload the authoritative list.
+		if m.nameForID == nil {
+			m.nameForID = map[string]string{}
+		}
+		m.nameForID[v.Room.ID] = v.Room.Name
+		m.roomsState.NameForID = m.nameForID
+		m.activeRoomID = v.Room.ID
+		m.mainviewState.RoomLabel = v.Room.Name
+		m.modal = nil
+		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout)
+
+	case api.RoomCreateFailed:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
+		if v.HTTPStatus == http.StatusUnauthorized {
+			return m.handleSessionExpiry()
+		}
+		if m.modal != nil {
+			next, cmd := m.modal.Update(msg)
+			m.modal = next
+			return m, cmd
+		}
+		return m, nil
+
+	case api.RoomLeft:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
+		if m.activeRoomID == v.RoomID {
+			// The active room is gone from the user's set; the Main pane
+			// returns to its no-room placeholder.
+			m.activeRoomID = ""
+			m.mainviewState.RoomLabel = ""
+			m.mainError = ""
+		}
+		m.roomsState.ActionError = ""
+		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout)
+
+	case api.RoomLeaveFailed:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
+		if v.HTTPStatus == http.StatusUnauthorized {
+			return m.handleSessionExpiry()
+		}
+		m.roomsState.ActionError = api.Humanise(v.Status, v.Message)
+		return m, nil
 
 	case api.RoomsLoaded:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
 		if m.modal != nil {
 			next, cmd := m.modal.Update(msg)
 			m.modal = next
@@ -415,6 +513,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case api.RoomsLoadFailed:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
 		if v.HTTPStatus == http.StatusUnauthorized {
 			return m.handleSessionExpiry()
 		}
@@ -426,6 +527,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case api.RoomJoinFailed:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
 		if v.HTTPStatus == http.StatusUnauthorized {
 			return m.handleSessionExpiry()
 		}
@@ -540,7 +644,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// `/` opens the room search globally, except while the composer is
 	// focused — there it is a literal character of the message.
 	if k.String() == "/" && m.focus != focusMainInput {
-		m.modal = roomsearch.New(m.joinRoomSubmitter(), m.roomsLoader(), m.server.String())
+		m.modal = m.openRoomSearchModal()
 		return m, m.modal.Init()
 	}
 
@@ -575,7 +679,14 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case rooms.OutcomeRetryLoad:
 			m.roomsState.Loading = true
 			m.roomsState.LoadError = ""
-			return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, api.DefaultRoomCallTimeout)
+			return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout)
+		case rooms.OutcomeLeaveRoom:
+			id := nextState.ActiveID()
+			if id == "" {
+				return m, nil
+			}
+			return m, api.LeaveRoomCmd(m.httpClient, m.server.String(), m.token,
+				id, nextState.ResolveName(id), m.sessionGeneration, api.DefaultRoomCallTimeout)
 		}
 		return m, nil
 	}
@@ -610,6 +721,20 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// focusMainView has no key bindings in this phase; scrollback scroll
 	// keys are out of scope (see the deferred-work notes).
 	return m, nil
+}
+
+// hasLiveSession reports whether this model still owns an authenticated
+// WebSocket session. Room HTTP completions are tied to the session that
+// dispatched them; after disconnect, same-generation completions are stale too.
+func (m Model) hasLiveSession() bool {
+	return m.token != "" && m.conn != nil
+}
+
+// liveRoomResult reports whether a room HTTP result belongs to the current
+// live session. Call this before handling unauthorized responses so stale 401s
+// from an old request cannot expire a newer login.
+func (m Model) liveRoomResult(generation api.SessionGeneration) bool {
+	return m.hasLiveSession() && generation == m.sessionGeneration
 }
 
 // handleSessionExpiry discards the current JWT, closes the WebSocket

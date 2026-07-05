@@ -194,11 +194,12 @@ func TestUpdateRoomJoinedSetsActiveRoomAndCloses(t *testing.T) {
 	m := makeModel(t)
 	m.modal = nil
 	m.token = "fake.jwt"
+	m.sessionGeneration = 1
 	// RoomJoined requires a live session — conn must be non-nil so the
 	// post-WSDisconnected race guard does not drop the message.
 	m.conn = &websocket.Conn{}
 
-	next, cmd := m.Update(api.RoomJoined{RoomID: "general", RoomName: "General"})
+	next, cmd := m.Update(api.RoomJoined{RoomID: "general", RoomName: "General", Generation: m.sessionGeneration})
 	got := next.(Model)
 
 	if got.activeRoomID != "general" {
@@ -224,7 +225,7 @@ func TestUpdateRoomJoinedAfterSessionEndsIsDropped(t *testing.T) {
 	// stays put and no phantom active-room state is written.
 	m := makeModel(t) // login modal installed; token == ""; conn == nil
 
-	next, cmd := m.Update(api.RoomJoined{RoomID: "general", RoomName: "General"})
+	next, cmd := m.Update(api.RoomJoined{RoomID: "general", RoomName: "General", Generation: 1})
 	got := next.(Model)
 
 	if got.activeRoomID != "" {
@@ -250,8 +251,9 @@ func TestUpdateRoomsLoadFailedUnauthorizedTriggersSessionExpiry(t *testing.T) {
 	m.token = "fake.jwt"
 	m.conn = &websocket.Conn{}
 	m.email = "rina@example.com"
+	m.sessionGeneration = 1
 
-	next, cmd := m.Update(api.RoomsLoadFailed{HTTPStatus: http.StatusUnauthorized})
+	next, cmd := m.Update(api.RoomsLoadFailed{HTTPStatus: http.StatusUnauthorized, Generation: m.sessionGeneration})
 	got := next.(Model)
 
 	if got.token != "" {
@@ -271,8 +273,9 @@ func TestUpdateRoomJoinFailedUnauthorizedTriggersSessionExpiry(t *testing.T) {
 	m.token = "fake.jwt"
 	m.conn = &websocket.Conn{}
 	m.email = "rina@example.com"
+	m.sessionGeneration = 1
 
-	next, cmd := m.Update(api.RoomJoinFailed{HTTPStatus: http.StatusUnauthorized})
+	next, cmd := m.Update(api.RoomJoinFailed{HTTPStatus: http.StatusUnauthorized, Generation: m.sessionGeneration})
 	got := next.(Model)
 
 	if got.token != "" {
@@ -286,14 +289,38 @@ func TestUpdateRoomJoinFailedUnauthorizedTriggersSessionExpiry(t *testing.T) {
 	}
 }
 
+func TestUpdateRoomsLoadFailedUnauthorizedFromOldGenerationDropped(t *testing.T) {
+	m := chatReadyModel(t)
+	m.width, m.height = 100, 30
+	m.sessionGeneration = 2
+
+	next, cmd := m.Update(api.RoomsLoadFailed{
+		HTTPStatus: http.StatusUnauthorized,
+		Status:     "AUTH_EXPIRED_TOKEN",
+		Generation: 1,
+	})
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatal("stale room-list failure must not dispatch a command")
+	}
+	if got.token == "" || got.conn == nil {
+		t.Fatal("stale room-list failure expired the current session")
+	}
+	if got.modal != nil {
+		t.Fatalf("stale room-list failure opened a modal: %T", got.modal)
+	}
+}
+
 func TestUpdateSessionExpiryClearsNameForID(t *testing.T) {
 	m := makeModel(t)
 	m.modal = nil
 	m.token = "fake.jwt"
 	m.conn = &websocket.Conn{}
 	m.nameForID = map[string]string{"general": "General"}
+	m.sessionGeneration = 1
 
-	next, _ := m.Update(api.JoinedRoomsLoadFailed{HTTPStatus: http.StatusUnauthorized})
+	next, _ := m.Update(api.JoinedRoomsLoadFailed{HTTPStatus: http.StatusUnauthorized, Generation: m.sessionGeneration})
 	got := next.(Model)
 
 	if got.nameForID != nil {
@@ -305,11 +332,14 @@ func TestUpdateJoinedRoomsLoadedPopulatesPane(t *testing.T) {
 	m := makeModel(t)
 	m.modal = nil
 	m.roomsState.Loading = true
+	m.token = "fake.jwt"
+	m.conn = &websocket.Conn{}
+	m.sessionGeneration = 1
 
 	next, _ := m.Update(api.JoinedRoomsLoaded{Rooms: []api.Room{
 		{ID: "general", Name: "General"},
 		{ID: "random", Name: "Random"},
-	}})
+	}, Generation: m.sessionGeneration})
 	got := next.(Model)
 	if got.roomsState.Loading {
 		t.Fatal("Loading flag not cleared")
@@ -326,9 +356,12 @@ func TestUpdateJoinedRoomsLoadFailedShowsError(t *testing.T) {
 	m := makeModel(t)
 	m.modal = nil
 	m.roomsState.Loading = true
+	m.token = "fake.jwt"
+	m.conn = &websocket.Conn{}
+	m.sessionGeneration = 1
 
 	next, _ := m.Update(api.JoinedRoomsLoadFailed{
-		Status: "SERVICE_UNAVAILABLE", Message: "down", HTTPStatus: 503,
+		Status: "SERVICE_UNAVAILABLE", Message: "down", HTTPStatus: 503, Generation: m.sessionGeneration,
 	})
 	got := next.(Model)
 	if got.roomsState.LoadError == "" {
@@ -346,8 +379,12 @@ func TestUpdateJoinedRoomsLoadFailedUnauthorizedReopensLogin(t *testing.T) {
 	m.token = "fake.jwt"
 	m.email = "rina@example.com"
 	m.userID = "u-rina-1"
+	m.conn = &websocket.Conn{}
+	m.sessionGeneration = 1
 
-	next, cmd := m.Update(api.JoinedRoomsLoadFailed{HTTPStatus: 401, Status: "AUTH_EXPIRED_TOKEN"})
+	next, cmd := m.Update(api.JoinedRoomsLoadFailed{
+		HTTPStatus: 401, Status: "AUTH_EXPIRED_TOKEN", Generation: m.sessionGeneration,
+	})
 	got := next.(Model)
 	if got.token != "" {
 		t.Fatal("token not discarded on 401")

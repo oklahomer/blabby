@@ -21,6 +21,9 @@ const cursorGlyph = "› "
 // with the column occupied by cursorGlyph on the cursor row.
 const indent = "  "
 
+// pageStep is how many rows pgup/pgdn move the cursor.
+const pageStep = 10
+
 // State holds the rendering inputs for the Rooms pane. A zero State
 // renders as the empty placeholder — Loading=false, LoadError="",
 // JoinedIDs=nil, NameForID=nil.
@@ -40,6 +43,13 @@ type State struct {
 	// session's joins. Rooms loaded from a prior session render with
 	// the ID until the user joins them again in-session.
 	NameForID map[string]string
+	// PendingLeaveID is the room awaiting the second x of the
+	// leave-confirmation gesture. Any key other than the confirming x
+	// clears it.
+	PendingLeaveID string
+	// ActionError is the humanised outcome of the last failed
+	// key-driven action (currently: leave). Cleared on the next key.
+	ActionError string
 }
 
 // Outcome describes the side effect a single key press has produced.
@@ -58,6 +68,10 @@ const (
 	// OutcomeRetryLoad means the user pressed r while the pane was
 	// in a load-error state and wants the joined-rooms list re-fetched.
 	OutcomeRetryLoad
+	// OutcomeLeaveRoom means the user confirmed the two-press leave
+	// gesture on the room under the cursor. Caller reads
+	// State.ActiveID() to learn which.
+	OutcomeLeaveRoom
 )
 
 // HandleKey applies a single key press to the pane state. The
@@ -67,7 +81,14 @@ const (
 // Movement keys clamp at the list boundaries (no wraparound). Enter
 // on an empty list, r without a pending load error, and any unknown
 // key all return OutcomeNone with the state otherwise unchanged.
+// Leaving is a two-press gesture: the first x arms the confirmation
+// for the room under the cursor, a second x on the same room confirms
+// it, and any other key (including moving to another room) disarms it.
 func HandleKey(state State, key string) (State, Outcome) {
+	state.ActionError = ""
+	if key != "x" {
+		state.PendingLeaveID = ""
+	}
 	switch key {
 	case "up", "k":
 		if state.Cursor > 0 {
@@ -79,6 +100,31 @@ func HandleKey(state State, key string) (State, Outcome) {
 			state.Cursor++
 		}
 		return state, OutcomeNone
+	case "pgup":
+		state.Cursor -= pageStep
+		if state.Cursor < 0 {
+			state.Cursor = 0
+		}
+		return state, OutcomeNone
+	case "pgdown":
+		state.Cursor += pageStep
+		if last := len(state.JoinedIDs) - 1; state.Cursor > last {
+			if last < 0 {
+				last = 0
+			}
+			state.Cursor = last
+		}
+		return state, OutcomeNone
+	case "home":
+		state.Cursor = 0
+		return state, OutcomeNone
+	case "end":
+		last := len(state.JoinedIDs) - 1
+		if last < 0 {
+			last = 0
+		}
+		state.Cursor = last
+		return state, OutcomeNone
 	case "enter":
 		if len(state.JoinedIDs) == 0 {
 			return state, OutcomeNone
@@ -89,6 +135,18 @@ func HandleKey(state State, key string) (State, Outcome) {
 			return state, OutcomeNone
 		}
 		return state, OutcomeRetryLoad
+	case "x":
+		active := state.ActiveID()
+		if active == "" {
+			state.PendingLeaveID = ""
+			return state, OutcomeNone
+		}
+		if state.PendingLeaveID == active {
+			state.PendingLeaveID = ""
+			return state, OutcomeLeaveRoom
+		}
+		state.PendingLeaveID = active
+		return state, OutcomeNone
 	}
 	return state, OutcomeNone
 }
@@ -152,6 +210,14 @@ func bodyLines(s State, focused bool) []string {
 			prefix = cursorGlyph
 		}
 		rows = append(rows, prefix+label)
+	}
+	if s.PendingLeaveID != "" {
+		rows = append(rows, "",
+			ui.Error().Render("press x again to leave"),
+			ui.Error().Render(s.ResolveName(s.PendingLeaveID)))
+	}
+	if s.ActionError != "" {
+		rows = append(rows, "", ui.Error().Render(s.ActionError))
 	}
 	return rows
 }
