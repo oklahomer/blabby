@@ -85,6 +85,29 @@ func TestViewOverflowKeepsNewestTail(t *testing.T) {
 	}
 }
 
+func TestVisibleLinesOffsetWindowsOlder(t *testing.T) {
+	base := time.Date(2026, 5, 30, 9, 0, 0, 0, time.Local)
+	lines := make([]Line, 0, 10)
+	for i := 0; i < 10; i++ {
+		lines = append(lines, Line{Msg: Message{ID: int64(i), Kind: KindChat, At: base.Add(time.Duration(i) * time.Second)}})
+	}
+	height := reservedRows + 3 // avail == 3
+
+	pinned := visibleLines(lines, height, false, 0)
+	if len(pinned) != 3 || pinned[2].Msg.ID != 9 {
+		t.Fatalf("offset 0 should show the newest 3 lines ending at id 9: %#v", pinned)
+	}
+	scrolled := visibleLines(lines, height, false, 2)
+	if len(scrolled) != 3 || scrolled[0].Msg.ID != 5 || scrolled[2].Msg.ID != 7 {
+		t.Fatalf("offset 2 should show ids 5..7: %#v", scrolled)
+	}
+	// Over-scroll clamps to the oldest window rather than running off-slice.
+	over := visibleLines(lines, height, false, 999)
+	if len(over) != 3 || over[0].Msg.ID != 0 {
+		t.Fatalf("over-scroll should clamp to the oldest window: %#v", over)
+	}
+}
+
 func TestViewOverflowErrorRowReservesScrollbackLine(t *testing.T) {
 	msgs := make([]Message, 0, 30)
 	at := time.Date(2026, 5, 30, 0, 0, 0, 0, time.Local)

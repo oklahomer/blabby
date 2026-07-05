@@ -118,6 +118,10 @@ type State struct {
 	// FetchingOlder appends a subtle "(loading history…)" hint to the
 	// status line while a backfill page is in flight for the active room.
 	FetchingOlder bool
+	// Offset is how many rows the scrollback is scrolled up from the newest
+	// line; 0 pins the view to the bottom. It is clamped to the scrollable
+	// range at render time.
+	Offset int
 }
 
 // View renders the pane content for the given inner width and height.
@@ -137,7 +141,7 @@ func View(s State, _ bool, width, height int) string {
 		ui.Title().Render(clip(label, width)),
 		statusLine(s.Connected, s.FetchingOlder),
 		"",
-		scrollback(s.Messages, width, height, s.ErrorLine != ""),
+		scrollback(s.Messages, width, height, s.ErrorLine != "", s.Offset),
 	}
 	if s.ErrorLine != "" {
 		parts = append(parts, ui.Error().Render(clip(s.ErrorLine, width)))
@@ -162,12 +166,12 @@ func statusLine(connected, fetchingOlder bool) string {
 	return line
 }
 
-// scrollback renders the visible rows (newest at the bottom), or the
-// empty placeholder when there are no messages. Messages are expanded to
-// physical rows (with date separators) before windowing so a separator
-// occupies a row like any other line.
-func scrollback(msgs []Message, width, height int, hasError bool) string {
-	visible := visibleLines(Lines(msgs), height, hasError)
+// scrollback renders the visible rows (newest at the bottom, unless
+// scrolled up by offset), or the empty placeholder when there are no
+// messages. Messages are expanded to physical rows (with date separators)
+// before windowing so a separator occupies a row like any other line.
+func scrollback(msgs []Message, width, height int, hasError bool, offset int) string {
+	visible := visibleLines(Lines(msgs), height, hasError, offset)
 	if len(visible) == 0 {
 		return ui.Subtle().Render("(no messages yet)")
 	}
@@ -191,26 +195,52 @@ func renderLine(ln Line, width int) string {
 	}
 }
 
-// visibleLines returns the newest tail of lines that fits the pane's
-// inner height after the fixed rows are reserved. The newest lines sit at
-// the bottom and are never the ones dropped; only the oldest overflow is
-// hidden. A non-positive height returns every line.
-func visibleLines(lines []Line, height int, hasError bool) []Line {
+// visibleLines returns the window of lines that fits the pane's inner
+// height after the fixed rows are reserved. offset scrolls the window up
+// from the bottom (0 pins to the newest line); it is clamped to the
+// scrollable range so an over-scroll shows the oldest lines rather than
+// running off the slice. A non-positive height returns every line.
+func visibleLines(lines []Line, height int, hasError bool, offset int) []Line {
 	if len(lines) == 0 || height <= 0 {
 		return lines
 	}
+	avail := availableRows(height, hasError)
+	if len(lines) <= avail {
+		return lines
+	}
+	offset = clampWindowOffset(offset, len(lines)-avail)
+	end := len(lines) - offset
+	return lines[end-avail : end]
+}
+
+// VisibleCapacity is how many scrollback rows fit the pane's inner height
+// after the fixed rows (and the optional error row) are reserved. The root
+// Model uses it to clamp the scroll offset and size a page jump.
+func VisibleCapacity(height int, hasError bool) int {
+	return availableRows(height, hasError)
+}
+
+// availableRows is the scrollback row budget for the given inner height.
+func availableRows(height int, hasError bool) int {
 	reserved := reservedRows
 	if hasError {
 		reserved++
 	}
-	avail := height - reserved
-	if avail < 1 {
-		avail = 1
+	if avail := height - reserved; avail > 1 {
+		return avail
 	}
-	if len(lines) <= avail {
-		return lines
+	return 1
+}
+
+// clampWindowOffset bounds offset into [0, maxOffset].
+func clampWindowOffset(offset, maxOffset int) int {
+	if offset < 0 {
+		return 0
 	}
-	return lines[len(lines)-avail:]
+	if offset > maxOffset {
+		return maxOffset
+	}
+	return offset
 }
 
 // formatMessageLine renders one scrollback row as "HH:MM:SS  sender  text",
