@@ -61,8 +61,17 @@ func TestMembershipRepoIntegration(t *testing.T) {
 		t.Fatalf("ListByRoom: %v", err)
 	}
 	owner, ok := findMember(members, seedOwner)
-	if !ok || owner.Role != domain.MembershipRoleOwner || owner.User.Name() != "alice" {
-		t.Fatalf("room 4 members = %+v, want user 1 as owner 'alice'", members)
+	if !ok {
+		t.Fatalf("room 4 members = %+v, want user 1 present", members)
+	}
+	if owner.Role != domain.MembershipRoleOwner {
+		t.Fatalf("user 1 role = %s, want owner", owner.Role)
+	}
+	if owner.User.Name() != "alice" {
+		t.Fatalf("user 1 name = %q, want alice", owner.User.Name())
+	}
+	if owner.User.PublicCode().String() != "A000000001" {
+		t.Fatalf("user 1 public_code = %q, want A000000001", owner.User.PublicCode())
 	}
 
 	// Seeded: user 1 belongs to room 4 (active), surfaced as a RoomRef.
@@ -82,8 +91,18 @@ func TestMembershipRepoIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListByRoom after add: %v", err)
 	}
-	if added, ok := findMember(withCharlie, scratch); !ok || added.Role != domain.MembershipRoleMember {
-		t.Fatalf("room 4 members after add = %+v, want user 3 as member", withCharlie)
+	added, ok := findMember(withCharlie, scratch)
+	if !ok {
+		t.Fatalf("room 4 members after add = %+v, want user 3 present", withCharlie)
+	}
+	if added.Role != domain.MembershipRoleMember {
+		t.Fatalf("user 3 role = %s, want member", added.Role)
+	}
+	if added.User.Name() != "charlie" {
+		t.Fatalf("user 3 name = %q, want charlie", added.User.Name())
+	}
+	if added.User.PublicCode().String() != "C000000003" {
+		t.Fatalf("user 3 public_code = %q, want C000000003", added.User.PublicCode())
 	}
 
 	if err := repo.Remove(ctx, pool, roomID, scratch); err != nil {

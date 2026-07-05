@@ -99,7 +99,8 @@ func TestBuildJoinedEvent_ZeroEventLeavesFieldsUnset(t *testing.T) {
 
 func TestBuildForwardMessage(t *testing.T) {
 	ts := time.UnixMilli(12345)
-	got := buildForwardMessage(eventsRoomRef(t), mustUserRef(t, "1", "Alice"), "hello", ts)
+	sender := mustUserRef(t, "1", "Alice")
+	got := buildForwardMessage(eventsRoomRef(t), sender, "hello", ts, "987654321")
 
 	if got.GetRoom().GetRoomId() != "4" || got.GetRoom().GetPublicCode() != "G000000004" {
 		t.Errorf("Room: got %+v, want id=4 code=G000000004", got.GetRoom())
@@ -107,11 +108,19 @@ func TestBuildForwardMessage(t *testing.T) {
 	if got.GetSender().GetId() != "1" {
 		t.Errorf("Sender.Id: got %q, want %q", got.GetSender().GetId(), "1")
 	}
+	// The sender's public code travels so the connection can render the client-
+	// facing U… without a lookup.
+	if got.GetSender().GetPublicCode() != sender.PublicCode().String() {
+		t.Errorf("Sender.PublicCode: got %q, want %q", got.GetSender().GetPublicCode(), sender.PublicCode().String())
+	}
 	if got.GetSender().GetName() != "Alice" {
 		t.Errorf("Sender.Name: got %q, want %q", got.GetSender().GetName(), "Alice")
 	}
 	if got.GetText() != "hello" {
 		t.Errorf("Text: got %q, want %q", got.GetText(), "hello")
+	}
+	if got.GetEventId() != "987654321" {
+		t.Errorf("EventId: got %q, want %q", got.GetEventId(), "987654321")
 	}
 	if !got.GetTimestamp().AsTime().Equal(ts) {
 		t.Errorf("Timestamp: got %v, want %v", got.GetTimestamp().AsTime(), ts)

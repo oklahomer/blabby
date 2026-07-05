@@ -22,7 +22,11 @@ func mustUserID(t *testing.T, raw string) id.UserID {
 // tests readable now that addMember/refreshMember take a UserRef.
 func mustUserRef(t *testing.T, rawID, name string) id.UserRef {
 	t.Helper()
-	ref, err := id.NewUserRef(mustUserID(t, rawID), name)
+	code, err := id.NewPublicCode()
+	if err != nil {
+		t.Fatalf("NewPublicCode: %v", err)
+	}
+	ref, err := id.NewUserRef(mustUserID(t, rawID), code, name)
 	if err != nil {
 		t.Fatalf("mustUserRef(%q, %q): %v", rawID, name, err)
 	}

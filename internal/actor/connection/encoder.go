@@ -24,13 +24,21 @@ func encodeOutboundMessage(msg any) (encodedFrame, bool) {
 	case *ChatDelivered:
 		return encodedFrame{
 			messageType: websocket.TextMessage,
-			data:        encodeMessage(m.RoomID, m.Sender, m.Text, timestampMillis(m.Timestamp)),
+			data:        encodeMessage(m.RoomID, m.Sender, m.Text, timestampMillis(m.Timestamp), m.EventID),
 			eventKind:   "message",
 		}, true
 	case *RoomJoined:
-		return encodedFrame{messageType: websocket.TextMessage, data: encodeJoined(m.RoomID, m.User), eventKind: "event"}, true
+		return encodedFrame{
+			messageType: websocket.TextMessage,
+			data:        encodeMember("joined", m.RoomID, m.User, m.EventID, timestampMillis(m.At)),
+			eventKind:   "event",
+		}, true
 	case *RoomLeft:
-		return encodedFrame{messageType: websocket.TextMessage, data: encodeLeft(m.RoomID, m.User), eventKind: "event"}, true
+		return encodedFrame{
+			messageType: websocket.TextMessage,
+			data:        encodeMember("left", m.RoomID, m.User, m.EventID, timestampMillis(m.At)),
+			eventKind:   "event",
+		}, true
 	case *ErrorResponse:
 		return encodedFrame{messageType: websocket.TextMessage, data: encodeError(m.Code, m.Message), eventKind: "error"}, true
 	case *AppPing:
@@ -72,10 +80,11 @@ func encodeError(code errcode.Code, message string) []byte {
 	})
 }
 
-func encodeMessage(roomID string, sender UserRef, text string, timestampMs int64) []byte {
+func encodeMessage(roomID string, sender UserRef, text string, timestampMs int64, eventID string) []byte {
 	return mustMarshal(map[string]any{
 		"type":      "message",
 		"room_id":   roomID,
+		"event_id":  eventID,
 		"sender":    map[string]any{"id": sender.ID, "name": sender.Name},
 		"text":      text,
 		"timestamp": timestampMs,
@@ -89,18 +98,16 @@ func timestampMillis(t time.Time) int64 {
 	return t.UnixMilli()
 }
 
-func encodeJoined(roomID string, user UserRef) []byte {
+// encodeMember renders the shared shape of the "joined" and "left" membership
+// frames: the room, the durable event id and timestamp (so the client
+// interleaves the system line with messages and dedups it against backfilled
+// history), and the member as a U… code + name.
+func encodeMember(kind, roomID string, user UserRef, eventID string, timestampMs int64) []byte {
 	return mustMarshal(map[string]any{
-		"type":    "joined",
-		"room_id": roomID,
-		"user":    map[string]any{"id": user.ID, "name": user.Name},
-	})
-}
-
-func encodeLeft(roomID string, user UserRef) []byte {
-	return mustMarshal(map[string]any{
-		"type":    "left",
-		"room_id": roomID,
-		"user":    map[string]any{"id": user.ID, "name": user.Name},
+		"type":      kind,
+		"room_id":   roomID,
+		"event_id":  eventID,
+		"user":      map[string]any{"id": user.ID, "name": user.Name},
+		"timestamp": timestampMs,
 	})
 }

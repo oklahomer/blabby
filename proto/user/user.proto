@@ -90,6 +90,11 @@ message ForwardMessageRequest {
   common.UserRef sender = 2;
   string text = 3;
   google.protobuf.Timestamp timestamp = 4;
+  // event_id is the decimal Snowflake id of the message_posted event appended to
+  // the room timeline for this message. It crosses the wire as a decimal string —
+  // the documented exception to never exposing internal numeric ids — so a client
+  // can order and dedup it against the timeline history it backfills.
+  string event_id = 5;
 }
 
 // ForwardMessageResponse acknowledges the message delivery. The User grain

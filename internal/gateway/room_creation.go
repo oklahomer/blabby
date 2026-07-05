@@ -84,7 +84,7 @@ func (s *RoomCreationService) CreateRoom(ctx context.Context, actor id.UserID, n
 		if err != nil {
 			return fmt.Errorf("room creation: resolve creator: %w", err)
 		}
-		ownerRef, err := id.NewUserRef(actor, user.DisplayName)
+		ownerRef, err := id.NewUserRef(actor, user.PublicCode, user.DisplayName)
 		if err != nil {
 			return fmt.Errorf("room creation: creator ref: %w", err)
 		}

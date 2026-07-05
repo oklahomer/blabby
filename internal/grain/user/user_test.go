@@ -981,34 +981,43 @@ func TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewUserID: %v", err)
 	}
-	seededRef, err := id.NewUserRef(aliceID, "Alice Display")
+	aliceCode, err := id.ParsePublicCode("A000000001")
+	if err != nil {
+		t.Fatalf("ParsePublicCode: %v", err)
+	}
+	seededRef, err := id.NewUserRef(aliceID, aliceCode, "Alice Display")
 	if err != nil {
 		t.Fatalf("NewUserRef: %v", err)
 	}
 
 	tests := []struct {
-		name       string
-		identity   string
-		directory  user.Directory // nil means no directory injected
-		wantID     string
-		wantName   string
-		wantReason string // seed-failure reason expected in logs; "" means no warning
+		name      string
+		identity  string
+		directory user.Directory // nil means no directory injected
+		wantID    string
+		wantName  string
+		// wantPublicCode is the bare public code Self carries. It is present
+		// only on a directory hit; every degrade path leaves it empty so the
+		// internal id can never stand in for it on the client wire.
+		wantPublicCode string
+		wantReason     string // seed-failure reason expected in logs; "" means no warning
 	}{
 		{
-			name:     "no directory falls back to identity as name",
+			name:     "no directory falls back to identity as name, no public code",
 			identity: "1",
 			wantID:   "1",
 			wantName: "1",
 		},
 		{
-			name:      "directory hit seeds the display name",
-			identity:  "1",
-			directory: resolveDirStub{ref: seededRef},
-			wantID:    "1",
-			wantName:  "Alice Display",
+			name:           "directory hit seeds the name and public code",
+			identity:       "1",
+			directory:      resolveDirStub{ref: seededRef},
+			wantID:         "1",
+			wantName:       "Alice Display",
+			wantPublicCode: "A000000001",
 		},
 		{
-			name:       "directory miss degrades to identity and warns",
+			name:       "directory miss degrades to a code-less self and warns",
 			identity:   "1",
 			directory:  resolveDirStub{err: user.ErrProfileNotFound},
 			wantID:     "1",
@@ -1016,7 +1025,7 @@ func TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully(t *testing.T) {
 			wantReason: "directory_miss",
 		},
 		{
-			name:       "directory backend error degrades to identity and logs the error class",
+			name:       "directory backend error degrades to a code-less self and logs the error class",
 			identity:   "1",
 			directory:  resolveDirStub{err: errors.New("dial tcp: connection refused")},
 			wantID:     "1",
@@ -1024,7 +1033,7 @@ func TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully(t *testing.T) {
 			wantReason: "directory_error",
 		},
 		{
-			name:       "unparseable identity degrades to identity and warns",
+			name:       "unparseable identity degrades to a code-less self and warns",
 			identity:   "bad/identity",
 			wantID:     "bad/identity",
 			wantName:   "bad/identity",
@@ -1052,6 +1061,9 @@ func TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully(t *testing.T) {
 			}
 			if self.GetName() != tt.wantName {
 				t.Errorf("Self().Name: got %q, want %q", self.GetName(), tt.wantName)
+			}
+			if self.GetPublicCode() != tt.wantPublicCode {
+				t.Errorf("Self().PublicCode: got %q, want %q", self.GetPublicCode(), tt.wantPublicCode)
 			}
 
 			out := logs.String()

@@ -9,6 +9,7 @@ import (
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/id"
+	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
 )
 
 // rolesGrain builds a loaded grain whose member cache holds Alice (1) and Bob
@@ -30,7 +31,7 @@ func aliceAndBob(t *testing.T) []id.UserRef {
 }
 
 func protoActor(id, name string) *commonpb.UserRef {
-	return &commonpb.UserRef{Id: id, Name: name}
+	return &commonpb.UserRef{Id: id, Name: name, PublicCode: graintest.BarePublicCodeFor(id)}
 }
 
 func TestGrain_SetMemberRole_RecordsChange(t *testing.T) {

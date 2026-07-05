@@ -21,7 +21,7 @@ func TestGateway_WebSocket_Integration(t *testing.T) {
 	const userID = "1"
 	const token = "integration-token-ws"
 
-	c := clustertest.Start(t, user.NewKind(nil))
+	c := clustertest.Start(t, user.NewKind(stubUserDirectory{}))
 	g := gateway.NewGateway(gateway.Deps{
 		Authenticator: &integrationAuth{userID: userID, token: token},
 		Rooms:         newStubRoomDirectory(),
@@ -48,9 +48,10 @@ func TestGateway_WebSocket_Integration(t *testing.T) {
 	resp, err := userpb.GetUserGrainGrainClient(c, userID).
 		ForwardMessage(&userpb.ForwardMessageRequest{
 			Room:      &commonpb.RoomRef{RoomId: "4", PublicCode: "G000000004"},
-			Sender:    &commonpb.UserRef{Id: "2", Name: "Bob Builder"},
+			Sender:    &commonpb.UserRef{Id: "2", Name: "Bob Builder", PublicCode: "B000000002"},
 			Text:      "hello-cluster",
 			Timestamp: timestamppb.New(time.UnixMilli(1700000000000)),
+			EventId:   "987654321",
 		})
 	if err != nil {
 		t.Fatalf("ForwardMessage: %v", err)
@@ -63,12 +64,16 @@ func TestGateway_WebSocket_Integration(t *testing.T) {
 	if got["type"] != "message" || got["text"] != "hello-cluster" {
 		t.Errorf("expected message frame with text=hello-cluster, got %v", got)
 	}
+	if got["event_id"] != "987654321" {
+		t.Errorf("expected event_id=987654321, got %v", got["event_id"])
+	}
 	sender, ok := got["sender"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected nested sender object, got %v (%T)", got["sender"], got["sender"])
 	}
-	if sender["id"] != "2" || sender["name"] != "Bob Builder" {
-		t.Errorf("expected sender {id:bob name:Bob Builder}, got %v", sender)
+	// The sender id on the wire is the client-facing U… code, never the internal id.
+	if sender["id"] != "UB000000002" || sender["name"] != "Bob Builder" {
+		t.Errorf("expected sender {id:UB000000002 name:Bob Builder}, got %v", sender)
 	}
 }
 

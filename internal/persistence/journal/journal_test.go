@@ -108,7 +108,11 @@ func mustUserRef(t *testing.T, rawID int64, name string) id.UserRef {
 	if err != nil {
 		t.Fatalf("NewUserID(%d): %v", rawID, err)
 	}
-	ref, err := id.NewUserRef(uid, name)
+	code, err := id.NewPublicCode()
+	if err != nil {
+		t.Fatalf("NewPublicCode: %v", err)
+	}
+	ref, err := id.NewUserRef(uid, code, name)
 	if err != nil {
 		t.Fatalf("NewUserRef: %v", err)
 	}

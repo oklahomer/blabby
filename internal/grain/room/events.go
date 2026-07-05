@@ -51,22 +51,30 @@ func applyMembershipEvent(req *userpb.NotifyRoomEventRequest, evt MembershipEven
 // buildForwardMessage shapes the ForwardMessage payload sent to every
 // current member (including the sender — multi-device echo, FR3) for a
 // posted chat message. room carries the room's reference metadata; sender
-// carries the author's id and display name.
-func buildForwardMessage(room domain.RoomRef, sender id.UserRef, text string, timestamp time.Time) *userpb.ForwardMessageRequest {
+// carries the author's id and display name; eventID is the durable
+// message_posted event id ("" when the grain runs storeless in unit tests),
+// so a client can order and dedup the live frame against timeline history.
+func buildForwardMessage(room domain.RoomRef, sender id.UserRef, text string, timestamp time.Time, eventID string) *userpb.ForwardMessageRequest {
 	return &userpb.ForwardMessageRequest{
 		Room:      protoRoomRef(room),
 		Sender:    protoUserRef(sender),
 		Text:      text,
 		Timestamp: timestamppb.New(timestamp),
+		EventId:   eventID,
 	}
 }
 
-// protoUserRef converts the minimal user identity ref (id.UserRef: id + display
-// name) into the wire UserRef carried by fan-out payloads. The richer
-// public-code/status fields of common.UserRef are left empty until userrepo
-// lands; see domain.UserRef for that fuller shape.
+// protoUserRef converts the user identity ref (id.UserRef: id + public code +
+// display name) into the wire UserRef carried by fan-out payloads. The public
+// code is what a connection renders as the client-facing U…; the internal id
+// travels only for server-side correlation, never onto a client frame. The
+// status field stays empty — fan-out consumers do not use it.
 func protoUserRef(u id.UserRef) *commonpb.UserRef {
-	return &commonpb.UserRef{Id: u.ID().String(), Name: u.Name()}
+	return &commonpb.UserRef{
+		Id:         u.ID().String(),
+		Name:       u.Name(),
+		PublicCode: u.PublicCode().String(),
+	}
 }
 
 // protoRoomRef converts the grain's cached domain.RoomRef into the wire RoomRef

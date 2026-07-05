@@ -70,7 +70,8 @@ type AuthFailed struct {
 // before reaching this actor, so re-checking the invariants here would
 // only force handling an error that cannot occur. The grain RPC
 // (commonpb.UserRef) and the domain value (id.UserRef) own the rules; this
-// is the shape the connection relays toward the WebSocket.
+// is the shape the connection relays toward the WebSocket. ID is the
+// client-facing U… public code (never the internal numeric id).
 type UserRef struct {
 	ID   string
 	Name string
@@ -84,20 +85,28 @@ type ChatDelivered struct {
 	Sender    UserRef
 	Text      string
 	Timestamp time.Time
+	// EventID is the message's decimal Snowflake timeline id, "" when the Room
+	// grain ran storeless. The client orders and dedups the frame by it.
+	EventID string
 }
 
 // RoomJoined reports that User joined RoomID. The write pump encodes it as the
-// "joined" frame.
+// "joined" frame. EventID and At identify the durable member_joined timeline
+// event so the client interleaves the system line with messages.
 type RoomJoined struct {
-	RoomID string
-	User   UserRef
+	RoomID  string
+	User    UserRef
+	EventID string
+	At      time.Time
 }
 
 // RoomLeft reports that User left RoomID. The write pump encodes it as the
-// "left" frame.
+// "left" frame. EventID and At carry the durable member_left timeline event.
 type RoomLeft struct {
-	RoomID string
-	User   UserRef
+	RoomID  string
+	User    UserRef
+	EventID string
+	At      time.Time
 }
 
 // ErrorResponse is the typed form of the generic "error" frame: an

@@ -87,7 +87,11 @@ func TestMembershipStore_RoleOps_Integration(t *testing.T) {
 		uid  id.UserID
 		name string
 	}{{alice, "alice"}, {charlie, "charlie"}} {
-		ref, err := id.NewUserRef(u.uid, u.name)
+		code, err := id.NewPublicCode()
+		if err != nil {
+			t.Fatalf("NewPublicCode: %v", err)
+		}
+		ref, err := id.NewUserRef(u.uid, code, u.name)
 		if err != nil {
 			t.Fatalf("NewUserRef: %v", err)
 		}

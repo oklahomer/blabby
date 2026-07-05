@@ -16,27 +16,41 @@ func mustUserID(t *testing.T, raw int64) id.UserID {
 	return u
 }
 
+func mustPublicCode(t *testing.T, raw string) id.PublicCode {
+	t.Helper()
+	c, err := id.ParsePublicCode(raw)
+	if err != nil {
+		t.Fatalf("ParsePublicCode(%q): %v", raw, err)
+	}
+	return c
+}
+
 func TestNewUserRef(t *testing.T) {
 	valid := mustUserID(t, 1)
+	code := mustPublicCode(t, "A000000001")
 
 	tests := []struct {
 		name     string
 		userID   id.UserID
+		code     id.PublicCode
 		display  string
 		wantErr  bool
 		wantName string // expected Name() on success (post-trim)
 	}{
-		{name: "valid", userID: valid, display: "Alice", wantName: "Alice"},
-		{name: "name is trimmed", userID: valid, display: "  Alice  ", wantName: "Alice"},
-		{name: "empty name rejected", userID: valid, display: "", wantErr: true},
-		{name: "whitespace-only name rejected", userID: valid, display: "   ", wantErr: true},
-		{name: "over-long name rejected", userID: valid, display: strings.Repeat("x", 257), wantErr: true},
-		{name: "zero-value id rejected", userID: id.UserID{}, display: "Alice", wantErr: true},
+		{name: "valid", userID: valid, code: code, display: "Alice", wantName: "Alice"},
+		{name: "name is trimmed", userID: valid, code: code, display: "  Alice  ", wantName: "Alice"},
+		{name: "empty name rejected", userID: valid, code: code, display: "", wantErr: true},
+		{name: "whitespace-only name rejected", userID: valid, code: code, display: "   ", wantErr: true},
+		{name: "over-long name rejected", userID: valid, code: code, display: strings.Repeat("x", 257), wantErr: true},
+		{name: "zero-value id rejected", userID: id.UserID{}, code: code, display: "Alice", wantErr: true},
+		// The public code is load-bearing: it is the only user identity that
+		// crosses to a client, so a ref cannot exist without one.
+		{name: "zero-value public code rejected", userID: valid, code: id.PublicCode{}, display: "Alice", wantErr: true},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ref, err := id.NewUserRef(tc.userID, tc.display)
+			ref, err := id.NewUserRef(tc.userID, tc.code, tc.display)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got ref %+v", ref)
@@ -49,9 +63,22 @@ func TestNewUserRef(t *testing.T) {
 			if ref.ID() != tc.userID {
 				t.Errorf("ID() = %v, want %v", ref.ID(), tc.userID)
 			}
+			if ref.PublicCode() != tc.code {
+				t.Errorf("PublicCode() = %v, want %v", ref.PublicCode(), tc.code)
+			}
 			if ref.Name() != tc.wantName {
 				t.Errorf("Name() = %q, want %q", ref.Name(), tc.wantName)
 			}
 		})
+	}
+}
+
+func TestUserRefPublicID(t *testing.T) {
+	ref, err := id.NewUserRef(mustUserID(t, 1), mustPublicCode(t, "A000000001"), "Alice")
+	if err != nil {
+		t.Fatalf("NewUserRef: %v", err)
+	}
+	if got := ref.PublicID(); got != "UA000000001" {
+		t.Errorf("PublicID() = %q, want the U… client code", got)
 	}
 }

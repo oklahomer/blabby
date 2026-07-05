@@ -2,12 +2,27 @@ package gateway_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
 )
+
+// stubUserDirectory is a user.Directory for the cluster-backed integration
+// tests: it resolves every id to a UserRef with a valid public code, so the
+// User grain's self carries the public identity the Room grain and the
+// connection now require (a code-less self fails closed and drops frames).
+type stubUserDirectory struct{}
+
+func (stubUserDirectory) Resolve(_ context.Context, uid id.UserID) (id.UserRef, error) {
+	code, err := id.ParsePublicCode("A000000001")
+	if err != nil {
+		return id.UserRef{}, err
+	}
+	return id.NewUserRef(uid, code, fmt.Sprintf("user-%s", uid))
+}
 
 // stubRoomDirectory is an in-memory gateway.RoomDirectory for the external
 // integration tests, seeded with the dev rooms (room 4 → RG000000004 "General",
