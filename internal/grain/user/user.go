@@ -76,8 +76,8 @@ type Grain struct {
 
 	// directory resolves this user's profile on activation. Left nil in tests
 	// that do not exercise name seeding; production injects it via NewKind.
-	// self is the resolved UserRef (id + display name), built once and reused
-	// (read-only) on every command this grain routes to a Room grain.
+	// self is the resolved UserRef (id + public code + display name), built once
+	// and reused (read-only) on every command this grain routes to a Room grain.
 	directory Directory
 	self      *commonpb.UserRef
 
@@ -93,11 +93,11 @@ type Grain struct {
 // while surfacing a real backend error loudly.
 var ErrProfileNotFound = errors.New("user: profile not found")
 
-// Directory resolves a user's profile (a UserRef of id + display name) from
-// their identity. The User grain seeds its UserRef from it on activation; the
-// production implementation reads service_user via userrepo (see
+// Directory resolves a user's profile (a UserRef of id + public code + display
+// name) from their identity. The User grain seeds its UserRef from it on
+// activation; the production implementation reads service_user via userrepo (see
 // NewRepoDirectory). A one-method interface so the grain unit-tests can inject a
-// fake (or omit it and fall back to the raw identity).
+// fake (or omit it and fall back to a code-less identity).
 //
 // Resolve reports ErrProfileNotFound when the id has no profile, and any other
 // error for a backend failure. Like JoinedRoomLoader, the implementation owns its
@@ -184,13 +184,13 @@ func (g *Grain) hydrateJoinedRooms(ctx cluster.GrainContext) {
 }
 
 // resolveSelf builds the grain's own UserRef once at activation, seeding the
-// display name from the directory. It falls back to the raw identity as the name
-// when no directory is injected, the identity is unparseable, the directory has no
-// entry, or the directory lookup fails — degrading to showing the user ID rather
-// than breaking message flow. The fallback is non-fatal by design: a genuine miss
-// logs at warn, while a backend failure logs at error (so an outage stays visible)
-// but still degrades rather than failing the activation. The cached result is
-// reused read-only on every outbound command.
+// display name and public code from the directory. It falls back to a code-less
+// raw identity when no directory is injected, the identity is unparseable, the
+// directory has no entry, or the directory lookup fails. The fallback is non-fatal
+// by design: a genuine miss logs at warn, while a backend failure logs at error
+// (so an outage stays visible), and downstream Room/connection boundaries fail
+// closed rather than using the internal id as a client-visible public code. The
+// cached result is reused read-only on every outbound command.
 func (g *Grain) resolveSelf(ctx cluster.GrainContext) *commonpb.UserRef {
 	identity := ctx.Identity()
 	// The degraded self carries the internal id and name for logging but no
