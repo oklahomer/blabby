@@ -349,6 +349,10 @@ func TestChatSendFailureKeepsSession(t *testing.T) {
 	if final.mainError != "Not a member of this room" {
 		t.Errorf("mainError = %q, want humanised business error", final.mainError)
 	}
+	// The attempted text is restored so the user can retry without retyping.
+	if got := final.composer.Value(); got != "hello" {
+		t.Errorf("composer text not restored after a failed send: %q", got)
+	}
 }
 
 // assertNoCredentialLeak fails the test if the JWT or the password typed

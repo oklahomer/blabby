@@ -691,6 +691,76 @@ func TestUpdateSendMessageFailedBusinessErrorKeepsSession(t *testing.T) {
 	}
 }
 
+func TestSendMessageFailedRestoresComposerText(t *testing.T) {
+	m := chatReadyModel(t)
+	m.composer = newComposer(40) // empty after the optimistic clear-on-send
+	next, _ := m.Update(api.SendMessageFailed{
+		RoomID:     "general",
+		Generation: m.sessionGeneration,
+		HTTPStatus: http.StatusForbidden,
+		Status:     "ROOM_NOT_MEMBER",
+		Text:       "unsent words",
+	})
+	got := next.(Model)
+	if got.composer.Value() != "unsent words" {
+		t.Fatalf("composer not restored after a failed send: %q", got.composer.Value())
+	}
+	if got.mainError != "Not a member of this room" {
+		t.Fatalf("mainError = %q", got.mainError)
+	}
+}
+
+func TestSendMessageFailedDoesNotClobberNewerText(t *testing.T) {
+	m := chatReadyModel(t)
+	m.composer = newComposer(40)
+	m.composer.SetValue("already typing this")
+	next, _ := m.Update(api.SendMessageFailed{
+		RoomID:     "general",
+		Generation: m.sessionGeneration,
+		HTTPStatus: http.StatusForbidden,
+		Status:     "ROOM_NOT_MEMBER",
+		Text:       "unsent words",
+	})
+	if got := next.(Model).composer.Value(); got != "already typing this" {
+		t.Fatalf("restore clobbered text typed since the send: %q", got)
+	}
+}
+
+func TestSendMessageFailedNoRestoreForOtherRoom(t *testing.T) {
+	m := chatReadyModel(t) // active room is "general"
+	m.composer = newComposer(40)
+	next, _ := m.Update(api.SendMessageFailed{
+		RoomID:     "random",
+		Generation: m.sessionGeneration,
+		HTTPStatus: http.StatusForbidden,
+		Status:     "ROOM_NOT_MEMBER",
+		Text:       "unsent words",
+	})
+	if got := next.(Model).composer.Value(); got != "" {
+		t.Fatalf("restored text into the wrong room's composer: %q", got)
+	}
+}
+
+func TestSendMessageFailedUnauthorizedDoesNotRestore(t *testing.T) {
+	m := chatReadyModel(t)
+	m.width, m.height = 100, 30
+	m.composer = newComposer(40)
+	next, _ := m.Update(api.SendMessageFailed{
+		RoomID:     "general",
+		Generation: m.sessionGeneration,
+		HTTPStatus: http.StatusUnauthorized,
+		Status:     "AUTH_EXPIRED_TOKEN",
+		Text:       "unsent words",
+	})
+	got := next.(Model)
+	if got.composer.Value() != "" {
+		t.Fatalf("the 401 path must not restore text; composer = %q", got.composer.Value())
+	}
+	if _, ok := got.modal.(login.Model); !ok {
+		t.Fatalf("expected session expiry to reopen the login modal, got %T", got.modal)
+	}
+}
+
 func TestUpdateSendMessageSucceededClearsError(t *testing.T) {
 	m := chatReadyModel(t)
 	m.mainError = "stale error"

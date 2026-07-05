@@ -644,6 +644,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.HTTPStatus == http.StatusUnauthorized {
 			return m.handleSessionExpiry()
 		}
+		// Restore the attempted text so the user can retry without retyping —
+		// only into the still-empty composer of the room it was sent from, so
+		// it never clobbers text typed since nor lands in another room.
+		if v.RoomID == m.activeRoomID && strings.TrimSpace(m.composer.Value()) == "" {
+			m.composer.SetValue(v.Text)
+		}
 		m.mainError = api.Humanise(v.Status, v.Message)
 		return m, nil
 
