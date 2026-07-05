@@ -153,8 +153,9 @@ components:
           payload:
             type: message
             room_id: RG000000004
+            event_id: '112233445566778899'
             sender:
-              id: alice
+              id: UA000000001
               name: Alice
             text: hello, world
             timestamp: 1718280000000
@@ -170,9 +171,11 @@ components:
           payload:
             type: joined
             room_id: RG000000004
+            event_id: '112233445566778900'
             user:
-              id: alice
+              id: UA000000001
               name: Alice
+            timestamp: 1718280000000
     Left:
       name: left
       title: Member left
@@ -185,9 +188,11 @@ components:
           payload:
             type: left
             room_id: RG000000004
+            event_id: '112233445566778901'
             user:
-              id: alice
+              id: UA000000001
               name: Alice
+            timestamp: 1718280500000
     Error:
       name: error
       title: Asynchronous error
@@ -254,6 +259,7 @@ components:
       required:
         - type
         - room_id
+        - event_id
         - sender
         - text
         - timestamp
@@ -266,6 +272,12 @@ components:
           description: |
             The room the message belongs to, as its opaque public code (`R…`).
             The internal numeric room id is never sent.
+        event_id:
+          type: string
+          description: |
+            The message's timeline event id, as a decimal Snowflake string. It
+            orders and dedups the frame against the room timeline a client
+            backfills from `GET /rooms/{id}/events`.
         sender:
           $ref: '#/components/schemas/UserRef'
         text:
@@ -280,7 +292,9 @@ components:
       required:
         - type
         - room_id
+        - event_id
         - user
+        - timestamp
       properties:
         type:
           type: string
@@ -290,14 +304,26 @@ components:
           description: |
             The room the membership change applies to, as its opaque public code
             (`R…`). The internal numeric room id is never sent.
+        event_id:
+          type: string
+          description: |
+            The member_joined timeline event id, as a decimal Snowflake string,
+            so the client interleaves the system line with messages and dedups
+            it against backfilled history.
         user:
           $ref: '#/components/schemas/UserRef'
+        timestamp:
+          type: integer
+          format: int64
+          description: The event's server-assigned time in Unix milliseconds.
     LeftPayload:
       type: object
       required:
         - type
         - room_id
+        - event_id
         - user
+        - timestamp
       properties:
         type:
           type: string
@@ -307,8 +333,17 @@ components:
           description: |
             The room the membership change applies to, as its opaque public code
             (`R…`). The internal numeric room id is never sent.
+        event_id:
+          type: string
+          description: |
+            The member_left timeline event id, as a decimal Snowflake string,
+            with the same ordering and dedup role as on the `joined` frame.
         user:
           $ref: '#/components/schemas/UserRef'
+        timestamp:
+          type: integer
+          format: int64
+          description: The event's server-assigned time in Unix milliseconds.
     AuthErrorPayload:
       type: object
       required:
@@ -357,7 +392,9 @@ components:
       properties:
         id:
           type: string
-          description: The user's identifier.
+          description: |
+            The user's client-facing public code (`U…`). The internal numeric
+            user id is never sent.
         name:
           type: string
           description: The user's display name.
