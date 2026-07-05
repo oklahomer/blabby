@@ -102,6 +102,13 @@ func (s *chatStubServer) handleRoomsJoined(w http.ResponseWriter, _ *http.Reques
 }
 
 func (s *chatStubServer) handleRoomCommand(w http.ResponseWriter, r *http.Request) {
+	// Backfill on room activation reads the timeline; answer with an empty
+	// page so the fetch succeeds instead of setting a spurious error.
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/events") {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.RoomEventsResponse{Events: []api.RoomEvent{}, Next: nil})
+		return
+	}
 	if !strings.HasSuffix(r.URL.Path, "/messages") {
 		http.Error(w, "not found", http.StatusNotFound)
 		return

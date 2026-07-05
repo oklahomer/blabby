@@ -115,6 +115,9 @@ type State struct {
 	CanType bool
 	// Connected drives the passive ● live / ● disconnected status line.
 	Connected bool
+	// FetchingOlder appends a subtle "(loading history…)" hint to the
+	// status line while a backfill page is in flight for the active room.
+	FetchingOlder bool
 }
 
 // View renders the pane content for the given inner width and height.
@@ -132,7 +135,7 @@ func View(s State, _ bool, width, height int) string {
 
 	parts := []string{
 		ui.Title().Render(clip(label, width)),
-		statusLine(s.Connected),
+		statusLine(s.Connected, s.FetchingOlder),
 		"",
 		scrollback(s.Messages, width, height, s.ErrorLine != ""),
 	}
@@ -144,14 +147,19 @@ func View(s State, _ bool, width, height int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-// statusLine renders the passive connection indicator. It is purely
-// informational — the actionable recovery path remains the login modal
-// the root Model reopens on disconnect.
-func statusLine(connected bool) string {
-	if connected {
-		return ui.Label().Render("● live")
+// statusLine renders the passive connection indicator, with a subtle
+// "(loading history…)" hint appended while a backfill is in flight. It is
+// purely informational — the actionable recovery path remains the login
+// modal the root Model reopens on disconnect.
+func statusLine(connected, fetchingOlder bool) string {
+	if !connected {
+		return ui.Error().Render("● disconnected")
 	}
-	return ui.Error().Render("● disconnected")
+	line := ui.Label().Render("● live")
+	if fetchingOlder {
+		line += ui.Subtle().Render("  (loading history…)")
+	}
+	return line
 }
 
 // scrollback renders the visible rows (newest at the bottom), or the

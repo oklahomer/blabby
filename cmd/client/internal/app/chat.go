@@ -2,6 +2,7 @@ package app
 
 import (
 	"sort"
+	"strconv"
 
 	"github.com/charmbracelet/bubbles/textinput"
 
@@ -9,6 +10,19 @@ import (
 	"github.com/oklahomer/blabby/cmd/client/internal/chrome"
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/mainview"
 )
+
+// roomHistory tracks a room's backfill pagination. next is the `before`
+// cursor for the next older page; exhausted is set once the server reports
+// no more history. fetched records that a newest-page load has completed
+// (so a re-activation refresh does not rewind a scroll-up's deeper
+// cursor), and loading is the single-flight latch admitting one in-flight
+// fetch per room.
+type roomHistory struct {
+	fetched   bool
+	loading   bool
+	next      string
+	exhausted bool
+}
 
 const (
 	// eventBucketCap bounds the per-room scrollback in memory. Once a
@@ -81,15 +95,65 @@ func (m Model) appendMemberEvent(me api.MemberEventReceived) Model {
 	})
 }
 
+// appendTimelineEvent inserts one backfilled history entry into its room's
+// bucket, mapping the timeline kind to the render kind. It shares the
+// ordering, dedup, and trim-heal path with the live frames, so a
+// backfilled event that also arrived live is inserted once.
+func (m Model) appendTimelineEvent(roomID string, te api.TimelineEvent) Model {
+	name := te.Person.Name
+	if name == "" {
+		name = te.Person.ID
+	}
+	kind := mainview.KindChat
+	switch te.Kind {
+	case api.TimelineJoined:
+		kind = mainview.KindJoined
+	case api.TimelineLeft:
+		kind = mainview.KindLeft
+	}
+	return m.appendEvent(roomID, mainview.Message{
+		ID:     te.EventID,
+		Kind:   kind,
+		Sender: name,
+		Text:   te.Text,
+		At:     te.At,
+		Self:   te.Person.ID == m.userID,
+	})
+}
+
 // appendEvent is the single insertion point every live frame and every
 // backfilled entry flows through: it inserts msg into roomID's bucket,
-// ordered and deduped by event id.
+// ordered and deduped by event id. When the insert overflows the in-memory
+// cap and trims the oldest entries, it heals the room's backfill cursor so
+// scrolling up re-fetches the trimmed region instead of skipping it.
 func (m Model) appendEvent(roomID string, msg mainview.Message) Model {
 	if m.messages == nil {
 		m.messages = map[string][]mainview.Message{}
 	}
-	next, _, _ := insertOrdered(m.messages[roomID], msg, eventBucketCap)
+	next, _, trimmed := insertOrdered(m.messages[roomID], msg, eventBucketCap)
 	m.messages[roomID] = next
+	if trimmed > 0 {
+		m = m.healTrimmedHistory(roomID, next)
+	}
+	return m
+}
+
+// healTrimmedHistory resets a room's backfill cursor after the in-memory
+// bucket dropped its oldest entries, so a scroll-up re-fetches the trimmed
+// region rather than skipping past it. The new cursor is the id of the
+// bucket's current oldest entry.
+func (m Model) healTrimmedHistory(roomID string, bucket []mainview.Message) Model {
+	if len(bucket) == 0 {
+		return m
+	}
+	if m.histories == nil {
+		m.histories = map[string]roomHistory{}
+	}
+	h := m.histories[roomID]
+	h.fetched = true
+	h.next = strconv.FormatInt(bucket[0].ID, 10)
+	h.exhausted = false
+	m.histories[roomID] = h
 	return m
 }
 

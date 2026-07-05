@@ -187,6 +187,17 @@ func TestViewConnectionStatusIndicator(t *testing.T) {
 	}
 }
 
+func TestViewStatusLineShowsLoadingHint(t *testing.T) {
+	loading := View(State{RoomLabel: "general", Connected: true, FetchingOlder: true}, false, 60, 20)
+	if !strings.Contains(loading, "loading history") {
+		t.Errorf("expected the loading-history hint while fetching:\n%s", loading)
+	}
+	idle := View(State{RoomLabel: "general", Connected: true, FetchingOlder: false}, false, 60, 20)
+	if strings.Contains(idle, "loading history") {
+		t.Errorf("loading hint must not show when not fetching:\n%s", idle)
+	}
+}
+
 func TestViewRendersInlineError(t *testing.T) {
 	out := View(State{RoomLabel: "general", ErrorLine: "Not a member of this room"}, false, 60, 20)
 	if !strings.Contains(out, "Not a member of this room") {

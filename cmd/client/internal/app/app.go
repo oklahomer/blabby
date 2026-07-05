@@ -63,10 +63,12 @@ type Model struct {
 
 	// chat state populated after the WS handshake succeeds. composer is
 	// the Main-pane message input; messages holds the per-room
-	// scrollback buckets keyed by room ID; connected drives the passive
-	// status indicator; mainError is the inline Main-pane error string.
+	// scrollback buckets keyed by room ID; histories tracks each room's
+	// backfill pagination; connected drives the passive status indicator;
+	// mainError is the inline Main-pane error string.
 	composer  textinput.Model
 	messages  map[string][]mainview.Message
+	histories map[string]roomHistory
 	connected bool
 	mainError string
 }
@@ -423,9 +425,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mainviewState.RoomLabel = v.RoomName
 		m.modal = nil
 		// Reload from the server so the Rooms pane reflects the
-		// authoritative membership; the modal's optimistic-add does
-		// not own this state.
-		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout)
+		// authoritative membership (the modal's optimistic-add does not
+		// own this state), and backfill the newly active room's timeline.
+		var joinedBackfill tea.Cmd
+		m, joinedBackfill = m.beginBackfill(v.RoomID)
+		return m, tea.Batch(
+			api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout),
+			joinedBackfill,
+		)
 
 	case roomsearch.CreateRoomRequested:
 		if !m.hasLiveSession() {
@@ -461,7 +468,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeRoomID = v.Room.ID
 		m.mainviewState.RoomLabel = v.Room.Name
 		m.modal = nil
-		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout)
+		var createdBackfill tea.Cmd
+		m, createdBackfill = m.beginBackfill(v.Room.ID)
+		return m, tea.Batch(
+			api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout),
+			createdBackfill,
+		)
 
 	case api.RoomCreateFailed:
 		if !m.liveRoomResult(v.Generation) {
@@ -540,6 +552,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case api.RoomEventsLoaded:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
+		if m.histories == nil {
+			m.histories = map[string]roomHistory{}
+		}
+		h := m.histories[v.RoomID]
+		prevFetched := h.fetched
+		h.loading = false
+		h.fetched = true
+		// Advance the pagination cursor: an older page (before != "") always
+		// adopts the server's next cursor, while a newest-page load seeds it
+		// only on the first fetch so a re-activation refresh cannot rewind a
+		// scroll-up's deeper cursor. The cursor is set before the merge so a
+		// trim during the merge (the fetched region overflowing the cap)
+		// re-heals it to the surviving oldest entry.
+		if v.Before != "" || !prevFetched {
+			h.next = v.Next
+			h.exhausted = v.Next == ""
+		}
+		m.histories[v.RoomID] = h
+		for _, ev := range v.Events {
+			m = m.appendTimelineEvent(v.RoomID, ev)
+		}
+		return m, nil
+
+	case api.RoomEventsLoadFailed:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
+		if v.HTTPStatus == http.StatusUnauthorized {
+			return m.handleSessionExpiry()
+		}
+		m = m.setHistoryLoading(v.RoomID, false)
+		if v.RoomID == m.activeRoomID {
+			m.mainError = api.Humanise(v.Status, v.Message)
+		}
+		return m, nil
+
 	case api.WSFrameReceived:
 		if v.Generation != m.sessionGeneration {
 			return m, nil
@@ -605,6 +657,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.roomsState = rooms.State{}
 		m.connected = false
 		m.messages = nil
+		m.histories = nil
 		m.composer = textinput.Model{}
 		m.mainError = ""
 		m.modal = m.openLoginModalWithError("Connection lost — please sign in again", previousEmail)
@@ -681,6 +734,9 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// Drop any inline error left over from the previous
 				// room so it does not linger over a different scrollback.
 				m.mainError = ""
+				var cmd tea.Cmd
+				m, cmd = m.beginBackfill(id)
+				return m, cmd
 			}
 			return m, nil
 		case rooms.OutcomeRetryLoad:
@@ -730,6 +786,37 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// beginBackfill dispatches a newest-page history load for roomID unless a
+// fetch is already in flight for it, latching the single-flight loading
+// flag. It returns the updated model and the Cmd (nil when a fetch is
+// already running, so the caller can tea.Batch it unconditionally). The
+// merged result heals any WebSocket fan-out frames the room missed.
+func (m Model) beginBackfill(roomID string) (Model, tea.Cmd) {
+	if m.histories == nil {
+		m.histories = map[string]roomHistory{}
+	}
+	h := m.histories[roomID]
+	if h.loading {
+		return m, nil
+	}
+	h.loading = true
+	m.histories[roomID] = h
+	return m, api.LoadEventsCmd(m.httpClient, m.server.String(), m.token, roomID, "", m.sessionGeneration, api.DefaultRoomCallTimeout)
+}
+
+// setHistoryLoading clears (or sets) a room's single-flight latch, leaving
+// the rest of its pagination untouched. Used by the failure path, where
+// only the latch changes.
+func (m Model) setHistoryLoading(roomID string, loading bool) Model {
+	if m.histories == nil {
+		m.histories = map[string]roomHistory{}
+	}
+	h := m.histories[roomID]
+	h.loading = loading
+	m.histories[roomID] = h
+	return m
+}
+
 // hasLiveSession reports whether this model still owns an authenticated
 // WebSocket session. Room HTTP completions are tied to the session that
 // dispatched them; after disconnect, same-generation completions are stale too.
@@ -763,6 +850,7 @@ func (m Model) handleSessionExpiry() (tea.Model, tea.Cmd) {
 	m.roomsState = rooms.State{}
 	m.connected = false
 	m.messages = nil
+	m.histories = nil
 	m.composer = textinput.Model{}
 	m.mainError = ""
 	m.modal = m.openLoginModalWithError("Session expired — please sign in again", previousEmail)
@@ -778,12 +866,13 @@ func (m Model) View() string {
 
 	mainW, mainH := mainInnerDims(m.width, m.height)
 	mainState := mainview.State{
-		RoomLabel: m.mainviewState.RoomLabel,
-		Messages:  m.messages[m.activeRoomID],
-		Composer:  m.composer.View(),
-		ErrorLine: m.mainError,
-		CanType:   m.activeRoomID != "",
-		Connected: m.connected,
+		RoomLabel:     m.mainviewState.RoomLabel,
+		Messages:      m.messages[m.activeRoomID],
+		Composer:      m.composer.View(),
+		ErrorLine:     m.mainError,
+		CanType:       m.activeRoomID != "",
+		Connected:     m.connected,
+		FetchingOlder: m.histories[m.activeRoomID].loading,
 	}
 
 	background := chrome.Render(chrome.State{
