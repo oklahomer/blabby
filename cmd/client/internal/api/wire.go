@@ -143,12 +143,54 @@ type UserRef struct {
 // MessageFrame mirrors internal/actor/connection/encoder.go
 // encodeMessage — the inbound {"type":"message"} chat frame the Room
 // grain fans out to every member (the sender included). The sender is a
-// nested {"id","name"} object. Timestamp is Unix milliseconds; the server
-// emits 0 for a zero-value time.
+// nested {"id","name"} object. EventID is the message's timeline event
+// id as a decimal Snowflake string; it orders and dedups the frame
+// against the backfilled history. Timestamp is Unix milliseconds; the
+// server emits 0 for a zero-value time.
 type MessageFrame struct {
 	Type      string  `json:"type"`
 	RoomID    string  `json:"room_id"`
+	EventID   string  `json:"event_id"`
 	Sender    UserRef `json:"sender"`
 	Text      string  `json:"text"`
 	Timestamp int64   `json:"timestamp"`
+}
+
+// MemberEventFrame mirrors internal/actor/connection/encoder.go
+// encodeMember — the shared shape of the inbound {"type":"joined"} and
+// {"type":"left"} membership frames. EventID is the membership event's
+// timeline id as a decimal Snowflake string, with the same ordering and
+// dedup role as on the message frame. User is the member the change
+// applies to. Timestamp is Unix milliseconds.
+type MemberEventFrame struct {
+	Type      string  `json:"type"`
+	RoomID    string  `json:"room_id"`
+	EventID   string  `json:"event_id"`
+	User      UserRef `json:"user"`
+	Timestamp int64   `json:"timestamp"`
+}
+
+// RoomEvent mirrors internal/gateway/handler_room_events.go roomEvent —
+// one timeline entry in the GET /rooms/{id}/events response. Type
+// discriminates the shape: a "message" carries Sender+Text, while
+// "member_joined"/"member_left" carry User. (The HTTP vocabulary is
+// member_joined/member_left; the WebSocket frames use joined/left —
+// LoadEventsCmd normalises the two into one MemberEventKind.) ID is the
+// event's decimal Snowflake id; Timestamp is Unix milliseconds.
+type RoomEvent struct {
+	ID        string   `json:"id"`
+	Type      string   `json:"type"`
+	Sender    *UserRef `json:"sender,omitempty"`
+	User      *UserRef `json:"user,omitempty"`
+	Text      string   `json:"text,omitempty"`
+	Timestamp int64    `json:"timestamp"`
+}
+
+// RoomEventsResponse mirrors internal/gateway/handler_room_events.go
+// roomEventsPage — one newest-first page of a room's timeline. Next is
+// the `before` cursor for the following (older) page — the id of this
+// page's last event — or null when the history is exhausted.
+type RoomEventsResponse struct {
+	Events []RoomEvent `json:"events"`
+	Next   *string     `json:"next"`
 }

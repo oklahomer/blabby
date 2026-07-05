@@ -34,6 +34,7 @@ func TestCreateRoomCancelledReturnsToSearch(t *testing.T) {
 func TestRoomCreatedActivatesRoomAndReloads(t *testing.T) {
 	m := chatReadyModel(t)
 	m.modal = createroom.New(m.createRoomSubmitter(), m.server.String())
+	m.mainError = "stale error"
 
 	next, cmd := m.Update(api.RoomCreated{
 		Room:       api.Room{ID: "RK000000042", Name: "Team Standup"},
@@ -48,6 +49,9 @@ func TestRoomCreatedActivatesRoomAndReloads(t *testing.T) {
 	}
 	if got.nameForID["RK000000042"] != "Team Standup" {
 		t.Fatalf("name not cached: %#v", got.nameForID)
+	}
+	if got.mainError != "" {
+		t.Fatalf("mainError not cleared on room creation: %q", got.mainError)
 	}
 	if cmd == nil {
 		t.Fatal("expected a joined-rooms reload cmd")

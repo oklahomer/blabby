@@ -2,6 +2,7 @@ package app
 
 import (
 	"sort"
+	"strconv"
 
 	"github.com/charmbracelet/bubbles/textinput"
 
@@ -10,13 +11,25 @@ import (
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/mainview"
 )
 
+// roomHistory tracks a room's backfill pagination. next is the `before`
+// cursor for the next older page; exhausted is set once the server reports
+// no more history. fetched records that a newest-page load has completed
+// (so a re-activation refresh does not rewind a scroll-up's deeper
+// cursor), and loading is the single-flight latch admitting one in-flight
+// fetch per room.
+type roomHistory struct {
+	fetched   bool
+	loading   bool
+	next      string
+	exhausted bool
+}
+
 const (
-	// messageBucketCap bounds the per-room scrollback. Once a bucket
-	// exceeds it, the oldest messages are dropped from the front so the
-	// newest are always retained. Phase 1 keeps only in-session
-	// messages — there is no history backfill — so a few hundred lines
-	// per room is generous.
-	messageBucketCap = 200
+	// eventBucketCap bounds the per-room scrollback in memory. Once a
+	// bucket exceeds it, the oldest entries are dropped from the front so
+	// the newest are always retained; the trimmed region can be re-fetched
+	// by scrolling up, since history backfill re-reads the server timeline.
+	eventBucketCap = 1000
 
 	// minComposerWidth floors the composer width so the cursor and a
 	// few characters always render even on a very narrow terminal.
@@ -40,46 +53,133 @@ func newComposer(width int) textinput.Model {
 	return ti
 }
 
-// appendChatMessage inserts a decoded inbound message into the active
-// room's bucket, ordered by the server timestamp. The sender name is
-// resolved here and the user's own messages are flagged Self; mainview
-// owns how Self is styled and never sees the raw user ID logic.
+// appendChatMessage inserts a decoded inbound message into its room's
+// bucket, ordered and deduped by event id. The sender name is resolved
+// here and the user's own messages are flagged Self; mainview owns how
+// Self is styled and never sees the raw user code logic.
 func (m Model) appendChatMessage(cm api.ChatMessageReceived) Model {
-	if m.messages == nil {
-		m.messages = map[string][]mainview.Message{}
-	}
-	// Show the human-readable name, falling back to the raw ID only if the
-	// server sent no name (older frames or a directory miss). The user's own
-	// messages are flagged Self so mainview can mute them — the name is still
-	// shown, just dimmed, so other members stand out.
+	// Show the human-readable name, falling back to the raw code only if the
+	// server sent no name (a directory miss). The user's own messages are
+	// flagged Self so mainview can mute them — the name is still shown, just
+	// dimmed, so other members stand out.
 	sender := cm.Sender.Name
 	if sender == "" {
 		sender = cm.Sender.ID
 	}
-	msg := mainview.Message{Sender: sender, Text: cm.Text, At: cm.At, Self: cm.Sender.ID == m.userID}
-	m.messages[cm.RoomID] = insertOrdered(m.messages[cm.RoomID], msg, messageBucketCap)
+	return m.appendEvent(cm.RoomID, mainview.Message{
+		ID:     cm.EventID,
+		Kind:   mainview.KindChat,
+		Sender: sender,
+		Text:   cm.Text,
+		At:     cm.At,
+		Self:   cm.Sender.ID == m.userID,
+	})
+}
+
+// appendMemberEvent inserts a decoded membership frame as a system line in
+// its room's bucket, ordered and deduped by event id like a chat message.
+func (m Model) appendMemberEvent(me api.MemberEventReceived) Model {
+	name := me.User.Name
+	if name == "" {
+		name = me.User.ID
+	}
+	kind := mainview.KindJoined
+	if me.Kind == api.MemberLeft {
+		kind = mainview.KindLeft
+	}
+	return m.appendEvent(me.RoomID, mainview.Message{
+		ID:     me.EventID,
+		Kind:   kind,
+		Sender: name,
+		At:     me.At,
+	})
+}
+
+// appendTimelineEvent inserts one backfilled history entry into its room's
+// bucket, mapping the timeline kind to the render kind. It shares the
+// ordering, dedup, and trim-heal path with the live frames, so a
+// backfilled event that also arrived live is inserted once.
+func (m Model) appendTimelineEvent(roomID string, te api.TimelineEvent) Model {
+	name := te.Person.Name
+	if name == "" {
+		name = te.Person.ID
+	}
+	kind := mainview.KindChat
+	switch te.Kind {
+	case api.TimelineJoined:
+		kind = mainview.KindJoined
+	case api.TimelineLeft:
+		kind = mainview.KindLeft
+	}
+	return m.appendEvent(roomID, mainview.Message{
+		ID:     te.EventID,
+		Kind:   kind,
+		Sender: name,
+		Text:   te.Text,
+		At:     te.At,
+		Self:   te.Person.ID == m.userID,
+	})
+}
+
+// appendEvent is the single insertion point every live frame and every
+// backfilled entry flows through: it inserts msg into roomID's bucket,
+// ordered and deduped by event id. When the insert overflows the in-memory
+// cap and trims the oldest entries, it heals the room's backfill cursor so
+// scrolling up re-fetches the trimmed region instead of skipping it.
+func (m Model) appendEvent(roomID string, msg mainview.Message) Model {
+	if m.messages == nil {
+		m.messages = map[string][]mainview.Message{}
+	}
+	next, _, trimmed := insertOrdered(m.messages[roomID], msg, eventBucketCap)
+	m.messages[roomID] = next
+	if trimmed > 0 {
+		m = m.healTrimmedHistory(roomID, next)
+	}
+	return m
+}
+
+// healTrimmedHistory resets a room's backfill cursor after the in-memory
+// bucket dropped its oldest entries, so a scroll-up re-fetches the trimmed
+// region rather than skipping past it. The new cursor is the id of the
+// bucket's current oldest entry.
+func (m Model) healTrimmedHistory(roomID string, bucket []mainview.Message) Model {
+	if len(bucket) == 0 {
+		return m
+	}
+	if m.histories == nil {
+		m.histories = map[string]roomHistory{}
+	}
+	h := m.histories[roomID]
+	h.fetched = true
+	h.next = strconv.FormatInt(bucket[0].ID, 10)
+	h.exhausted = false
+	m.histories[roomID] = h
 	return m
 }
 
 // insertOrdered returns a new slice with msg inserted into bucket by
-// ascending At, preserving arrival order among equal timestamps. When
-// the result exceeds cap, the oldest entries are dropped from the
-// front. The bucket is never mutated in place: a fresh backing array is
-// allocated so a value-copied Model cannot alias another's scrollback.
-func insertOrdered(bucket []mainview.Message, msg mainview.Message, cap int) []mainview.Message {
-	// First index whose timestamp is strictly after msg.At; inserting
-	// there keeps equal-timestamp messages in arrival order.
+// ascending event id, together with whether it was inserted (false when
+// the id was already present — a duplicate, e.g. a live frame that also
+// arrived via backfill) and how many oldest entries were trimmed to
+// respect cap. The bucket is never mutated in place: on insertion a fresh
+// backing array is allocated so a value-copied Model cannot alias
+// another's scrollback; a duplicate returns the original slice unchanged.
+func insertOrdered(bucket []mainview.Message, msg mainview.Message, cap int) (next []mainview.Message, inserted bool, trimmed int) {
 	idx := sort.Search(len(bucket), func(i int) bool {
-		return bucket[i].At.After(msg.At)
+		return bucket[i].ID >= msg.ID
 	})
-	next := make([]mainview.Message, 0, len(bucket)+1)
+	if idx < len(bucket) && bucket[idx].ID == msg.ID {
+		return bucket, false, 0
+	}
+	next = make([]mainview.Message, 0, len(bucket)+1)
 	next = append(next, bucket[:idx]...)
 	next = append(next, msg)
 	next = append(next, bucket[idx:]...)
 	if len(next) > cap {
-		next = next[len(next)-cap:]
+		trimmed = len(next) - cap
+		next = next[trimmed:]
 	}
-	return next
+	return next, true, trimmed
 }
 
 // mainInnerDims returns the Main pane's inner content width and height

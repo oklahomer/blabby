@@ -134,6 +134,13 @@ func (s *roomStubServer) roomsFromIDs(ids []string) []api.Room {
 }
 
 func (s *roomStubServer) handleRoomCommand(w http.ResponseWriter, r *http.Request) {
+	// Backfill on room activation reads the timeline; answer with an empty
+	// page so the fetch succeeds instead of setting a spurious error.
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/events") {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.RoomEventsResponse{Events: []api.RoomEvent{}, Next: nil})
+		return
+	}
 	// Expect PUT /rooms/{id}/membership — strip the prefix/suffix.
 	if r.Method != http.MethodPut || !strings.HasPrefix(r.URL.Path, "/rooms/") || !strings.HasSuffix(r.URL.Path, "/membership") {
 		http.Error(w, "not found", http.StatusNotFound)

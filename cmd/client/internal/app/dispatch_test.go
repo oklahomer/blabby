@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -195,6 +196,7 @@ func TestUpdateRoomJoinedSetsActiveRoomAndCloses(t *testing.T) {
 	m.modal = nil
 	m.token = "fake.jwt"
 	m.sessionGeneration = 1
+	m.mainError = "stale error"
 	// RoomJoined requires a live session — conn must be non-nil so the
 	// post-WSDisconnected race guard does not drop the message.
 	m.conn = &websocket.Conn{}
@@ -210,6 +212,9 @@ func TestUpdateRoomJoinedSetsActiveRoomAndCloses(t *testing.T) {
 	}
 	if got.nameForID["general"] != "General" {
 		t.Fatalf("nameForID not populated: %#v", got.nameForID)
+	}
+	if got.mainError != "" {
+		t.Fatalf("mainError not cleared on room join: %q", got.mainError)
 	}
 	if got.modal != nil {
 		t.Fatal("expected modal cleared on RoomJoined")
@@ -482,18 +487,29 @@ func chatReadyModel(t *testing.T) Model {
 }
 
 // messageFrameJSON builds a raw {"type":"message"} frame for dispatch
-// tests without threading json.Marshal through every call site.
-func messageFrameJSON(room, sender, text string, ms int64) []byte {
+// tests without threading json.Marshal through every call site. eventID
+// is the ordering key the scrollback sorts and dedups on.
+func messageFrameJSON(room, sender, text string, eventID, ms int64) []byte {
 	return []byte(fmt.Sprintf(
-		`{"type":"message","room_id":%q,"sender":{"id":%q},"text":%q,"timestamp":%d}`,
-		room, sender, text, ms))
+		`{"type":"message","room_id":%q,"event_id":%q,"sender":{"id":%q},"text":%q,"timestamp":%d}`,
+		room, itoa64(eventID), sender, text, ms))
 }
 
-func messageFrameJSONNamed(room, senderID, senderName, text string, ms int64) []byte {
+func messageFrameJSONNamed(room, senderID, senderName, text string, eventID, ms int64) []byte {
 	return []byte(fmt.Sprintf(
-		`{"type":"message","room_id":%q,"sender":{"id":%q,"name":%q},"text":%q,"timestamp":%d}`,
-		room, senderID, senderName, text, ms))
+		`{"type":"message","room_id":%q,"event_id":%q,"sender":{"id":%q,"name":%q},"text":%q,"timestamp":%d}`,
+		room, itoa64(eventID), senderID, senderName, text, ms))
 }
+
+// memberFrameJSON builds a raw {"type":"joined"|"left"} membership frame.
+func memberFrameJSON(kind, room, userID, userName string, eventID, ms int64) []byte {
+	return []byte(fmt.Sprintf(
+		`{"type":%q,"room_id":%q,"event_id":%q,"user":{"id":%q,"name":%q},"timestamp":%d}`,
+		kind, room, itoa64(eventID), userID, userName, ms))
+}
+
+// itoa64 renders a decimal event id for the wire fixtures.
+func itoa64(v int64) string { return strconv.FormatInt(v, 10) }
 
 func chatFrame(m Model, typ string, raw []byte) api.WSFrameReceived {
 	return api.WSFrameReceived{Type: typ, Raw: raw, Generation: m.sessionGeneration}
@@ -501,7 +517,7 @@ func chatFrame(m Model, typ string, raw []byte) api.WSFrameReceived {
 
 func TestUpdateMessageFrameAppendsToActiveBucket(t *testing.T) {
 	m := chatReadyModel(t)
-	next, cmd := m.Update(chatFrame(m, "message", messageFrameJSON("general", "alice", "hello", 1000)))
+	next, cmd := m.Update(chatFrame(m, "message", messageFrameJSON("general", "alice", "hello", 1, 1000)))
 	got := next.(Model)
 	if cmd != nil {
 		t.Fatal("inbound message frame must not dispatch a cmd")
@@ -512,25 +528,66 @@ func TestUpdateMessageFrameAppendsToActiveBucket(t *testing.T) {
 	}
 }
 
-func TestUpdateMessageFrameSortsByTimestamp(t *testing.T) {
+func TestUpdateMessageFrameSortsByEventID(t *testing.T) {
 	m := chatReadyModel(t)
-	// Arrive out of order: the later timestamp lands first.
-	n1, _ := m.Update(chatFrame(m, "message", messageFrameJSON("general", "a", "late", 5000)))
+	// event_id order and timestamp order disagree: "first" has the smaller
+	// event id but the later timestamp. Ordering by event id must win.
+	n1, _ := m.Update(chatFrame(m, "message", messageFrameJSON("general", "a", "second", 20, 1000)))
 	n1Model := n1.(Model)
-	n2, _ := n1Model.Update(chatFrame(n1Model, "message", messageFrameJSON("general", "b", "early", 1000)))
+	n2, _ := n1Model.Update(chatFrame(n1Model, "message", messageFrameJSON("general", "b", "first", 10, 9000)))
 	bucket := n2.(Model).messages["general"]
 	if len(bucket) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(bucket))
 	}
-	if bucket[0].Text != "early" || bucket[1].Text != "late" {
-		t.Fatalf("messages not sorted by timestamp: %#v", bucket)
+	if bucket[0].Text != "first" || bucket[1].Text != "second" {
+		t.Fatalf("messages not sorted by event id: %#v", bucket)
+	}
+}
+
+func TestUpdateMessageFrameDedupsByEventID(t *testing.T) {
+	m := chatReadyModel(t)
+	// The same event id arriving twice (e.g. a live frame that also lands
+	// via backfill) is inserted once.
+	n1, _ := m.Update(chatFrame(m, "message", messageFrameJSON("general", "a", "hello", 42, 1000)))
+	n1Model := n1.(Model)
+	n2, _ := n1Model.Update(chatFrame(n1Model, "message", messageFrameJSON("general", "a", "hello", 42, 1000)))
+	bucket := n2.(Model).messages["general"]
+	if len(bucket) != 1 {
+		t.Fatalf("expected 1 deduped message, got %d: %#v", len(bucket), bucket)
+	}
+}
+
+func TestUpdateMemberFramesAppendSystemLines(t *testing.T) {
+	m := chatReadyModel(t)
+	n1, cmd := m.Update(chatFrame(m, "joined", memberFrameJSON("joined", "general", "U9", "Bob", 5, 1000)))
+	if cmd != nil {
+		t.Fatal("a membership frame must not dispatch a cmd")
+	}
+	n2, _ := n1.(Model).Update(chatFrame(n1.(Model), "left", memberFrameJSON("left", "general", "U9", "Bob", 6, 2000)))
+	bucket := n2.(Model).messages["general"]
+	if len(bucket) != 2 {
+		t.Fatalf("expected 2 system lines, got %d: %#v", len(bucket), bucket)
+	}
+	if bucket[0].Kind != mainview.KindJoined || bucket[0].Sender != "Bob" {
+		t.Fatalf("first entry not a joined system line: %#v", bucket[0])
+	}
+	if bucket[1].Kind != mainview.KindLeft {
+		t.Fatalf("second entry not a left system line: %#v", bucket[1])
+	}
+}
+
+func TestUpdateMemberFrameMalformedIgnored(t *testing.T) {
+	m := chatReadyModel(t)
+	next, _ := m.Update(chatFrame(m, "joined", []byte(`{"type":"joined"}`))) // no event_id
+	if len(next.(Model).messages["general"]) != 0 {
+		t.Fatal("a membership frame without an event id must not append")
 	}
 }
 
 func TestUpdateMessageFrameForOtherRoomRetainedNotShown(t *testing.T) {
 	m := chatReadyModel(t)
 	m.width, m.height = 120, 35
-	next, _ := m.Update(chatFrame(m, "message", messageFrameJSON("random", "a", "hidden-text", 1000)))
+	next, _ := m.Update(chatFrame(m, "message", messageFrameJSON("random", "a", "hidden-text", 1, 1000)))
 	got := next.(Model)
 	if len(got.messages["random"]) != 1 {
 		t.Fatalf("frame for non-active room not retained: %#v", got.messages)
@@ -545,7 +602,7 @@ func TestUpdateMessageFrameForOtherRoomRetainedNotShown(t *testing.T) {
 
 func TestUpdateOwnMessageShowsMutedName(t *testing.T) {
 	m := chatReadyModel(t) // userID == u-rina-1
-	next, _ := m.Update(chatFrame(m, "message", messageFrameJSONNamed("general", "u-rina-1", "Rina", "mine", 1000)))
+	next, _ := m.Update(chatFrame(m, "message", messageFrameJSONNamed("general", "u-rina-1", "Rina", "mine", 1, 1000)))
 	msg := next.(Model).messages["general"][0]
 	// Own messages now show the display name (not "you") and are flagged
 	// Self so mainview mutes the sender.
@@ -559,7 +616,7 @@ func TestUpdateOwnMessageShowsMutedName(t *testing.T) {
 
 func TestUpdateOtherUserMessageNotSelf(t *testing.T) {
 	m := chatReadyModel(t) // userID == u-rina-1
-	next, _ := m.Update(chatFrame(m, "message", messageFrameJSONNamed("general", "u-bob-9", "Bob", "hi", 1000)))
+	next, _ := m.Update(chatFrame(m, "message", messageFrameJSONNamed("general", "u-bob-9", "Bob", "hi", 1, 1000)))
 	msg := next.(Model).messages["general"][0]
 	if msg.Sender != "Bob" {
 		t.Errorf("other sender = %q, want %q", msg.Sender, "Bob")
@@ -635,6 +692,76 @@ func TestUpdateSendMessageFailedBusinessErrorKeepsSession(t *testing.T) {
 	}
 	if got.modal != nil {
 		t.Fatalf("modal opened on a business-error send failure: %T", got.modal)
+	}
+}
+
+func TestSendMessageFailedRestoresComposerText(t *testing.T) {
+	m := chatReadyModel(t)
+	m.composer = newComposer(40) // empty after the optimistic clear-on-send
+	next, _ := m.Update(api.SendMessageFailed{
+		RoomID:     "general",
+		Generation: m.sessionGeneration,
+		HTTPStatus: http.StatusForbidden,
+		Status:     "ROOM_NOT_MEMBER",
+		Text:       "unsent words",
+	})
+	got := next.(Model)
+	if got.composer.Value() != "unsent words" {
+		t.Fatalf("composer not restored after a failed send: %q", got.composer.Value())
+	}
+	if got.mainError != "Not a member of this room" {
+		t.Fatalf("mainError = %q", got.mainError)
+	}
+}
+
+func TestSendMessageFailedDoesNotClobberNewerText(t *testing.T) {
+	m := chatReadyModel(t)
+	m.composer = newComposer(40)
+	m.composer.SetValue("already typing this")
+	next, _ := m.Update(api.SendMessageFailed{
+		RoomID:     "general",
+		Generation: m.sessionGeneration,
+		HTTPStatus: http.StatusForbidden,
+		Status:     "ROOM_NOT_MEMBER",
+		Text:       "unsent words",
+	})
+	if got := next.(Model).composer.Value(); got != "already typing this" {
+		t.Fatalf("restore clobbered text typed since the send: %q", got)
+	}
+}
+
+func TestSendMessageFailedNoRestoreForOtherRoom(t *testing.T) {
+	m := chatReadyModel(t) // active room is "general"
+	m.composer = newComposer(40)
+	next, _ := m.Update(api.SendMessageFailed{
+		RoomID:     "random",
+		Generation: m.sessionGeneration,
+		HTTPStatus: http.StatusForbidden,
+		Status:     "ROOM_NOT_MEMBER",
+		Text:       "unsent words",
+	})
+	if got := next.(Model).composer.Value(); got != "" {
+		t.Fatalf("restored text into the wrong room's composer: %q", got)
+	}
+}
+
+func TestSendMessageFailedUnauthorizedDoesNotRestore(t *testing.T) {
+	m := chatReadyModel(t)
+	m.width, m.height = 100, 30
+	m.composer = newComposer(40)
+	next, _ := m.Update(api.SendMessageFailed{
+		RoomID:     "general",
+		Generation: m.sessionGeneration,
+		HTTPStatus: http.StatusUnauthorized,
+		Status:     "AUTH_EXPIRED_TOKEN",
+		Text:       "unsent words",
+	})
+	got := next.(Model)
+	if got.composer.Value() != "" {
+		t.Fatalf("the 401 path must not restore text; composer = %q", got.composer.Value())
+	}
+	if _, ok := got.modal.(login.Model); !ok {
+		t.Fatalf("expected session expiry to reopen the login modal, got %T", got.modal)
 	}
 }
 
@@ -736,7 +863,7 @@ func TestUpdateWSFrameReceivedFromOldGenerationDropped(t *testing.T) {
 
 	next, cmd := m.Update(api.WSFrameReceived{
 		Type:       "message",
-		Raw:        messageFrameJSON("general", "bob", "stale", 2000),
+		Raw:        messageFrameJSON("general", "bob", "stale", 2, 2000),
 		Generation: 1,
 	})
 	got := next.(Model)

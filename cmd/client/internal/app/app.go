@@ -63,12 +63,18 @@ type Model struct {
 
 	// chat state populated after the WS handshake succeeds. composer is
 	// the Main-pane message input; messages holds the per-room
-	// scrollback buckets keyed by room ID; connected drives the passive
-	// status indicator; mainError is the inline Main-pane error string.
+	// scrollback buckets keyed by room ID; histories tracks each room's
+	// backfill pagination; connected drives the passive status indicator;
+	// mainError is the inline Main-pane error string.
 	composer  textinput.Model
 	messages  map[string][]mainview.Message
+	histories map[string]roomHistory
 	connected bool
 	mainError string
+	// scrollOffset is how many rows the active room's scrollback is
+	// scrolled up from the newest line; 0 pins the view to the bottom. It
+	// resets on every room activation and session reset.
+	scrollOffset int
 }
 
 // New constructs the root Model for the given parsed --server URL.
@@ -419,13 +425,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.nameForID[v.RoomID] = v.RoomName
 		m.roomsState.NameForID = m.nameForID
-		m.activeRoomID = v.RoomID
-		m.mainviewState.RoomLabel = v.RoomName
+		m = m.activateRoom(v.RoomID, v.RoomName)
 		m.modal = nil
 		// Reload from the server so the Rooms pane reflects the
-		// authoritative membership; the modal's optimistic-add does
-		// not own this state.
-		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout)
+		// authoritative membership (the modal's optimistic-add does not
+		// own this state), and backfill the newly active room's timeline.
+		var joinedBackfill tea.Cmd
+		m, joinedBackfill = m.beginBackfill(v.RoomID)
+		return m, tea.Batch(
+			api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout),
+			joinedBackfill,
+		)
 
 	case roomsearch.CreateRoomRequested:
 		if !m.hasLiveSession() {
@@ -458,10 +468,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.nameForID[v.Room.ID] = v.Room.Name
 		m.roomsState.NameForID = m.nameForID
-		m.activeRoomID = v.Room.ID
-		m.mainviewState.RoomLabel = v.Room.Name
+		m = m.activateRoom(v.Room.ID, v.Room.Name)
 		m.modal = nil
-		return m, api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout)
+		var createdBackfill tea.Cmd
+		m, createdBackfill = m.beginBackfill(v.Room.ID)
+		return m, tea.Batch(
+			api.LoadJoinedRoomsCmd(m.httpClient, m.server.String(), m.token, m.sessionGeneration, api.DefaultRoomCallTimeout),
+			createdBackfill,
+		)
 
 	case api.RoomCreateFailed:
 		if !m.liveRoomResult(v.Generation) {
@@ -540,27 +554,75 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case api.RoomEventsLoaded:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
+		oldActive := m.activeLines()
+		if m.histories == nil {
+			m.histories = map[string]roomHistory{}
+		}
+		h := m.histories[v.RoomID]
+		prevFetched := h.fetched
+		h.loading = false
+		h.fetched = true
+		// Advance the pagination cursor: an older page (before != "") always
+		// adopts the server's next cursor, while a newest-page load seeds it
+		// only on the first fetch so a re-activation refresh cannot rewind a
+		// scroll-up's deeper cursor. The cursor is set before the merge so a
+		// trim during the merge (the fetched region overflowing the cap)
+		// re-heals it to the surviving oldest entry.
+		if v.Before != "" || !prevFetched {
+			h.next = v.Next
+			h.exhausted = v.Next == ""
+		}
+		m.histories[v.RoomID] = h
+		for _, ev := range v.Events {
+			m = m.appendTimelineEvent(v.RoomID, ev)
+		}
+		m = m.reanchor(oldActive)
+		return m, nil
+
+	case api.RoomEventsLoadFailed:
+		if !m.liveRoomResult(v.Generation) {
+			return m, nil
+		}
+		if v.HTTPStatus == http.StatusUnauthorized {
+			return m.handleSessionExpiry()
+		}
+		m = m.setHistoryLoading(v.RoomID, false)
+		if v.RoomID == m.activeRoomID {
+			m.mainError = api.Humanise(v.Status, v.Message)
+		}
+		return m, nil
+
 	case api.WSFrameReceived:
 		if v.Generation != m.sessionGeneration {
 			return m, nil
 		}
-		// message and error frames render into the Main pane; joined /
-		// left / ping are delivered but ignored in this phase (see the
-		// deferred-work notes for system lines and pong replies).
+		// message, joined, and left frames render into the active room's
+		// scrollback; error sets the inline Main-pane error; ping is
+		// delivered but not yet answered (the pong reply is parked with the
+		// heartbeat arc). Each decoder fails closed, dropping a frame the
+		// server sent malformed or without an event id. A scrolled-up view
+		// is re-anchored so an inbound frame does not slide it.
+		oldActive := m.activeLines()
 		switch v.Type {
 		case "message":
 			if cm, ok := api.DecodeChatMessage(v.Raw); ok {
 				m = m.appendChatMessage(cm)
 			}
-			return m, nil
+		case "joined", "left":
+			if me, ok := api.DecodeMemberEvent(v.Raw); ok {
+				m = m.appendMemberEvent(me)
+			}
 		case "error":
 			if ef, ok := api.DecodeErrorFrame(v.Raw); ok {
 				m.mainError = api.Humanise(ef.Status, ef.Message)
 			}
-			return m, nil
-		default:
-			return m, nil
 		}
+		m = m.reanchor(oldActive)
+		return m, nil
 
 	case api.SendMessageSucceeded:
 		if m.token == "" || m.conn == nil || v.Generation != m.sessionGeneration {
@@ -577,6 +639,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if v.HTTPStatus == http.StatusUnauthorized {
 			return m.handleSessionExpiry()
+		}
+		// Restore the attempted text so the user can retry without retyping —
+		// only into the still-empty composer of the room it was sent from, so
+		// it never clobbers text typed since nor lands in another room.
+		if v.RoomID == m.activeRoomID && strings.TrimSpace(m.composer.Value()) == "" {
+			m.composer.SetValue(v.Text)
 		}
 		m.mainError = api.Humanise(v.Status, v.Message)
 		return m, nil
@@ -598,6 +666,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.roomsState = rooms.State{}
 		m.connected = false
 		m.messages = nil
+		m.histories = nil
+		m.scrollOffset = 0
 		m.composer = textinput.Model{}
 		m.mainError = ""
 		m.modal = m.openLoginModalWithError("Connection lost — please sign in again", previousEmail)
@@ -669,11 +739,10 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch outcome {
 		case rooms.OutcomeSwitchActiveRoom:
 			if id := nextState.ActiveID(); id != "" {
-				m.activeRoomID = id
-				m.mainviewState.RoomLabel = nextState.ResolveName(id)
-				// Drop any inline error left over from the previous
-				// room so it does not linger over a different scrollback.
-				m.mainError = ""
+				m = m.activateRoom(id, nextState.ResolveName(id))
+				var cmd tea.Cmd
+				m, cmd = m.beginBackfill(id)
+				return m, cmd
 			}
 			return m, nil
 		case rooms.OutcomeRetryLoad:
@@ -718,9 +787,132 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// focusMainView has no key bindings in this phase; scrollback scroll
-	// keys are out of scope (see the deferred-work notes).
+	if m.focus == focusMainView {
+		// The scrollback region owns the vertical scroll keys; a jump to the
+		// top pages in older history.
+		return m.handleScrollKey(k.String())
+	}
 	return m, nil
+}
+
+// activateRoom updates the Main-pane surface for a newly selected room.
+// Room-scoped error and scroll state are reset so stale state from the
+// previously active room does not leak into the new scrollback.
+func (m Model) activateRoom(roomID, roomName string) Model {
+	m.activeRoomID = roomID
+	m.mainviewState.RoomLabel = roomName
+	m.mainError = ""
+	m.scrollOffset = 0
+	return m
+}
+
+// beginBackfill dispatches a newest-page history load for roomID unless a
+// fetch is already in flight for it, latching the single-flight loading
+// flag. It returns the updated model and the Cmd (nil when a fetch is
+// already running, so the caller can tea.Batch it unconditionally). The
+// merged result heals any WebSocket fan-out frames the room missed.
+func (m Model) beginBackfill(roomID string) (Model, tea.Cmd) {
+	if m.histories == nil {
+		m.histories = map[string]roomHistory{}
+	}
+	h := m.histories[roomID]
+	if h.loading {
+		return m, nil
+	}
+	h.loading = true
+	m.histories[roomID] = h
+	return m, api.LoadEventsCmd(m.httpClient, m.server.String(), m.token, roomID, "", m.sessionGeneration, api.DefaultRoomCallTimeout)
+}
+
+// handleScrollKey applies a scroll key while the scrollback region is
+// focused. Movement clamps at both ends; a jump to (or past) the top while
+// more history remains kicks off an older-page fetch. All state transitions
+// stay here in the dispatch — mainview only renders the resulting offset.
+func (m Model) handleScrollKey(key string) (Model, tea.Cmd) {
+	avail := m.scrollAvail()
+	maxOffset := maxScrollOffset(len(m.activeLines()), avail)
+	atTop := m.scrollOffset >= maxOffset
+
+	switch key {
+	case "up", "k":
+		m.scrollOffset++
+	case "down", "j":
+		m.scrollOffset--
+	case "pgup":
+		m.scrollOffset += pageStep(avail)
+	case "pgdown":
+		m.scrollOffset -= pageStep(avail)
+	case "home":
+		m.scrollOffset = maxOffset
+	case "end":
+		m.scrollOffset = 0
+	default:
+		return m, nil
+	}
+	m.scrollOffset = clampOffset(m.scrollOffset, maxOffset)
+
+	// Trying to move above the top pages in older history.
+	switch key {
+	case "up", "k", "pgup", "home":
+		if atTop {
+			return m.fetchOlder()
+		}
+	}
+	return m, nil
+}
+
+// fetchOlder dispatches an older-page history load for the active room when
+// one is warranted — more history remains and no fetch is already running.
+func (m Model) fetchOlder() (Model, tea.Cmd) {
+	h := m.histories[m.activeRoomID]
+	if h.loading || h.exhausted || h.next == "" {
+		return m, nil
+	}
+	h.loading = true
+	if m.histories == nil {
+		m.histories = map[string]roomHistory{}
+	}
+	m.histories[m.activeRoomID] = h
+	return m, api.LoadEventsCmd(m.httpClient, m.server.String(), m.token, m.activeRoomID, h.next, m.sessionGeneration, api.DefaultRoomCallTimeout)
+}
+
+// activeLines renders the active room's bucket into physical rows for the
+// scroll math (offset clamping, anchor stability).
+func (m Model) activeLines() []mainview.Line {
+	return mainview.Lines(m.messages[m.activeRoomID])
+}
+
+// scrollAvail is how many scrollback rows the Main pane can show at the
+// current terminal size, accounting for the inline error row.
+func (m Model) scrollAvail() int {
+	_, innerH := mainInnerDims(m.width, m.height)
+	return mainview.VisibleCapacity(innerH, m.mainError != "")
+}
+
+// reanchor keeps a scrolled-up viewport pinned to the same content after
+// the active room's rendered lines changed from oldActiveLines. It is a
+// no-op when pinned to the bottom (offset 0).
+func (m Model) reanchor(oldActiveLines []mainview.Line) Model {
+	if m.scrollOffset == 0 {
+		return m
+	}
+	newLines := m.activeLines()
+	off := adjustOffset(oldActiveLines, newLines, m.scrollOffset)
+	m.scrollOffset = clampOffset(off, maxScrollOffset(len(newLines), m.scrollAvail()))
+	return m
+}
+
+// setHistoryLoading clears (or sets) a room's single-flight latch, leaving
+// the rest of its pagination untouched. Used by the failure path, where
+// only the latch changes.
+func (m Model) setHistoryLoading(roomID string, loading bool) Model {
+	if m.histories == nil {
+		m.histories = map[string]roomHistory{}
+	}
+	h := m.histories[roomID]
+	h.loading = loading
+	m.histories[roomID] = h
+	return m
 }
 
 // hasLiveSession reports whether this model still owns an authenticated
@@ -756,6 +948,8 @@ func (m Model) handleSessionExpiry() (tea.Model, tea.Cmd) {
 	m.roomsState = rooms.State{}
 	m.connected = false
 	m.messages = nil
+	m.histories = nil
+	m.scrollOffset = 0
 	m.composer = textinput.Model{}
 	m.mainError = ""
 	m.modal = m.openLoginModalWithError("Session expired — please sign in again", previousEmail)
@@ -771,12 +965,14 @@ func (m Model) View() string {
 
 	mainW, mainH := mainInnerDims(m.width, m.height)
 	mainState := mainview.State{
-		RoomLabel: m.mainviewState.RoomLabel,
-		Messages:  m.messages[m.activeRoomID],
-		Composer:  m.composer.View(),
-		ErrorLine: m.mainError,
-		CanType:   m.activeRoomID != "",
-		Connected: m.connected,
+		RoomLabel:     m.mainviewState.RoomLabel,
+		Messages:      m.messages[m.activeRoomID],
+		Composer:      m.composer.View(),
+		ErrorLine:     m.mainError,
+		CanType:       m.activeRoomID != "",
+		Connected:     m.connected,
+		FetchingOlder: m.histories[m.activeRoomID].loading,
+		Offset:        m.scrollOffset,
 	}
 
 	background := chrome.Render(chrome.State{

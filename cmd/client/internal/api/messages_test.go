@@ -266,7 +266,7 @@ func TestSendMessageCmdTransportError(t *testing.T) {
 
 func TestDecodeChatMessageValid(t *testing.T) {
 	const ms int64 = 1_700_000_000_000
-	raw := []byte(`{"type":"message","room_id":"general","sender":{"id":"alice","name":"Alice Liddell"},"text":"hello","timestamp":1700000000000}`)
+	raw := []byte(`{"type":"message","room_id":"general","event_id":"112233445566778899","sender":{"id":"alice","name":"Alice Liddell"},"text":"hello","timestamp":1700000000000}`)
 	got, ok := DecodeChatMessage(raw)
 	if !ok {
 		t.Fatal("expected ok for a valid message frame")
@@ -274,13 +274,16 @@ func TestDecodeChatMessageValid(t *testing.T) {
 	if got.RoomID != "general" || got.Sender.ID != "alice" || got.Sender.Name != "Alice Liddell" || got.Text != "hello" {
 		t.Fatalf("decoded fields wrong: %#v", got)
 	}
+	if got.EventID != 112233445566778899 {
+		t.Fatalf("EventID = %d, want 112233445566778899", got.EventID)
+	}
 	if !got.At.Equal(time.UnixMilli(ms)) {
 		t.Fatalf("At = %v, want %v", got.At, time.UnixMilli(ms))
 	}
 }
 
 func TestDecodeChatMessageZeroTimestamp(t *testing.T) {
-	raw := []byte(`{"type":"message","room_id":"general","sender":{"id":"alice"},"text":"hi","timestamp":0}`)
+	raw := []byte(`{"type":"message","room_id":"general","event_id":"42","sender":{"id":"alice"},"text":"hi","timestamp":0}`)
 	got, ok := DecodeChatMessage(raw)
 	if !ok {
 		t.Fatal("expected ok")
@@ -288,10 +291,13 @@ func TestDecodeChatMessageZeroTimestamp(t *testing.T) {
 	if !got.At.IsZero() {
 		t.Fatalf("expected zero At for timestamp 0, got %v", got.At)
 	}
+	if got.EventID != 42 {
+		t.Fatalf("EventID = %d, want 42", got.EventID)
+	}
 }
 
 func TestDecodeChatMessageWrongType(t *testing.T) {
-	if _, ok := DecodeChatMessage([]byte(`{"type":"joined","room_id":"general","user":{"id":"alice"}}`)); ok {
+	if _, ok := DecodeChatMessage([]byte(`{"type":"joined","room_id":"general","event_id":"1","user":{"id":"alice"}}`)); ok {
 		t.Fatal("expected ok=false for a non-message frame")
 	}
 }
@@ -299,6 +305,75 @@ func TestDecodeChatMessageWrongType(t *testing.T) {
 func TestDecodeChatMessageMalformed(t *testing.T) {
 	if _, ok := DecodeChatMessage([]byte(`{not json`)); ok {
 		t.Fatal("expected ok=false for malformed JSON")
+	}
+}
+
+func TestDecodeChatMessageBadEventID(t *testing.T) {
+	cases := map[string]string{
+		"missing":     `{"type":"message","room_id":"general","sender":{"id":"a"},"text":"hi","timestamp":1}`,
+		"empty":       `{"type":"message","room_id":"general","event_id":"","sender":{"id":"a"},"text":"hi","timestamp":1}`,
+		"non-numeric": `{"type":"message","room_id":"general","event_id":"abc","sender":{"id":"a"},"text":"hi","timestamp":1}`,
+		"zero":        `{"type":"message","room_id":"general","event_id":"0","sender":{"id":"a"},"text":"hi","timestamp":1}`,
+		"negative":    `{"type":"message","room_id":"general","event_id":"-5","sender":{"id":"a"},"text":"hi","timestamp":1}`,
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, ok := DecodeChatMessage([]byte(raw)); ok {
+				t.Fatalf("expected ok=false for %s event_id", name)
+			}
+		})
+	}
+}
+
+func TestDecodeMemberEventJoined(t *testing.T) {
+	const ms int64 = 1_700_000_000_000
+	raw := []byte(`{"type":"joined","room_id":"general","event_id":"55","user":{"id":"U000000042","name":"Bob"},"timestamp":1700000000000}`)
+	got, ok := DecodeMemberEvent(raw)
+	if !ok {
+		t.Fatal("expected ok for a valid joined frame")
+	}
+	if got.Kind != MemberJoined {
+		t.Fatalf("Kind = %d, want MemberJoined", got.Kind)
+	}
+	if got.RoomID != "general" || got.User.ID != "U000000042" || got.User.Name != "Bob" {
+		t.Fatalf("decoded fields wrong: %#v", got)
+	}
+	if got.EventID != 55 {
+		t.Fatalf("EventID = %d, want 55", got.EventID)
+	}
+	if !got.At.Equal(time.UnixMilli(ms)) {
+		t.Fatalf("At = %v, want %v", got.At, time.UnixMilli(ms))
+	}
+}
+
+func TestDecodeMemberEventLeft(t *testing.T) {
+	raw := []byte(`{"type":"left","room_id":"general","event_id":"56","user":{"id":"U000000042","name":"Bob"},"timestamp":0}`)
+	got, ok := DecodeMemberEvent(raw)
+	if !ok {
+		t.Fatal("expected ok for a valid left frame")
+	}
+	if got.Kind != MemberLeft {
+		t.Fatalf("Kind = %d, want MemberLeft", got.Kind)
+	}
+	if !got.At.IsZero() {
+		t.Fatalf("expected zero At for timestamp 0, got %v", got.At)
+	}
+}
+
+func TestDecodeMemberEventRejects(t *testing.T) {
+	cases := map[string]string{
+		"wrong-type":   `{"type":"message","room_id":"general","event_id":"1","sender":{"id":"a"},"text":"hi","timestamp":1}`,
+		"malformed":    `}{`,
+		"missing-id":   `{"type":"joined","room_id":"general","user":{"id":"a"},"timestamp":1}`,
+		"bad-id":       `{"type":"left","room_id":"general","event_id":"nope","user":{"id":"a"},"timestamp":1}`,
+		"non-positive": `{"type":"joined","room_id":"general","event_id":"0","user":{"id":"a"},"timestamp":1}`,
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, ok := DecodeMemberEvent([]byte(raw)); ok {
+				t.Fatalf("expected ok=false for %s", name)
+			}
+		})
 	}
 }
 

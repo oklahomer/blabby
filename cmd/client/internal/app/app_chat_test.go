@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -101,6 +102,13 @@ func (s *chatStubServer) handleRoomsJoined(w http.ResponseWriter, _ *http.Reques
 }
 
 func (s *chatStubServer) handleRoomCommand(w http.ResponseWriter, r *http.Request) {
+	// Backfill on room activation reads the timeline; answer with an empty
+	// page so the fetch succeeds instead of setting a spurious error.
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/events") {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.RoomEventsResponse{Events: []api.RoomEvent{}, Next: nil})
+		return
+	}
 	if !strings.HasSuffix(r.URL.Path, "/messages") {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -128,7 +136,9 @@ func (s *chatStubServer) handleRoomCommand(w http.ResponseWriter, r *http.Reques
 
 // pushMessage writes a server→client {"type":"message"} frame, blocking
 // until the WebSocket is authenticated so the write never races auth_ok.
-func (s *chatStubServer) pushMessage(t *testing.T, room, sender, text string, ms int64) {
+// eventID is carried as the frame's decimal event id so the client can
+// order and dedup it.
+func (s *chatStubServer) pushMessage(t *testing.T, room, sender, text string, eventID, ms int64) {
 	t.Helper()
 	select {
 	case <-s.ready:
@@ -142,7 +152,8 @@ func (s *chatStubServer) pushMessage(t *testing.T, room, sender, text string, ms
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	frame := map[string]any{
-		"type": "message", "room_id": room, "sender": map[string]any{"id": sender}, "text": text, "timestamp": ms,
+		"type": "message", "room_id": room, "event_id": strconv.FormatInt(eventID, 10),
+		"sender": map[string]any{"id": sender}, "text": text, "timestamp": ms,
 	}
 	if err := conn.WriteJSON(frame); err != nil {
 		t.Errorf("push message frame: %v", err)
@@ -227,7 +238,7 @@ func TestChatSendAndEchoRenders(t *testing.T) {
 
 	// The server fans the echo back; it renders with a timestamp. The
 	// rendered frame is captured for the credential-leak scan below.
-	stub.pushMessage(t, "general", "u-rina-1", "hello", echoTimestampMs)
+	stub.pushMessage(t, "general", "u-rina-1", "hello", 1, echoTimestampMs)
 	wantTS := time.UnixMilli(echoTimestampMs).Format("15:04:05")
 	var rendered string
 	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
@@ -264,7 +275,7 @@ func TestChatSendAndEchoRenders(t *testing.T) {
 	}
 }
 
-func TestChatMessagesRenderInTimestampOrder(t *testing.T) {
+func TestChatMessagesRenderInEventIDOrder(t *testing.T) {
 	stub := newChatStubServer(t)
 	stub.loginToken = validJWT(t, "u-rina-1")
 
@@ -282,9 +293,9 @@ func TestChatMessagesRenderInTimestampOrder(t *testing.T) {
 		return strings.Contains(string(out), "type a message")
 	}, teatest.WithCheckInterval(100*time.Millisecond), teatest.WithDuration(5*time.Second))
 
-	// Inject two frames out of order: the later timestamp arrives first.
-	tm.Send(api.WSFrameReceived{Type: "message", Raw: messageFrameJSON("general", "bob", "bravo-msg", 5000), Generation: 1})
-	tm.Send(api.WSFrameReceived{Type: "message", Raw: messageFrameJSON("general", "alice", "alpha-msg", 1000), Generation: 1})
+	// Inject two frames out of order: the higher event id arrives first.
+	tm.Send(api.WSFrameReceived{Type: "message", Raw: messageFrameJSON("general", "bob", "bravo-msg", 5, 5000), Generation: 1})
+	tm.Send(api.WSFrameReceived{Type: "message", Raw: messageFrameJSON("general", "alice", "alpha-msg", 1, 1000), Generation: 1})
 
 	// Both must reach the rendered scrollback (the render path runs).
 	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
@@ -299,9 +310,9 @@ func TestChatMessagesRenderInTimestampOrder(t *testing.T) {
 	if len(bucket) != 2 {
 		t.Fatalf("expected 2 messages in the bucket, got %d: %#v", len(bucket), bucket)
 	}
-	// Ordered by server timestamp (1000 before 5000), not arrival order.
+	// Ordered by event id (1 before 5), not arrival order.
 	if bucket[0].Text != "alpha-msg" || bucket[1].Text != "bravo-msg" {
-		t.Errorf("messages not ordered by timestamp: %#v", bucket)
+		t.Errorf("messages not ordered by event id: %#v", bucket)
 	}
 }
 
@@ -337,6 +348,10 @@ func TestChatSendFailureKeepsSession(t *testing.T) {
 	}
 	if final.mainError != "Not a member of this room" {
 		t.Errorf("mainError = %q, want humanised business error", final.mainError)
+	}
+	// The attempted text is restored so the user can retry without retyping.
+	if got := final.composer.Value(); got != "hello" {
+		t.Errorf("composer text not restored after a failed send: %q", got)
 	}
 }
 
