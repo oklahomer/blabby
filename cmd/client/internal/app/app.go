@@ -425,9 +425,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.nameForID[v.RoomID] = v.RoomName
 		m.roomsState.NameForID = m.nameForID
-		m.activeRoomID = v.RoomID
-		m.mainviewState.RoomLabel = v.RoomName
-		m.scrollOffset = 0
+		m = m.activateRoom(v.RoomID, v.RoomName)
 		m.modal = nil
 		// Reload from the server so the Rooms pane reflects the
 		// authoritative membership (the modal's optimistic-add does not
@@ -470,9 +468,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.nameForID[v.Room.ID] = v.Room.Name
 		m.roomsState.NameForID = m.nameForID
-		m.activeRoomID = v.Room.ID
-		m.mainviewState.RoomLabel = v.Room.Name
-		m.scrollOffset = 0
+		m = m.activateRoom(v.Room.ID, v.Room.Name)
 		m.modal = nil
 		var createdBackfill tea.Cmd
 		m, createdBackfill = m.beginBackfill(v.Room.ID)
@@ -743,12 +739,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch outcome {
 		case rooms.OutcomeSwitchActiveRoom:
 			if id := nextState.ActiveID(); id != "" {
-				m.activeRoomID = id
-				m.mainviewState.RoomLabel = nextState.ResolveName(id)
-				// Drop any inline error left over from the previous
-				// room so it does not linger over a different scrollback.
-				m.mainError = ""
-				m.scrollOffset = 0
+				m = m.activateRoom(id, nextState.ResolveName(id))
 				var cmd tea.Cmd
 				m, cmd = m.beginBackfill(id)
 				return m, cmd
@@ -802,6 +793,17 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleScrollKey(k.String())
 	}
 	return m, nil
+}
+
+// activateRoom updates the Main-pane surface for a newly selected room.
+// Room-scoped error and scroll state are reset so stale state from the
+// previously active room does not leak into the new scrollback.
+func (m Model) activateRoom(roomID, roomName string) Model {
+	m.activeRoomID = roomID
+	m.mainviewState.RoomLabel = roomName
+	m.mainError = ""
+	m.scrollOffset = 0
+	return m
 }
 
 // beginBackfill dispatches a newest-page history load for roomID unless a

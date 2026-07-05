@@ -24,7 +24,7 @@ const zeroTimeGlyph = "--:--:--"
 // reservedRows is the number of fixed rows View renders around the
 // scrollback (room label, status line, the blank separator, the
 // divider, and the input row). The error row, when present, costs one
-// more; visibleMessages accounts for it via hasError.
+// more; visibleLines accounts for it via hasError.
 const reservedRows = 5
 
 // MessageKind discriminates a chat line from the two membership system

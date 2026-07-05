@@ -196,6 +196,7 @@ func TestUpdateRoomJoinedSetsActiveRoomAndCloses(t *testing.T) {
 	m.modal = nil
 	m.token = "fake.jwt"
 	m.sessionGeneration = 1
+	m.mainError = "stale error"
 	// RoomJoined requires a live session — conn must be non-nil so the
 	// post-WSDisconnected race guard does not drop the message.
 	m.conn = &websocket.Conn{}
@@ -211,6 +212,9 @@ func TestUpdateRoomJoinedSetsActiveRoomAndCloses(t *testing.T) {
 	}
 	if got.nameForID["general"] != "General" {
 		t.Fatalf("nameForID not populated: %#v", got.nameForID)
+	}
+	if got.mainError != "" {
+		t.Fatalf("mainError not cleared on room join: %q", got.mainError)
 	}
 	if got.modal != nil {
 		t.Fatal("expected modal cleared on RoomJoined")
