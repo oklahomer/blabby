@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-06-13
-- **Related:** [ADR-012](adr-012-watch-based-connection-lifecycle.md), [ADR-016](adr-016-gateway-backend-tier-separation.md), [ADR-017](adr-017-supervision-strategy.md)
+- **Related:** [ADR-007](adr-007-database-authoritative-persistence.md), [ADR-010](adr-010-eventual-consistency-model.md), [ADR-012](adr-012-watch-based-connection-lifecycle.md), [ADR-016](adr-016-gateway-backend-tier-separation.md), [ADR-017](adr-017-supervision-strategy.md)
 
 ## Context
 
@@ -55,9 +55,10 @@ WebSocket upgrade.**
 
 Grain activations rebuild on demand: when a grain passivates on its receive
 timeout or its host node leaves, the next message addressed to it produces a
-fresh activation. In Phase 1 (no persistence) that activation starts empty and
-state is rebuilt by subsequent traffic — connections re-register, membership
-is re-established by user commands.
+fresh activation. That activation hydrates its durable state from the store
+([ADR-007](adr-007-database-authoritative-persistence.md)) — membership and
+history come back — while transient state that is not persisted, such as live
+connection registrations, re-establishes as traffic resumes.
 
 ## Consequences
 
@@ -80,10 +81,12 @@ is re-established by user commands.
 ### Negative
 
 - **Grain state is hostage to activation lifecycle.** Passivation and node
-  failure drop in-memory state, so every consumer must tolerate an
-  empty-but-correct grain (see [ADR-010](adr-010-eventual-consistency-model.md)
-  on reporting that state honestly). Persistence (Phase 2) narrows this, but
-  the topology itself does not guarantee continuity.
+  failure drop in-memory state; a fresh activation hydrates its durable facts
+  from the store ([ADR-007](adr-007-database-authoritative-persistence.md)) and
+  rebuilds transient facts from traffic, so consumers tolerate a moment of
+  reconvergence (see [ADR-010](adr-010-eventual-consistency-model.md) on
+  reporting that honestly) rather than lost membership. The topology itself does
+  not guarantee continuity; the store provides it for durable facts.
 - **Two addressing schemes coexist.** Grains are addressed by identity, the
   connection actor by PID. Crossing between them requires carrying PIDs in
   message payloads ([ADR-011](adr-011-cross-boundary-pid-propagation.md)),
