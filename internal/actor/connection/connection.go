@@ -53,6 +53,7 @@ const (
 	eventConnectionWriteBackpressure      = "connection.write.backpressure"
 	eventConnectionEventUnknown           = "connection.event.unknown"
 	eventConnectionRoomRefInvalid         = "connection.room_ref.invalid"
+	eventConnectionUserRefInvalid         = "connection.user_ref.invalid"
 	eventConnectionCloseFrameError        = "connection.close_frame.error"
 	eventConnectionReadPumpPanic          = "connection.read_pump.panic"
 	eventConnectionSupervision            = "connection.supervision"
@@ -515,8 +516,34 @@ func (uc *UserConnection) roomCodeFromRef(ctx actor.Context, room *commonpb.Room
 	return code.FormatRoom(), true
 }
 
+// userCodeFromRef renders the client-facing U… code from the user ref carried
+// by a fan-out message, mirroring roomCodeFromRef. It returns ok=false when the
+// ref is missing or its public code is unparseable; the caller drops the frame
+// rather than send a malformed or internal-id-leaking value onto the wire.
+func (uc *UserConnection) userCodeFromRef(ctx actor.Context, user *commonpb.UserRef) (string, bool) {
+	if user == nil {
+		slog.Error(eventConnectionUserRefInvalid,
+			"actor_type", actorType, "pid", ctx.Self().String(),
+			"user_id", uc.userID.String(), "reason", "missing_user_ref")
+		return "", false
+	}
+	code, err := id.ParsePublicCode(user.GetPublicCode())
+	if err != nil {
+		slog.Error(eventConnectionUserRefInvalid,
+			"actor_type", actorType, "pid", ctx.Self().String(),
+			"user_id", uc.userID.String(),
+			"reason", "unparseable_public_code", "error", err)
+		return "", false
+	}
+	return code.FormatUser(), true
+}
+
 func (uc *UserConnection) forwardMessage(ctx actor.Context, req *userpb.ForwardMessageRequest) {
 	roomCode, ok := uc.roomCodeFromRef(ctx, req.GetRoom())
+	if !ok {
+		return
+	}
+	senderCode, ok := uc.userCodeFromRef(ctx, req.GetSender())
 	if !ok {
 		return
 	}
@@ -526,16 +553,18 @@ func (uc *UserConnection) forwardMessage(ctx actor.Context, req *userpb.ForwardM
 	}
 	uc.sendOutbound(ctx, &ChatDelivered{
 		RoomID:    roomCode,
-		Sender:    UserRef{ID: req.GetSender().GetId(), Name: req.GetSender().GetName()},
+		Sender:    UserRef{ID: senderCode, Name: req.GetSender().GetName()},
 		Text:      req.GetText(),
 		Timestamp: timestamp,
+		EventID:   req.GetEventId(),
 	})
 	slog.Debug(eventConnectionWriteMessage,
 		"actor_type", actorType,
 		"pid", ctx.Self().String(),
 		"user_id", uc.userID.String(),
 		"room_id", roomCode,
-		"sender_id", req.GetSender().GetId(),
+		"sender_code", senderCode,
+		"event_id", req.GetEventId(),
 		"text_len", len(req.GetText()),
 	)
 }
@@ -559,12 +588,20 @@ func (uc *UserConnection) forwardRoomEvent(ctx actor.Context, req *userpb.Notify
 	if !ok {
 		return
 	}
-	user := UserRef{ID: req.GetUser().GetId(), Name: req.GetUser().GetName()}
+	userCode, ok := uc.userCodeFromRef(ctx, req.GetUser())
+	if !ok {
+		return
+	}
+	user := UserRef{ID: userCode, Name: req.GetUser().GetName()}
+	var at time.Time
+	if ts := req.GetTimestamp(); ts != nil {
+		at = ts.AsTime()
+	}
 	var out any
 	if eventType == userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED {
-		out = &RoomJoined{RoomID: roomCode, User: user}
+		out = &RoomJoined{RoomID: roomCode, User: user, EventID: req.GetEventId(), At: at}
 	} else {
-		out = &RoomLeft{RoomID: roomCode, User: user}
+		out = &RoomLeft{RoomID: roomCode, User: user, EventID: req.GetEventId(), At: at}
 	}
 	uc.sendOutbound(ctx, out)
 }

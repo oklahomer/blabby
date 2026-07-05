@@ -528,11 +528,16 @@ func (x *SendMessageResponse) GetError() *common.ErrorDetail {
 // renders its public R… code without a lookup; `sender` carries the message
 // author's id and display name.
 type ForwardMessageRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Room          *common.RoomRef        `protobuf:"bytes,1,opt,name=room,proto3" json:"room,omitempty"`
-	Sender        *common.UserRef        `protobuf:"bytes,2,opt,name=sender,proto3" json:"sender,omitempty"`
-	Text          string                 `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
-	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Room      *common.RoomRef        `protobuf:"bytes,1,opt,name=room,proto3" json:"room,omitempty"`
+	Sender    *common.UserRef        `protobuf:"bytes,2,opt,name=sender,proto3" json:"sender,omitempty"`
+	Text      string                 `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
+	Timestamp *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// event_id is the decimal Snowflake id of the message_posted event appended to
+	// the room timeline for this message. It crosses the wire as a decimal string —
+	// the documented exception to never exposing internal numeric ids — so a client
+	// can order and dedup it against the timeline history it backfills.
+	EventId       string `protobuf:"bytes,5,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -593,6 +598,13 @@ func (x *ForwardMessageRequest) GetTimestamp() *timestamppb.Timestamp {
 		return x.Timestamp
 	}
 	return nil
+}
+
+func (x *ForwardMessageRequest) GetEventId() string {
+	if x != nil {
+		return x.EventId
+	}
+	return ""
 }
 
 // ForwardMessageResponse acknowledges the message delivery. The User grain
@@ -1078,12 +1090,13 @@ const file_user_user_proto_rawDesc = "" +
 	"\x04text\x18\x02 \x01(\tR\x04text\"z\n" +
 	"\x13SendMessageResponse\x128\n" +
 	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12)\n" +
-	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"\xb3\x01\n" +
+	"\x05error\x18\x02 \x01(\v2\x13.common.ErrorDetailR\x05error\"\xce\x01\n" +
 	"\x15ForwardMessageRequest\x12#\n" +
 	"\x04room\x18\x01 \x01(\v2\x0f.common.RoomRefR\x04room\x12'\n" +
 	"\x06sender\x18\x02 \x01(\v2\x0f.common.UserRefR\x06sender\x12\x12\n" +
 	"\x04text\x18\x03 \x01(\tR\x04text\x128\n" +
-	"\ttimestamp\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\x18\n" +
+	"\ttimestamp\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x19\n" +
+	"\bevent_id\x18\x05 \x01(\tR\aeventId\"\x18\n" +
 	"\x16ForwardMessageResponse\"\xeb\x01\n" +
 	"\x16NotifyRoomEventRequest\x12#\n" +
 	"\x04room\x18\x01 \x01(\v2\x0f.common.RoomRefR\x04room\x12#\n" +

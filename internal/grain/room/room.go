@@ -540,8 +540,11 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 		return postErr(errcode.InternalError, "failed to record message"), nil
 	}
 	timestamp := evt.OccurredAt
+	eventID := ""
 	if evt.IsZero() {
 		timestamp = g.now()
+	} else {
+		eventID = evt.ID.String()
 	}
 	// Refresh the cached name from the value carried on this message, so the
 	// room's roster reflects the sender's current display name.
@@ -567,7 +570,7 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 		"target_count", len(recipients),
 		"text_len", textLen,
 	)
-	payload := buildForwardMessage(g.state.roomRef(), sender, req.GetText(), timestamp)
+	payload := buildForwardMessage(g.state.roomRef(), sender, req.GetText(), timestamp, eventID)
 	g.fanOutForward(ctx, recipients, payload, "PostMessage.fanout")
 
 	return &roompb.PostMessageResponse{Timestamp: timestamppb.New(timestamp)}, nil

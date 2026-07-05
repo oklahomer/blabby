@@ -51,13 +51,16 @@ func applyMembershipEvent(req *userpb.NotifyRoomEventRequest, evt MembershipEven
 // buildForwardMessage shapes the ForwardMessage payload sent to every
 // current member (including the sender — multi-device echo, FR3) for a
 // posted chat message. room carries the room's reference metadata; sender
-// carries the author's id and display name.
-func buildForwardMessage(room domain.RoomRef, sender id.UserRef, text string, timestamp time.Time) *userpb.ForwardMessageRequest {
+// carries the author's id and display name; eventID is the durable
+// message_posted event id ("" when the grain runs storeless in unit tests),
+// so a client can order and dedup the live frame against timeline history.
+func buildForwardMessage(room domain.RoomRef, sender id.UserRef, text string, timestamp time.Time, eventID string) *userpb.ForwardMessageRequest {
 	return &userpb.ForwardMessageRequest{
 		Room:      protoRoomRef(room),
 		Sender:    protoUserRef(sender),
 		Text:      text,
 		Timestamp: timestamppb.New(timestamp),
+		EventId:   eventID,
 	}
 }
 

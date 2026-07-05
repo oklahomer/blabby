@@ -440,8 +440,9 @@ func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {
 
 	when := time.UnixMilli(1700000000000)
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		Room: fanoutRoom(), Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
-		Text: "hello", Timestamp: timestamppb.New(when),
+		Room:   fanoutRoom(),
+		Sender: &commonpb.UserRef{Id: "2", Name: "Bob Builder", PublicCode: "B000000002"},
+		Text:   "hello", Timestamp: timestamppb.New(when), EventId: "987654321",
 	})
 
 	got := readJSON(t, sess.client)
@@ -451,8 +452,12 @@ func TestForwardMessage_AfterAuthSerialisesToWire(t *testing.T) {
 	if got["room_id"] != "RG000000004" || got["text"] != "hello" {
 		t.Errorf("payload mismatch: %v", got)
 	}
-	if sender := userObject(t, got, "sender"); sender["id"] != "bob" || sender["name"] != "Bob Builder" {
-		t.Errorf("sender: got %v, want {id:bob name:Bob Builder}", sender)
+	if got["event_id"] != "987654321" {
+		t.Errorf("event_id: got %v, want 987654321", got["event_id"])
+	}
+	// The sender id on the wire is the client-facing U… code, never the internal id.
+	if sender := userObject(t, got, "sender"); sender["id"] != "UB000000002" || sender["name"] != "Bob Builder" {
+		t.Errorf("sender: got %v, want {id:UB000000002 name:Bob Builder}", sender)
 	}
 	if got["timestamp"].(float64) != 1700000000000 {
 		t.Errorf("timestamp: got %v, want 1700000000000", got["timestamp"])
@@ -471,8 +476,9 @@ func TestForwardMessage_RendersPublicCodeFromRef(t *testing.T) {
 	_ = readJSON(t, sess.client) // auth_ok
 
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		Room: fanoutRoom(), Sender: &commonpb.UserRef{Id: "2", Name: "Bob"},
-		Text: "hello", Timestamp: timestamppb.New(time.UnixMilli(1)),
+		Room:   fanoutRoom(),
+		Sender: &commonpb.UserRef{Id: "2", Name: "Bob", PublicCode: "B000000002"},
+		Text:   "hello", Timestamp: timestamppb.New(time.UnixMilli(1)),
 	})
 
 	got := readJSON(t, sess.client)
@@ -481,6 +487,37 @@ func TestForwardMessage_RendersPublicCodeFromRef(t *testing.T) {
 	}
 	if got["room_id"] != "RG000000004" {
 		t.Errorf("room_id: got %v, want RG000000004 (public code rendered from the ref)", got["room_id"])
+	}
+	if sender := userObject(t, got, "sender"); sender["id"] != "UB000000002" {
+		t.Errorf("sender.id: got %v, want UB000000002 (public code rendered from the ref)", sender["id"])
+	}
+}
+
+// TestForwardMessage_InvalidUserCodeDropsFrame proves a fan-out message whose
+// sender ref carries no valid public code is dropped, so an internal user id can
+// never stand in for it on the wire. A valid frame afterwards still arrives.
+func TestForwardMessage_InvalidUserCodeDropsFrame(t *testing.T) {
+	authStub := &stubAuthenticator{validateFn: func(_ context.Context, _ string) (*auth.Claims, error) {
+		return aliceClaims(), nil
+	}}
+	sess := startSession(t, authStub, &recordingGrainCaller{})
+	writeAuthFrame(t, sess.client, "tok")
+	_ = readJSON(t, sess.client) // auth_ok
+
+	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
+		Room:   fanoutRoom(),
+		Sender: &commonpb.UserRef{Id: "2", Name: "Bob", PublicCode: "not-a-code"},
+		Text:   "dropped", Timestamp: timestamppb.New(time.UnixMilli(1)),
+	})
+	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
+		Room:   fanoutRoom(),
+		Sender: &commonpb.UserRef{Id: "2", Name: "Bob", PublicCode: "B000000002"},
+		Text:   "delivered", Timestamp: timestamppb.New(time.UnixMilli(2)),
+	})
+
+	got := readJSON(t, sess.client)
+	if got["text"] != "delivered" {
+		t.Errorf("expected only the valid frame to arrive, got %v", got)
 	}
 }
 
@@ -498,12 +535,13 @@ func TestForwardMessage_InvalidPublicCodeDropsFrame(t *testing.T) {
 
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
 		Room:   &commonpb.RoomRef{RoomId: "4", PublicCode: "not-a-code"},
-		Sender: &commonpb.UserRef{Id: "2", Name: "Bob"},
+		Sender: &commonpb.UserRef{Id: "2", Name: "Bob", PublicCode: "B000000002"},
 		Text:   "dropped", Timestamp: timestamppb.New(time.UnixMilli(1)),
 	})
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		Room: fanoutRoom(), Sender: &commonpb.UserRef{Id: "2", Name: "Bob"},
-		Text: "delivered", Timestamp: timestamppb.New(time.UnixMilli(2)),
+		Room:   fanoutRoom(),
+		Sender: &commonpb.UserRef{Id: "2", Name: "Bob", PublicCode: "B000000002"},
+		Text:   "delivered", Timestamp: timestamppb.New(time.UnixMilli(2)),
 	})
 
 	got := readJSON(t, sess.client)
@@ -533,26 +571,37 @@ func TestRoomEvent_JoinedAndLeftSerialise(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		Room: fanoutRoom(), User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		Room:      fanoutRoom(),
+		User:      &commonpb.UserRef{Id: "3", Name: "Carol Danvers", PublicCode: "C000000003"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
+		EventId:   "111", Timestamp: timestamppb.New(time.UnixMilli(1700000000000)),
 	})
 	joined := readJSON(t, sess.client)
 	if joined["type"] != "joined" {
 		t.Errorf("joined type: got %v, want joined", joined["type"])
 	}
-	if u := userObject(t, joined, "user"); u["id"] != "carol" || u["name"] != "Carol Danvers" {
+	if joined["event_id"] != "111" || joined["timestamp"].(float64) != 1700000000000 {
+		t.Errorf("joined event_id/timestamp: got %v/%v, want 111/1700000000000", joined["event_id"], joined["timestamp"])
+	}
+	// The member id on the wire is the client-facing U… code, never the internal id.
+	if u := userObject(t, joined, "user"); u["id"] != "UC000000003" || u["name"] != "Carol Danvers" {
 		t.Errorf("joined user mismatch: %v", u)
 	}
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		Room: fanoutRoom(), User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		Room:      fanoutRoom(),
+		User:      &commonpb.UserRef{Id: "3", Name: "Carol Danvers", PublicCode: "C000000003"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_LEFT,
+		EventId:   "222", Timestamp: timestamppb.New(time.UnixMilli(1700000001000)),
 	})
 	left := readJSON(t, sess.client)
 	if left["type"] != "left" {
 		t.Errorf("left type: got %v, want left", left["type"])
 	}
-	if u := userObject(t, left, "user"); u["id"] != "carol" || u["name"] != "Carol Danvers" {
+	if left["event_id"] != "222" {
+		t.Errorf("left event_id: got %v, want 222", left["event_id"])
+	}
+	if u := userObject(t, left, "user"); u["id"] != "UC000000003" || u["name"] != "Carol Danvers" {
 		t.Errorf("left user mismatch: %v", u)
 	}
 }
@@ -566,14 +615,16 @@ func TestRoomEvent_UnspecifiedDoesNotCloseSession(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		Room: fanoutRoom(), User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		Room:      fanoutRoom(),
+		User:      &commonpb.UserRef{Id: "3", Name: "Carol Danvers", PublicCode: "C000000003"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_UNSPECIFIED,
 	})
 
 	// Push a known event afterwards. If the unknown event killed the session
 	// we'd never see this frame.
 	sess.system.Root.Send(sess.pid, &userpb.NotifyRoomEventRequest{
-		Room: fanoutRoom(), User: &commonpb.UserRef{Id: "carol", Name: "Carol Danvers"},
+		Room:      fanoutRoom(),
+		User:      &commonpb.UserRef{Id: "3", Name: "Carol Danvers", PublicCode: "C000000003"},
 		EventType: userpb.RoomEventType_ROOM_EVENT_TYPE_JOINED,
 	})
 	if got := readJSON(t, sess.client); got["type"] != "joined" {
@@ -677,7 +728,8 @@ func TestLogs_MessageBodyIsNeverLogged(t *testing.T) {
 	_ = readJSON(t, sess.client)
 
 	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
-		Room: fanoutRoom(), Sender: &commonpb.UserRef{Id: "bob", Name: "Bob Builder"},
+		Room:      fanoutRoom(),
+		Sender:    &commonpb.UserRef{Id: "2", Name: "Bob Builder", PublicCode: "B000000002"},
 		Text:      secretBody,
 		Timestamp: timestamppb.New(time.UnixMilli(1)),
 	})

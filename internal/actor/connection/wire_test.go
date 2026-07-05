@@ -76,26 +76,26 @@ func TestEncodeOutboundErrorResponse(t *testing.T) {
 }
 
 func TestEncodeMessage(t *testing.T) {
-	got := encodeMessage("general", UserRef{ID: "alice", Name: "Alice Liddell"}, "hello world", 1700000000000)
-	want := `{"room_id":"general","sender":{"id":"alice","name":"Alice Liddell"},"text":"hello world","timestamp":1700000000000,"type":"message"}`
+	got := encodeMessage("general", UserRef{ID: "UA000000001", Name: "Alice Liddell"}, "hello world", 1700000000000, "987654321")
+	want := `{"event_id":"987654321","room_id":"general","sender":{"id":"UA000000001","name":"Alice Liddell"},"text":"hello world","timestamp":1700000000000,"type":"message"}`
 	if string(got) != want {
 		t.Errorf("encodeMessage = %s\nwant %s", got, want)
 	}
 }
 
 func TestEncodeJoined(t *testing.T) {
-	got := encodeJoined("general", UserRef{ID: "alice", Name: "Alice Liddell"})
-	want := `{"room_id":"general","type":"joined","user":{"id":"alice","name":"Alice Liddell"}}`
+	got := encodeMember("joined", "general", UserRef{ID: "UA000000001", Name: "Alice Liddell"}, "987654321", 1700000000000)
+	want := `{"event_id":"987654321","room_id":"general","timestamp":1700000000000,"type":"joined","user":{"id":"UA000000001","name":"Alice Liddell"}}`
 	if string(got) != want {
-		t.Errorf("encodeJoined = %s\nwant %s", got, want)
+		t.Errorf("encodeMember(joined) = %s\nwant %s", got, want)
 	}
 }
 
 func TestEncodeLeft(t *testing.T) {
-	got := encodeLeft("general", UserRef{ID: "alice", Name: "Alice Liddell"})
-	want := `{"room_id":"general","type":"left","user":{"id":"alice","name":"Alice Liddell"}}`
+	got := encodeMember("left", "general", UserRef{ID: "UA000000001", Name: "Alice Liddell"}, "987654322", 1700000000000)
+	want := `{"event_id":"987654322","room_id":"general","timestamp":1700000000000,"type":"left","user":{"id":"UA000000001","name":"Alice Liddell"}}`
 	if string(got) != want {
-		t.Errorf("encodeLeft = %s\nwant %s", got, want)
+		t.Errorf("encodeMember(left) = %s\nwant %s", got, want)
 	}
 }
 
@@ -103,9 +103,9 @@ func TestEncodeLeft(t *testing.T) {
 func TestNonAuthErrorBuildersOmitCode(t *testing.T) {
 	cases := map[string][]byte{
 		"auth_ok": encodeAuthOk(),
-		"message": encodeMessage("r", UserRef{ID: "s", Name: "sn"}, "t", 1),
-		"joined":  encodeJoined("r", UserRef{ID: "u", Name: "un"}),
-		"left":    encodeLeft("r", UserRef{ID: "u", Name: "un"}),
+		"message": encodeMessage("r", UserRef{ID: "s", Name: "sn"}, "t", 1, "1"),
+		"joined":  encodeMember("joined", "r", UserRef{ID: "u", Name: "un"}, "1", 1),
+		"left":    encodeMember("left", "r", UserRef{ID: "u", Name: "un"}, "1", 1),
 	}
 	for name, out := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -125,7 +125,7 @@ func TestNonAuthErrorBuildersOmitCode(t *testing.T) {
 func TestEncodersNeverLeakSensitiveSubstrings(t *testing.T) {
 	const tokenSubstr = "ey-secret-jwt-payload"
 	const internalErr = "panic: runtime error"
-	out1 := encodeMessage("r", UserRef{ID: "s", Name: "sn"}, "harmless body", 1)
+	out1 := encodeMessage("r", UserRef{ID: "s", Name: "sn"}, "harmless body", 1, "1")
 	out2 := encodeAuthError(errcode.AuthInvalidToken, "invalid token")
 
 	for _, b := range [][]byte{out1, out2} {
