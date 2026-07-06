@@ -8,6 +8,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/oklahomer/blabby/cmd/client/internal/timeline"
 )
 
 // TimelineKind discriminates the entries GET /rooms/{id}/events returns.
@@ -31,7 +33,7 @@ const (
 // EventID is the entry's numeric ordering key, parsed from the wire's
 // decimal Snowflake string.
 type TimelineEvent struct {
-	EventID int64
+	EventID timeline.EventID
 	Kind    TimelineKind
 	Person  UserRef
 	Text    string
@@ -152,7 +154,7 @@ func parseTimelineEvents(raw []RoomEvent) ([]TimelineEvent, error) {
 		default:
 			continue
 		}
-		eventID, err := parseWireEventID(e.ID)
+		eventID, err := timeline.ParseEventID(e.ID)
 		if err != nil {
 			return nil, fmt.Errorf("event %q: %w", e.ID, err)
 		}

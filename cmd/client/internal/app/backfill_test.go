@@ -10,11 +10,12 @@ import (
 	"github.com/oklahomer/blabby/cmd/client/internal/api"
 	"github.com/oklahomer/blabby/cmd/client/internal/login"
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/mainview"
+	"github.com/oklahomer/blabby/cmd/client/internal/timeline"
 )
 
 func chatMsg(id int64, text string) api.TimelineEvent {
 	return api.TimelineEvent{
-		EventID: id,
+		EventID: timeline.EventID(id),
 		Kind:    api.TimelineMessage,
 		Person:  api.UserRef{ID: "u-x", Name: "X"},
 		Text:    text,
@@ -233,7 +234,7 @@ func TestTrimHealsBackfillCursor(t *testing.T) {
 	// Fill past the cap so the oldest entries are trimmed; the cursor must
 	// heal to the surviving oldest so scroll-up re-fetches the trimmed span.
 	for i := int64(1); i <= eventBucketCap+1; i++ {
-		m = m.appendEvent("general", mainview.Message{ID: i, Kind: mainview.KindChat})
+		m = m.appendEvent("general", mainview.Message{ID: timeline.EventID(i), Kind: mainview.KindChat})
 	}
 	if len(m.messages["general"]) != eventBucketCap {
 		t.Fatalf("bucket not capped: len = %d", len(m.messages["general"]))

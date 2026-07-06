@@ -2,7 +2,6 @@ package app
 
 import (
 	"sort"
-	"strconv"
 
 	"github.com/charmbracelet/bubbles/textinput"
 
@@ -151,7 +150,7 @@ func (m Model) healTrimmedHistory(roomID string, bucket []mainview.Message) Mode
 	}
 	h := m.histories[roomID]
 	h.fetched = true
-	h.next = strconv.FormatInt(bucket[0].ID, 10)
+	h.next = bucket[0].ID.String()
 	h.exhausted = false
 	m.histories[roomID] = h
 	return m

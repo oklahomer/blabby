@@ -4,14 +4,17 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/mainview"
+	"github.com/oklahomer/blabby/cmd/client/internal/timeline"
 )
 
-func msgID(id int64) mainview.Message { return mainview.Message{ID: id, Kind: mainview.KindChat} }
+func msgID(id int64) mainview.Message {
+	return mainview.Message{ID: timeline.EventID(id), Kind: mainview.KindChat}
+}
 
 func ids(bucket []mainview.Message) []int64 {
 	out := make([]int64, len(bucket))
 	for i, m := range bucket {
-		out[i] = m.ID
+		out[i] = m.ID.Int64()
 	}
 	return out
 }

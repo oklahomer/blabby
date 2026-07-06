@@ -6,6 +6,7 @@ import (
 
 	"github.com/oklahomer/blabby/cmd/client/internal/api"
 	"github.com/oklahomer/blabby/cmd/client/internal/panes/mainview"
+	"github.com/oklahomer/blabby/cmd/client/internal/timeline"
 )
 
 // scrollBase anchors every scroll-test message to one calendar day so line
@@ -13,7 +14,7 @@ import (
 var scrollBase = time.Date(2026, 5, 30, 9, 0, 0, 0, time.Local)
 
 func chatLine(id int64) mainview.Line {
-	return mainview.Line{Msg: mainview.Message{ID: id, Kind: mainview.KindChat}}
+	return mainview.Line{Msg: mainview.Message{ID: timeline.EventID(id), Kind: mainview.KindChat}}
 }
 
 func TestClampOffset(t *testing.T) {
@@ -81,7 +82,7 @@ func scrollModel(t *testing.T, n int) Model {
 	m.width, m.height = 100, 30
 	msgs := make([]mainview.Message, 0, n)
 	for i := 0; i < n; i++ {
-		msgs = append(msgs, mainview.Message{ID: int64(i + 1), Kind: mainview.KindChat, At: scrollBase.Add(time.Duration(i) * time.Second)})
+		msgs = append(msgs, mainview.Message{ID: timeline.EventID(i + 1), Kind: mainview.KindChat, At: scrollBase.Add(time.Duration(i) * time.Second)})
 	}
 	m.messages["general"] = msgs
 	return m
@@ -190,7 +191,7 @@ func TestBackfillPrependHoldsScrolledView(t *testing.T) {
 	m.width, m.height = 100, 30
 	msgs := make([]mainview.Message, 0, 50)
 	for i := int64(0); i < 50; i++ {
-		msgs = append(msgs, mainview.Message{ID: 100 + i, Kind: mainview.KindChat, At: scrollBase.Add(time.Duration(i) * time.Second)})
+		msgs = append(msgs, mainview.Message{ID: timeline.EventID(100 + i), Kind: mainview.KindChat, At: scrollBase.Add(time.Duration(i) * time.Second)})
 	}
 	m.messages["general"] = msgs // ids 100..149
 	m.scrollOffset = 5
@@ -198,7 +199,7 @@ func TestBackfillPrependHoldsScrolledView(t *testing.T) {
 
 	older := make([]api.TimelineEvent, 0, 5)
 	for id := int64(90); id <= 94; id++ {
-		older = append(older, api.TimelineEvent{EventID: id, Kind: api.TimelineMessage, Person: api.UserRef{ID: "u"}, At: scrollBase.Add(-time.Hour)})
+		older = append(older, api.TimelineEvent{EventID: timeline.EventID(id), Kind: api.TimelineMessage, Person: api.UserRef{ID: "u"}, At: scrollBase.Add(-time.Hour)})
 	}
 	next, _ := m.Update(api.RoomEventsLoaded{RoomID: "general", Events: older, Next: "89", Before: "100", Generation: 1})
 	if got := next.(Model).scrollOffset; got != 5 {
