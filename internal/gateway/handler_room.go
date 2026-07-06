@@ -250,34 +250,9 @@ func (e *roomRequestError) Error() string { return e.detail.Message }
 // oversize body surfaces as *http.MaxBytesError at decode time and is
 // mapped to a "payload_too_large" / 413 response.
 func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (*sendMessageRequest, *roomRequestError) {
-	if !contentTypeIsJSON(r.Header.Get("Content-Type")) {
-		return nil, &roomRequestError{
-			reason: "content_type",
-			detail: ErrInvalidRequest("content-type must be application/json"),
-		}
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxRoomMessageBodyBytes)
-
 	var req sendMessageRequest
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(&req); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			return nil, &roomRequestError{
-				reason: "payload_too_large",
-				detail: ErrPayloadTooLarge("request body exceeds maximum size"),
-			}
-		}
-		return nil, &roomRequestError{
-			reason: "malformed_body",
-			detail: ErrInvalidRequest("malformed request body"),
-		}
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return nil, &roomRequestError{
-			reason: "trailing_garbage",
-			detail: ErrInvalidRequest("malformed request body"),
-		}
+	if err := decodeStrictJSONBody(w, r, maxRoomMessageBodyBytes, &req); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(req.Text) == "" {
 		return nil, &roomRequestError{
@@ -292,6 +267,42 @@ func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (*sendMess
 		}
 	}
 	return &req, nil
+}
+
+// decodeStrictJSONBody applies the gateway's common JSON-body rules for room
+// command endpoints: JSON content type, a per-endpoint byte cap, exactly one JSON
+// value, and no trailing data. Endpoint-specific semantic validation happens in
+// the caller after a typed request value exists.
+func decodeStrictJSONBody(w http.ResponseWriter, r *http.Request, maxBytes int64, dst any) *roomRequestError {
+	if !contentTypeIsJSON(r.Header.Get("Content-Type")) {
+		return &roomRequestError{
+			reason: "content_type",
+			detail: ErrInvalidRequest("content-type must be application/json"),
+		}
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(dst); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return &roomRequestError{
+				reason: "payload_too_large",
+				detail: ErrPayloadTooLarge("request body exceeds maximum size"),
+			}
+		}
+		return &roomRequestError{
+			reason: "malformed_body",
+			detail: ErrInvalidRequest("malformed request body"),
+		}
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return &roomRequestError{
+			reason: "trailing_garbage",
+			detail: ErrInvalidRequest("malformed request body"),
+		}
+	}
+	return nil
 }
 
 // contentTypeIsJSON parses the Content-Type header and returns true if

@@ -2,9 +2,7 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -164,23 +162,8 @@ func (g *Gateway) requireTargetUserID(w http.ResponseWriter, r *http.Request, en
 // package's strict rules (JSON content type, size cap, no trailing data),
 // writing the rejection itself and returning false on failure.
 func decodeRoomCommandBody(w http.ResponseWriter, r *http.Request, dst any) bool {
-	if !contentTypeIsJSON(r.Header.Get("Content-Type")) {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("content-type must be application/json"))
-		return false
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxRoomCommandBodyBytes)
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(dst); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			WriteErrorResponse(w, http.StatusRequestEntityTooLarge, ErrPayloadTooLarge("request body exceeds maximum size"))
-			return false
-		}
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("malformed request body"))
-		return false
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("malformed request body"))
+	if err := decodeStrictJSONBody(w, r, maxRoomCommandBodyBytes, dst); err != nil {
+		WriteErrorResponse(w, httpStatus(err.detail.Code), err.detail)
 		return false
 	}
 	return true
