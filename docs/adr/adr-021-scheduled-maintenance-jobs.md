@@ -12,12 +12,13 @@ pending-account garbage collection: a registration that is never verified leaves
 the challenge has been expired past a grace period. More such jobs will follow.
 
 A periodic job in a multi-node cluster ([ADR-016](adr-016-gateway-backend-tier-separation.md))
-raises the coordination question immediately: if every node runs its own timer, every
-node runs the job, and N concurrent sweeps race. The job therefore needs a single
-cluster-wide runner — but "single" has to survive the reality that cluster
-membership changes: a failover can briefly overlap two activations, and an operator
-(or a retry) can fire a trigger twice. The design needs both a coordination point and
-a guarantee that a duplicate run is harmless, not just unlikely.
+raises the coordination question immediately: if several gateways each run their own
+timer, several fire the job and concurrent sweeps race. Rather than elect one timer,
+the design lets every gateway keep its own and makes the redundant triggers safe —
+which also has to survive the reality that cluster membership changes: a failover can
+briefly overlap two grain activations, and an operator (or a retry) can fire a trigger
+twice. So the design needs a single cluster-wide *runner* even though triggers are
+many, plus a guarantee that a duplicate run is harmless, not merely unlikely.
 
 ## Decision
 
@@ -30,12 +31,18 @@ itself.** The three layers are defense in depth, not redundancy for its own sake
 
 `POST /internal/jobs/pending-account-gc` is served only on the gateway's internal
 listener (never the public API listener) and is unauthenticated — access is
-restricted at the network layer. An external scheduler (cron, a Kubernetes CronJob)
-owns the cadence and calls this endpoint. The handler asks the maintenance grain to
+restricted at the network layer. By default each gateway process runs a local cron
+(`github.com/robfig/cron/v3`) that POSTs this endpoint on `--gc-schedule` (default
+`@every 1m`); passing `--gc-schedule off` disables the local cron and hands the
+cadence to an external scheduler instead. Because every gateway crons independently,
+the endpoint receives redundant triggers by design — which is exactly what the
+coordinator and the backstop below absorb. The handler asks the maintenance grain to
 run and returns immediately: `202` when this call started a sweep, `200` when one was
-already running (coalesced), `503` when the grain is unreachable. Keeping the
-schedule in operations config — not an in-process timer — makes the cadence
-deployable and the job manually triggerable, and means no node runs its own timer.
+already running (coalesced), `503` when the grain is unreachable. Putting the trigger
+behind an endpoint — rather than calling the sweep in-process — means one contract
+serves the local cron, an external scheduler, and a manual operator run alike, and the
+zero-config default reclaims abandoned registrations within about a minute with no
+external setup.
 
 ### The coordinator — a singleton grain
 
@@ -98,9 +105,12 @@ never swept. The verification row is removed by its `ON DELETE CASCADE`.
   misconfigured network exposure would let anyone trigger the job. (Triggering it is
   low-harm — the sweep is idempotent and self-limiting — but the isolation is a
   deployment responsibility.)
-- **An external scheduler is required to run the job periodically.** Without a cron
-  or CronJob calling the endpoint, the job only runs when triggered manually. The
-  cadence is deliberately outside the application.
+- **Every gateway's cron fires redundant triggers.** The zero-config default runs a
+  timer per gateway, so the coalescing and the advisory lock do routine work on every
+  tick, not only during rare races — a little wasted trigger traffic (bounded, cheap
+  POSTs) in exchange for needing no external scheduler and no leader election. A
+  deployment that prefers a single cadence removes the redundancy with
+  `--gc-schedule off` and its own scheduler.
 - **The singleton concentrates the job on one activation.** A very heavy periodic
   job would load one node; acceptable for sweeps, and the per-job identity means a
   future heavy job can be split without disturbing this one.
@@ -115,12 +125,15 @@ never swept. The verification row is removed by its `ON DELETE CASCADE`.
 
 ## Alternatives considered
 
-### An in-process timer on every node
+### A single designated scheduler node, or a leader-elected timer
 
-Each node runs a ticker and fires the job. Rejected: N nodes means N concurrent runs
-unless the nodes elect a leader or dedup among themselves — which is exactly the
-coordination the singleton grain plus advisory lock provides, without a second
-mechanism.
+Nominate one gateway (or elect a leader among them) to own the timer so the job fires
+exactly once. Rejected: it adds a leader-election mechanism or a special-node role for
+no gain, because the singleton grain already funnels every trigger to one runner and
+the advisory lock makes any overlap harmless. Letting every gateway keep an
+independent cron and coalescing the results is simpler than electing which one is
+allowed to fire — and it degrades gracefully, since any surviving gateway keeps
+triggering when others are down.
 
 ### An external scheduler that runs the job directly (SQL or a script)
 
@@ -159,5 +172,7 @@ audit, which this does not.
   reentrant continuation.
 - `internal/gateway/handler_internal_jobs.go` and `maintenance_trigger.go` — the
   internal trigger endpoint and the cluster call into the grain.
+- `cmd/gateway/cron.go` and `cmd/gateway/main.go` — the gateway-local `robfig/cron`
+  scheduler and the `--gc-schedule` flag (default `@every 1m`, `off` to hand off).
 - `internal/persistence/accountgc/sweep.go` — the advisory lock and the idempotent
   sweep.
