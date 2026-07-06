@@ -653,23 +653,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.Generation != m.sessionGeneration {
 			return m, nil
 		}
-		previousEmail := m.email
-		m.conn = nil
-		m.token = ""
-		m.email = ""
-		m.userID = ""
-		m.infoState.Email = ""
-		m.infoState.UserID = ""
-		m.activeRoomID = ""
-		m.nameForID = nil
-		m.mainviewState.RoomLabel = ""
-		m.roomsState = rooms.State{}
-		m.connected = false
-		m.messages = nil
-		m.histories = nil
-		m.scrollOffset = 0
-		m.composer = textinput.Model{}
-		m.mainError = ""
+		var previousEmail string
+		m, previousEmail = m.resetSession()
 		m.modal = m.openLoginModalWithError("Connection lost — please sign in again", previousEmail)
 		return m, m.modal.Init()
 
@@ -929,13 +914,12 @@ func (m Model) liveRoomResult(generation api.SessionGeneration) bool {
 	return m.hasLiveSession() && generation == m.sessionGeneration
 }
 
-// handleSessionExpiry discards the current JWT, closes the WebSocket
-// with a normal-closure frame, and reopens the login modal with the
-// "Session expired" headline and the prior email pre-filled. Mirrors
-// the WSDisconnected recovery path.
-func (m Model) handleSessionExpiry() (tea.Model, tea.Cmd) {
+// resetSession clears the authenticated WebSocket/session state and returns the
+// previous email so re-authentication modals can pre-fill it. It does not close
+// the WebSocket; callers decide whether the connection is already gone or needs
+// a graceful close frame first.
+func (m Model) resetSession() (Model, string) {
 	previousEmail := m.email
-	api.CloseGracefully(m.conn)
 	m.conn = nil
 	m.token = ""
 	m.email = ""
@@ -952,6 +936,17 @@ func (m Model) handleSessionExpiry() (tea.Model, tea.Cmd) {
 	m.scrollOffset = 0
 	m.composer = textinput.Model{}
 	m.mainError = ""
+	return m, previousEmail
+}
+
+// handleSessionExpiry discards the current JWT, closes the WebSocket
+// with a normal-closure frame, and reopens the login modal with the
+// "Session expired" headline and the prior email pre-filled. Mirrors
+// the WSDisconnected recovery path.
+func (m Model) handleSessionExpiry() (tea.Model, tea.Cmd) {
+	api.CloseGracefully(m.conn)
+	var previousEmail string
+	m, previousEmail = m.resetSession()
 	m.modal = m.openLoginModalWithError("Session expired — please sign in again", previousEmail)
 	return m, m.modal.Init()
 }
