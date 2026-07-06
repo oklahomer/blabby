@@ -5,8 +5,9 @@
 // [room.Grain]; do NOT rename it to RoomGrain (that would stutter with the
 // package name and trip golangci-lint's revive rule).
 //
-// Phase 1 keeps room state in memory and uses best-effort fan-out; persistence
-// and retry policy are deferred to later phases.
+// Room metadata, membership, and timeline writes are DB-authoritative. Each
+// activation hydrates the room/member refs it needs from persistence and keeps
+// an in-memory working cache for command handling and best-effort fan-out.
 package room
 
 import (

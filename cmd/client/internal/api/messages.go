@@ -2,14 +2,13 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/oklahomer/blabby/cmd/client/internal/timeline"
 )
 
 // SendMessageSucceeded is emitted by SendMessageCmd on HTTP 200. At is
@@ -48,7 +47,7 @@ type ChatMessageReceived struct {
 	RoomID  string
 	Sender  UserRef
 	Text    string
-	EventID int64
+	EventID timeline.EventID
 	At      time.Time
 }
 
@@ -74,7 +73,7 @@ type MemberEventReceived struct {
 	RoomID  string
 	User    UserRef
 	Kind    MemberEventKind
-	EventID int64
+	EventID timeline.EventID
 	At      time.Time
 }
 
@@ -161,7 +160,7 @@ func DecodeChatMessage(raw []byte) (ChatMessageReceived, bool) {
 	if err := json.Unmarshal(raw, &f); err != nil || f.Type != "message" {
 		return ChatMessageReceived{}, false
 	}
-	eventID, err := parseWireEventID(f.EventID)
+	eventID, err := timeline.ParseEventID(f.EventID)
 	if err != nil {
 		return ChatMessageReceived{}, false
 	}
@@ -193,7 +192,7 @@ func DecodeMemberEvent(raw []byte) (MemberEventReceived, bool) {
 	default:
 		return MemberEventReceived{}, false
 	}
-	eventID, err := parseWireEventID(f.EventID)
+	eventID, err := timeline.ParseEventID(f.EventID)
 	if err != nil {
 		return MemberEventReceived{}, false
 	}
@@ -204,22 +203,6 @@ func DecodeMemberEvent(raw []byte) (MemberEventReceived, bool) {
 		EventID: eventID,
 		At:      millisToTime(f.Timestamp),
 	}, true
-}
-
-// parseWireEventID converts the decimal-string event id carried on every
-// timeline frame into a positive int64 ordering key. Ids are ordered and
-// deduped numerically — never as strings, where "9" would sort after
-// "10" — so this parse is the single boundary that guarantees an int64
-// ordering key exists. A non-numeric or non-positive value is rejected.
-func parseWireEventID(s string) (int64, error) {
-	v, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("event_id: %w", err)
-	}
-	if v <= 0 {
-		return 0, errors.New("event_id: must be a positive snowflake")
-	}
-	return v, nil
 }
 
 // DecodeErrorFrame parses a raw inbound frame as a {"type":"error"}

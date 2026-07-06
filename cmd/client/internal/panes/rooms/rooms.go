@@ -91,40 +91,23 @@ func HandleKey(state State, key string) (State, Outcome) {
 	}
 	switch key {
 	case "up", "k":
-		if state.Cursor > 0 {
-			state.Cursor--
-		}
-		return state, OutcomeNone
+		state.Cursor--
+		return state.ClampCursor(), OutcomeNone
 	case "down", "j":
-		if state.Cursor < len(state.JoinedIDs)-1 {
-			state.Cursor++
-		}
-		return state, OutcomeNone
+		state.Cursor++
+		return state.ClampCursor(), OutcomeNone
 	case "pgup":
 		state.Cursor -= pageStep
-		if state.Cursor < 0 {
-			state.Cursor = 0
-		}
-		return state, OutcomeNone
+		return state.ClampCursor(), OutcomeNone
 	case "pgdown":
 		state.Cursor += pageStep
-		if last := len(state.JoinedIDs) - 1; state.Cursor > last {
-			if last < 0 {
-				last = 0
-			}
-			state.Cursor = last
-		}
-		return state, OutcomeNone
+		return state.ClampCursor(), OutcomeNone
 	case "home":
 		state.Cursor = 0
 		return state, OutcomeNone
 	case "end":
-		last := len(state.JoinedIDs) - 1
-		if last < 0 {
-			last = 0
-		}
-		state.Cursor = last
-		return state, OutcomeNone
+		state.Cursor = len(state.JoinedIDs) - 1
+		return state.ClampCursor(), OutcomeNone
 	case "enter":
 		if len(state.JoinedIDs) == 0 {
 			return state, OutcomeNone
@@ -149,6 +132,19 @@ func HandleKey(state State, key string) (State, Outcome) {
 		return state, OutcomeNone
 	}
 	return state, OutcomeNone
+}
+
+// ClampCursor returns a State whose cursor is inside the current JoinedIDs
+// bounds. Empty lists clamp to 0.
+func (s State) ClampCursor() State {
+	if len(s.JoinedIDs) == 0 || s.Cursor < 0 {
+		s.Cursor = 0
+		return s
+	}
+	if last := len(s.JoinedIDs) - 1; s.Cursor > last {
+		s.Cursor = last
+	}
+	return s
 }
 
 // ActiveID returns the room ID under the cursor, or "" when the list

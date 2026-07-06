@@ -105,38 +105,32 @@ func currentUserID(ctx actor.ReceiverContext) string {
 }
 
 // Option configures the UserConnection at construction time. See
-// [WithAuthTimeout] and [WithUserGrainCaller].
-type Option interface {
-	applyConfig(*userConnectionConfig)
-}
-
-type optionFunc func(*userConnectionConfig)
-
-func (f optionFunc) applyConfig(c *userConnectionConfig) { f(c) }
+// [WithAuthTimeout], [WithUserGrainCaller], and [WithAppHeartbeat].
+type Option func(*userConnectionConfig)
 
 // WithAuthTimeout overrides the default first-message auth deadline.
 // Used in tests to drive the timeout path quickly.
 func WithAuthTimeout(d time.Duration) Option {
-	return optionFunc(func(c *userConnectionConfig) { c.authTimeout = d })
+	return func(c *userConnectionConfig) { c.authTimeout = d }
 }
 
 // WithUserGrainCaller overrides the default cluster-backed grain caller.
 // Used in unit tests to assert on RegisterConnection inputs without a
 // cluster bootstrap.
 func WithUserGrainCaller(uc UserGrainCaller) Option {
-	return optionFunc(func(c *userConnectionConfig) { c.userClient = uc })
+	return func(c *userConnectionConfig) { c.userClient = uc }
 }
 
 // WithAppHeartbeat enables application-level ping/pong timing for the
 // connection. The actor decides what ping and timeout mean; this option only
 // configures timer ownership in middleware.
 func WithAppHeartbeat(pingInterval, pongTimeout time.Duration) Option {
-	return optionFunc(func(c *userConnectionConfig) {
+	return func(c *userConnectionConfig) {
 		c.heartbeat = heartbeatConfig{
 			pingInterval: pingInterval,
 			pongTimeout:  pongTimeout,
 		}
-	})
+	}
 }
 
 // NewProps builds an actor.Props for a UserConnection bound to conn. The
@@ -148,7 +142,7 @@ func NewProps(conn *websocket.Conn, a auth.Authenticator, c *cluster.Cluster, op
 		authTimeout: defaultAuthTimeout,
 	}
 	for _, o := range opts {
-		o.applyConfig(&cfg)
+		o(&cfg)
 	}
 	if cfg.userClient == nil && c != nil {
 		cfg.userClient = newClusterUserGrainCaller(c)

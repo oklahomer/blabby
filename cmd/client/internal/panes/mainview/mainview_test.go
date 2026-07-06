@@ -7,6 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+
+	"github.com/oklahomer/blabby/cmd/client/internal/timeline"
 )
 
 func TestViewDefaultLabel(t *testing.T) {
@@ -89,7 +91,7 @@ func TestVisibleLinesOffsetWindowsOlder(t *testing.T) {
 	base := time.Date(2026, 5, 30, 9, 0, 0, 0, time.Local)
 	lines := make([]Line, 0, 10)
 	for i := 0; i < 10; i++ {
-		lines = append(lines, Line{Msg: Message{ID: int64(i), Kind: KindChat, At: base.Add(time.Duration(i) * time.Second)}})
+		lines = append(lines, Line{Msg: Message{ID: timeline.EventID(i), Kind: KindChat, At: base.Add(time.Duration(i) * time.Second)}})
 	}
 	height := reservedRows + 3 // avail == 3
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/oklahomer/blabby/cmd/client/internal/timeline"
 	"github.com/oklahomer/blabby/cmd/client/internal/ui"
 )
 
@@ -48,7 +49,7 @@ const (
 // sender name so other members stand out. At is the server-assigned time,
 // zero when unknown.
 type Message struct {
-	ID     int64
+	ID     timeline.EventID
 	Kind   MessageKind
 	Sender string
 	Text   string

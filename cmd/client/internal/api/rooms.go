@@ -352,16 +352,9 @@ func doRoomRequest(client *http.Client, method, server, path, token string, body
 	return raw, resp.StatusCode, nil
 }
 
-// parseErrorEnvelope decodes a non-2xx response body. When the server
-// returned a parseable envelope, the returned status and message come
-// straight from it. When the body is empty or not an envelope, status
-// is "" and message is a generic "server returned 502 Bad Gateway"
-// fallback derived from the HTTP status. The fallback message never
-// echoes the request body or any header.
+// parseErrorEnvelope decodes a non-2xx response body using the shared gateway
+// error-envelope parser, deriving the fallback text from the numeric HTTP status
+// that room commands already carry.
 func parseErrorEnvelope(raw []byte, httpStatus int) (string, string) {
-	var env ErrorEnvelope
-	if err := json.Unmarshal(raw, &env); err == nil && env.Error.Status != "" {
-		return env.Error.Status, env.Error.Message
-	}
-	return "", fmt.Sprintf("server returned %d %s", httpStatus, http.StatusText(httpStatus))
+	return decodeErrorEnvelope(raw, fmt.Sprintf("%d %s", httpStatus, http.StatusText(httpStatus)))
 }
