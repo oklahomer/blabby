@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-31
-- **Related:** [ADR-004](adr-004-message-routing-through-user-grain.md), [ADR-006](adr-006-bidirectional-watch-pattern.md), [ADR-011](adr-011-cross-boundary-pid-propagation.md)
+- **Related:** [ADR-004](adr-004-message-routing-through-user-grain.md), [ADR-006](adr-006-bidirectional-watch-pattern.md), [ADR-007](adr-007-database-authoritative-persistence.md), [ADR-011](adr-011-cross-boundary-pid-propagation.md), [ADR-019](adr-019-snowflake-ids-and-worker-lease-fencing.md)
 
 ## Context
 
@@ -74,9 +74,12 @@ long-lived child actor dedicated to fan-out. Command handlers mutate state, snap
 the recipient set, hand a notification job to the child, and return immediately; the
 child performs the per-member calls on its own mailbox, outside the command's call
 chain, so no cycle can form. The child processes its mailbox in order, so
-notifications are issued in the order the grain produced them; clients additionally
-order messages by the server-assigned timestamp, making display order independent of
-delivery timing. The child belongs to the grain's actor hierarchy and stops with it.
+notifications are issued in the order the grain produced them — best-effort. Display
+order does not depend on delivery timing: clients order and dedup against the durable
+`event_id` ([ADR-007](adr-007-database-authoritative-persistence.md),
+[ADR-019](adr-019-snowflake-ids-and-worker-lease-fencing.md)), and the frame's
+timestamp is display metadata, not the ordering contract. The child belongs to the
+grain's actor hierarchy and stops with it.
 
 ### Alternatives considered (for the worked example)
 
@@ -99,8 +102,9 @@ delivery timing. The child belongs to the grain's actor hierarchy and stops with
 - In the worked example: the re-entrancy deadlock is removed; a command returns as
   soon as its state change is committed, and command latency is decoupled from
   notification latency.
-- Notification order is preserved by the child's sequential processing; client
-  timestamp ordering is a second, independent guarantee.
+- Notification order is preserved by the child's sequential processing; the
+  authoritative display order is a second, independent guarantee — clients order and
+  dedup against the durable `event_id`, not against delivery timing.
 - The fan-out child's lifecycle is automatic: it stops when its Room grain
   passivates.
 
@@ -113,8 +117,6 @@ delivery timing. The child belongs to the grain's actor hierarchy and stops with
 - The fan-out child notifies recipients sequentially; a slow or unreachable
   recipient delays later notifications. The design permits per-recipient concurrency
   (preserving per-recipient order) should measurement call for it.
-- Equal-millisecond timestamps are tie-broken by client arrival order; a monotonic
-  per-room sequence would order exact ties more strongly.
 
 ### Neutral
 

@@ -34,9 +34,8 @@ never crosses the client boundary.**
   `POST /login` and `POST /rooms/{id}/messages`,
   `PUT /rooms/{id}/membership` to ensure membership, and
   `DELETE /rooms/{id}/membership` to ensure absence. **Queries are HTTP GET**
-  (`GET /rooms`, which serves the gateway's static Phase 1 room
-  catalogue without touching any grain, and `GET /rooms/joined`, a User-grain
-  query). Handlers live in `internal/gateway/handler_room.go`,
+  (`GET /rooms`, which serves the room catalogue from the database without
+  touching any grain, and `GET /rooms/joined`, a User-grain query). Handlers live in `internal/gateway/handler_room.go`,
   `handler_room_query.go`, and `handler.go` (login). Each request gets
   standard HTTP semantics: status codes, the JSON error envelope of
   [ADR-009](adr-009-error-response-format.md), and — everywhere except the

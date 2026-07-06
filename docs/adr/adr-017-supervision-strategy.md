@@ -1,21 +1,29 @@
-# ADR-017: Supervision policy for connections and fan-out workers
+# ADR-017: Supervision policy for non-grain actors
 
 - **Status:** Accepted
 - **Date:** 2026-06-08
-- **Related:** [ADR-001](adr-001-grain-topology.md), [ADR-012](adr-012-watch-based-connection-lifecycle.md), [ADR-015](adr-015-command-query-vs-notification.md)
+- **Related:** [ADR-001](adr-001-grain-topology.md), [ADR-012](adr-012-watch-based-connection-lifecycle.md), [ADR-015](adr-015-command-query-vs-notification.md), [ADR-021](adr-021-scheduled-maintenance-jobs.md)
 
 ## Context
 
 Proto.Actor requires a supervisor to decide what happens after an actor panics.
-That decision depends on what gives the actor its identity and whether a new
-actor instance can continue useful work.
+That decision follows one question: **can a new instance of this actor continue
+useful work?** The answer depends on what gives the actor its identity, whether
+it holds unrecoverable external state, and whether a rebuilt instance would still
+have work to do.
 
-This system supervises two non-grain actors with different lifecycle needs:
+The non-grain actors this system supervises answer that question differently:
 
 - A **UserConnection** owns one WebSocket. The socket is the actor's identity
-  and cannot be restored by constructing another actor instance.
+  and cannot be restored by constructing another instance — a rebuilt actor has
+  no live socket to serve.
 - A Room grain's **fan-out worker** is stateless. A new instance can continue
-  processing later jobs from the same mailbox.
+  processing later jobs from the same mailbox, so it is rebuildable *and* still
+  useful after a restart.
+- A maintenance grain's **sweep worker** is rebuildable but one-shot: it exists
+  to run a single sweep and reply. A restarted instance has already consumed its
+  one job and would sit idle — so, unlike the fan-out worker, a rebuild buys
+  nothing.
 
 Expected fan-out delivery failures are ordinary `error` values returned by the
 User grain client. They are not actor failures: the worker logs the failed
@@ -23,9 +31,9 @@ recipient and continues its best-effort delivery loop.
 
 ## Decision
 
-**Use actor supervision only for panics, with a policy based on whether the
-actor can be rebuilt. Keep expected operational failures on normal error
-paths.**
+**Use actor supervision only for panics, with a policy based on whether a
+rebuilt instance can continue useful work. Keep expected operational failures on
+normal error paths.**
 
 Each supervised actor supplies a pure Proto.Actor decider, structured log
 attributes, and one of Proto.Actor's built-in strategies to a shared logging
@@ -76,6 +84,22 @@ could be sent to a terminating child.
 Expected per-recipient errors do not cause a restart. `runNotify` and
 `runForward` log them and continue with the remaining recipients.
 
+### Stop the maintenance sweep worker
+
+The maintenance grain's sweep worker maps to **Stop**, applied by a one-for-one
+stop strategy. This is the same directive as UserConnection but for a different
+reason: the worker is rebuildable, yet a rebuilt instance would have no work to
+do. It is spawned per trigger to run one sweep and reply
+([ADR-021](adr-021-scheduled-maintenance-jobs.md)); a restarted instance has
+already consumed its single job, and because the maintenance grain never
+passivates, such idle workers would accumulate for the process's lifetime.
+
+Stopping is also what keeps the job self-healing. The grain tracks the sweep
+with a request future whose reentrant continuation clears the running flag on
+reply, failure, *or* timeout. Letting a panicked worker stop lets that future
+resolve (with an error) and clear the flag, so a crashed sweep can never wedge
+the job — whereas a restarted-but-idle worker would leave the future waiting.
+
 ## Consequences
 
 ### Positive
@@ -101,7 +125,8 @@ Expected per-recipient errors do not cause a restart. `runNotify` and
 
 ### Neutral
 
-- Grain activations remain governed by the cluster runtime. The custom Room
-  strategy governs the fan-out child only.
+- Grain activations remain governed by the cluster runtime. The custom
+  strategies govern only the non-grain children — the Room grain's fan-out
+  worker and the maintenance grain's sweep worker.
 - Resume and Escalate remain available through the decorator but are not part
   of the current connection or Room worker policies.

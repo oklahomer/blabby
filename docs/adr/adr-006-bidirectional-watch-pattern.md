@@ -89,11 +89,11 @@ design intent the implemented half was built to compose with.
 
 ### Neutral
 
-- The pattern restores *registration*, not *state*. A reactivated grain's
-  joined-rooms set is still empty until persistence lands
-  ([ADR-007](adr-007-single-table-persistence.md)); honest emptiness
-  ([ADR-010](adr-010-eventual-consistency-model.md)) is unchanged by who
-  re-registers when.
+- The pattern restores *registration*, not *state*. A reactivated grain
+  hydrates its durable state from the store
+  ([ADR-007](adr-007-database-authoritative-persistence.md)); this pattern only
+  re-establishes the connection↔grain references, a concern orthogonal to state
+  recovery ([ADR-010](adr-010-eventual-consistency-model.md)).
 
 ## Alternatives considered
 
@@ -127,7 +127,7 @@ belongs to the live actors that embody it.
   half: grain watches connection, evicts on Terminated.
 - [ADR-011](adr-011-cross-boundary-pid-propagation.md) — the PID-in-payload
   mechanism the registration response would extend.
-- [ADR-010](adr-010-eventual-consistency-model.md) — the empty-state honesty
-  this pattern narrows but does not replace.
+- [ADR-010](adr-010-eventual-consistency-model.md) — the unpersisted-state
+  honesty this pattern narrows but does not replace.
 - `internal/grain/user/state.go` — the connection set that re-registration
   repopulates.
