@@ -159,10 +159,11 @@ filters are already known query needs.
 
 Keep the Phase-1 model where grain memory is authoritative and the database, if any,
 is a replay log. Rejected: membership and history must survive reactivation as a
-product requirement, and honest empty-state after reactivation
-([ADR-010](adr-010-eventual-consistency-model.md)) is a poor experience once the
-data exists to restore. Making the store authoritative and hydrating grains from it
-keeps the single-writer simplicity while giving durability.
+product requirement. Under sole authority nothing is stored, so a grain reactivates
+empty — the unpersisted-state honesty
+([ADR-010](adr-010-eventual-consistency-model.md)) taken to its limit — which is a
+poor experience once the data exists to restore. Making the store authoritative and
+hydrating grains from it keeps the single-writer simplicity while giving durability.
 
 ## References
 

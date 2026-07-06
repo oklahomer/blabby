@@ -127,7 +127,7 @@ belongs to the live actors that embody it.
   half: grain watches connection, evicts on Terminated.
 - [ADR-011](adr-011-cross-boundary-pid-propagation.md) — the PID-in-payload
   mechanism the registration response would extend.
-- [ADR-010](adr-010-eventual-consistency-model.md) — the empty-state honesty
-  this pattern narrows but does not replace.
+- [ADR-010](adr-010-eventual-consistency-model.md) — the unpersisted-state
+  honesty this pattern narrows but does not replace.
 - `internal/grain/user/state.go` — the connection set that re-registration
   repopulates.

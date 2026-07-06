@@ -147,6 +147,6 @@ common read.
 - [ADR-015](adr-015-command-query-vs-notification.md) — best-effort
   notifications and re-read-to-converge.
 - [ADR-017](adr-017-supervision-strategy.md) — failure handling consistent
-  with empty-state honesty.
+  with unpersisted-state honesty.
 - `internal/clusterboot/departure_integration_test.go` — the executable
   statement of this model under node failure.
