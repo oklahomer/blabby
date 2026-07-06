@@ -9,8 +9,8 @@
 Every persisted entity and event needs a primary key
 ([ADR-007](adr-007-database-authoritative-persistence.md)), and the room timeline
 needs those keys to be **ordered**: the client pages history and dedups live frames
-by comparing ids, so an id must sort by creation time without a separate timestamp
-column carrying the ordering. The keys must be mintable by any backend node without a
+by comparing ids, so the id itself carries the timeline's ordering, rather than a
+separate sequence column. The keys must be mintable by any backend node without a
 round-trip to a shared allocator on every write, and — because the cluster runs
 multiple backend members ([ADR-016](adr-016-gateway-backend-tier-separation.md)) —
 two nodes must **never** mint the same id.
@@ -38,9 +38,11 @@ another node can reuse the worker id.**
 - **12 bits** per-worker sequence (`0..4095`) within a millisecond.
 
 One generator is bound to one worker id and is goroutine-safe. The value is positive
-and strictly increasing per worker; `internal/id` wraps it as the typed `UserID` /
-`RoomID` / `EventID` ([ADR-014](adr-014-domain-identifier-types-and-boundary-parsing.md))
-and renders it as a decimal string on the wire (JavaScript cannot hold 63 bits).
+and strictly increasing **per worker** — ordering *across* workers rests on the
+clock-synchronization assumption discussed in the consequences. `internal/id` wraps
+it as the typed `UserID` / `RoomID` / `EventID`
+([ADR-014](adr-014-domain-identifier-types-and-boundary-parsing.md)) and renders it as
+a decimal string on the wire (JavaScript cannot hold 63 bits).
 
 ### The fencing
 
@@ -83,6 +85,20 @@ actually expires — so the worker id is safe for another node to lease.
 
 ### Negative
 
+- **Cross-node ordering assumes synchronized clocks.** Ordering is total and strict
+  *within* a worker (the generator fail-closes on its own clock going backwards), but
+  ids minted on *different* nodes sort by creation time only to the accuracy of the
+  nodes' clock synchronization — the standard Snowflake operating assumption (NTP).
+  Because the timestamp sits in the high bits, clocks within a few milliseconds still
+  order correctly; the exposure is narrow but real: when a Room grain reactivates on a
+  node whose clock lags the one that last appended to that room, the next id can fall
+  *below* the room's latest, inverting the timeline within the skew window. The single
+  appender per room ([ADR-007](adr-007-database-authoritative-persistence.md)) removes
+  intra-node races but does not bound cross-node skew. `occurred_at` (the single
+  Postgres `now()` clock) is a skew-free reference the timeline could order by, or a
+  per-room monotonic floor could be enforced at append, if a hard guarantee is ever
+  required; today the system accepts NTP-level synchronization as an operational
+  requirement.
 - **A backend node cannot mint without a database-reachable lease.** Losing the
   database costs id generation, not just persistence — acceptable, since a node that
   cannot reach the store cannot do useful work anyway.

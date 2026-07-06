@@ -52,9 +52,13 @@ Concretely (the schema is `internal/persistence/schema.sql`):
   every timeline query needs as normalized columns — `id`, `room_id`, `type`,
   `user_id`, `occurred_at` — and the type-specific fields in a single `JSONB`
   `payload` (a message's text; the actor's display name on a membership event).
-  The Room grain is the single appender per room, so the per-room id sequence is
-  monotonic and orders the timeline; `occurred_at` is display-only. A reserved
-  `client_key` unique index is the affordance for send idempotency.
+  The Room grain is the single appender per room, so within one activation the
+  ids it mints increase and order the timeline; across a reactivation onto
+  another backend node, that ordering rests on the cluster's clock-sync
+  assumption ([ADR-019](adr-019-snowflake-ids-and-worker-lease-fencing.md)).
+  `occurred_at` is the single DB clock, stamped `now()`, and is display-only
+  today. A reserved `client_key` unique index is the affordance for send
+  idempotency.
 - **Native enums, Snowflake keys.** Enum-like columns (`user_status`,
   `room_status`, `membership_role`, `event_type`) use native PostgreSQL `ENUM`
   types for readable predicates (`role = 'owner'`) and database-level type safety,
