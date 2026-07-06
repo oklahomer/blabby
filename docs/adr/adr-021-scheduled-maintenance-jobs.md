@@ -94,9 +94,10 @@ never swept. The verification row is removed by its `ON DELETE CASCADE`.
 - **A stuck job cannot wedge the pipeline.** The reentrant future clears the running
   flag on reply, failure, or timeout; a hung worker times out and the next trigger
   proceeds.
-- **The schedule lives in operations, not code.** The cadence is a deployment
-  concern (cron / CronJob), and the job is manually triggerable for testing or an
-  incident.
+- **The cadence is operationally configurable.** The zero-config default is an
+  in-process gateway-local cron (`--gc-schedule @every 1m`); `--gc-schedule off` hands
+  the cadence to an external scheduler; and either way the endpoint stays manually
+  triggerable for testing or an incident.
 
 ### Negative
 
