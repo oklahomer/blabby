@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oklahomer/blabby/internal/snowflake"
@@ -17,6 +18,15 @@ const (
 	defaultTTL           = 30 * time.Second
 	defaultMargin        = 5 * time.Second
 	defaultRenewInterval = 10 * time.Second
+
+	// defaultBeatTimeout bounds the database work of a single renewal beat. It caps
+	// how long the loop can sit inside a hung store call, which in turn caps how long
+	// Stop waits for an in-flight beat to observe the stop signal.
+	defaultBeatTimeout = 5 * time.Second
+	// defaultReleaseTimeout bounds the best-effort lease release on shutdown. Without
+	// it a hung release would keep the loop's teardown from completing, blocking Stop
+	// (which waits for the loop to finish) indefinitely.
+	defaultReleaseTimeout = 5 * time.Second
 )
 
 // Sentinel errors from the Manager lifecycle.
@@ -43,6 +53,12 @@ type LeaseStore interface {
 // The deadline is computed from the injected clock (monotonic in production) at the
 // instant each acquire/renew is *sent*, never from the lease's DB expiry — so an
 // NTP step or host↔DB skew can never extend minting past the lease.
+//
+// A single loop goroutine owns the renewal ticker, the current lease/generator, and
+// teardown. It publishes the live session through cur so Next reads it lock-free.
+// Start publishes the initial session before launching the loop; after that the loop
+// is cur's sole writer (replacing it on re-acquire, clearing it on exit), so cur
+// needs no mutex. Stop only signals the loop and waits, never touching the session.
 type Manager struct {
 	store         LeaseStore
 	owner         string
@@ -50,18 +66,33 @@ type Manager struct {
 	margin        time.Duration
 	renewInterval time.Duration
 	now           func() time.Time
+	// beatTimeout bounds each renewal beat's store call; releaseTimeout bounds the
+	// shutdown release. Both keep a hung store call from stalling the loop's teardown
+	// and, in turn, Stop.
+	beatTimeout    time.Duration
+	releaseTimeout time.Duration
 
+	// lifecycleMu serializes Start and Stop against each other.
 	lifecycleMu sync.Mutex
-
-	mu    sync.Mutex
-	state managerState
+	// cur holds the live lease/generator, or nil when not running. It is the
+	// started marker (Start rejects a non-nil cur) and Next's lock-free source.
+	// Start publishes the first session; after that the owning loop is the sole
+	// writer, and a later Start republishes only after the prior loop cleared cur.
+	cur atomic.Pointer[session]
+	// stop and done are the current run goroutine's control channels, recorded so
+	// Stop can signal it and wait for it. The loop receives its own copies as
+	// arguments, so a restart can replace these fields without disturbing an
+	// already-exiting goroutine.
+	stop chan struct{}
+	done chan struct{}
 }
 
-type managerState struct {
-	gen    *snowflake.Generator
-	lease  Lease
-	cancel context.CancelFunc
-	done   chan struct{}
+// session is the immutable lease/generator pair the loop publishes for Next to read
+// lock-free. The loop swaps it wholesale on re-acquire; only the generator's own
+// deadline clock changes in place on a published session.
+type session struct {
+	lease Lease
+	gen   *snowflake.Generator
 }
 
 // ManagerOption customizes a Manager.
@@ -89,12 +120,14 @@ func WithClock(now func() time.Time) ManagerOption { return func(m *Manager) { m
 // lease, are configuration errors rather than runtime surprises.
 func NewManager(store LeaseStore, owner string, opts ...ManagerOption) (*Manager, error) {
 	m := &Manager{
-		store:         store,
-		owner:         owner,
-		ttl:           defaultTTL,
-		margin:        defaultMargin,
-		renewInterval: defaultRenewInterval,
-		now:           time.Now,
+		store:          store,
+		owner:          owner,
+		ttl:            defaultTTL,
+		margin:         defaultMargin,
+		renewInterval:  defaultRenewInterval,
+		now:            time.Now,
+		beatTimeout:    defaultBeatTimeout,
+		releaseTimeout: defaultReleaseTimeout,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -124,15 +157,16 @@ func (m *Manager) validateCadence() error {
 	return nil
 }
 
-// Start acquires the first lease, installs the generator with its initial deadline,
-// and launches the renewal heartbeat. A second call on a running Manager returns
-// ErrAlreadyStarted (m.cancel is the live-heartbeat marker); a failed Start leaves
-// it unset and is retryable. The heartbeat runs until Stop or ctx cancellation.
+// Start acquires the first lease, publishes the generator with its initial deadline,
+// and launches the renewal loop. A second call on a running Manager returns
+// ErrAlreadyStarted (a non-nil cur is the running marker); a failed Start leaves cur
+// nil and is retryable. The loop runs until Stop or ctx cancellation, releasing the
+// lease on either exit.
 func (m *Manager) Start(ctx context.Context) error {
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 
-	if _, ok := m.snapshot(); ok {
+	if m.cur.Load() != nil {
 		return ErrAlreadyStarted
 	}
 
@@ -140,50 +174,63 @@ func (m *Manager) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hbCtx, cancel := context.WithCancel(ctx)
+	m.cur.Store(&session{lease: lease, gen: gen})
+	stop := make(chan struct{})
 	done := make(chan struct{})
-	m.install(managerState{
-		gen:    gen,
-		lease:  lease,
-		cancel: cancel,
-		done:   done,
-	})
-	go func() {
-		defer close(done)
-		m.heartbeat(hbCtx)
-	}()
+	m.stop, m.done = stop, done
+	go m.run(ctx, stop, done)
 	m.logLease("workerlease.acquired", lease)
 	return nil
 }
 
-// Next mints the next id from the current generator, or ErrNotStarted if Start has
-// not run. The generator's own fail-closed errors (lease expired, clock regression)
-// surface unchanged.
-func (m *Manager) Next() (int64, error) {
-	state, ok := m.snapshot()
-	if !ok {
-		return 0, ErrNotStarted
+// run is the lease loop: it renews on each beat and, on either ctx cancellation or a
+// Stop signal, tears the lease down. The ticker and lease ownership are stack-local
+// here so the whole lifecycle reads top to bottom. stop and done are the caller's
+// channels for this run, closed/observed only here. ctx flows straight into each
+// beat, so a parent-ctx cancellation interrupts an in-flight renewal; Stop does not
+// interrupt a beat, it just ends the loop once the current beat (bounded by the beat
+// timeout) returns.
+func (m *Manager) run(ctx context.Context, stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	defer m.releaseAndClear()
+
+	ticker := time.NewTicker(m.renewInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case <-ticker.C:
+			m.beat(ctx)
+		}
 	}
-	return state.gen.Next()
 }
 
-// Stop terminates the heartbeat and releases the current lease (best-effort). It is
-// meant to be called once after Start; calling it before Start is a no-op.
+// Next mints the next id from the current generator, or ErrNotStarted if no lease is
+// live. The generator's own fail-closed errors (lease expired, clock regression)
+// surface unchanged.
+func (m *Manager) Next() (int64, error) {
+	s := m.cur.Load()
+	if s == nil {
+		return 0, ErrNotStarted
+	}
+	return s.gen.Next()
+}
+
+// Stop signals the loop to exit and waits for it to release the lease. It is meant to
+// be called once after Start; calling it before Start, or after the loop has already
+// exited (e.g. ctx cancellation), is a no-op because cur is nil.
 func (m *Manager) Stop() {
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 
-	state, ok := m.snapshot()
-	if !ok {
+	if m.cur.Load() == nil {
 		return
 	}
-	m.clear()
-	state.gen.Renew(time.Time{})
-	state.cancel()
-	<-state.done
-	if err := m.store.Release(context.Background(), state.lease); err != nil {
-		slog.Warn("workerlease.release_error", "error", err)
-	}
+	close(m.stop)
+	<-m.done
 }
 
 // acquire takes a lease and builds a fresh generator with its initial deadline. It
@@ -207,44 +254,35 @@ func (m *Manager) acquire(ctx context.Context) (Lease, *snowflake.Generator, err
 	return lease, gen, nil
 }
 
-func (m *Manager) heartbeat(ctx context.Context) {
-	ticker := time.NewTicker(m.renewInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			m.tick(ctx)
-		}
-	}
-}
-
-// tick performs one renewal beat: renew and, on success, extend the local deadline;
-// on a transient error leave the deadline to lapse on its own and retry next beat;
-// on a confirmed loss halt minting and re-acquire a fresh worker id.
-func (m *Manager) tick(ctx context.Context) {
+// beat performs one renewal: renew and, on success, extend the local deadline; on a
+// transient error leave the deadline to lapse on its own and retry next beat; on a
+// confirmed loss halt minting and re-acquire a fresh worker id. Its database work is
+// bounded by beatTimeout so a hung store call cannot stall the loop.
+func (m *Manager) beat(ctx context.Context) {
 	sendAt := m.now()
-	state, ok := m.snapshot()
-	if !ok {
+	s := m.cur.Load()
+	if s == nil {
 		return
 	}
-	held, err := m.store.Renew(ctx, state.lease, m.ttl)
+	ctx, cancel := context.WithTimeout(ctx, m.beatTimeout)
+	defer cancel()
+	held, err := m.store.Renew(ctx, s.lease, m.ttl)
 	switch {
 	case err != nil:
 		slog.Warn("workerlease.renew_error", "error", err)
 	case !held:
 		slog.Warn("workerlease.lease_lost")
-		m.handleLoss(ctx, state)
+		m.handleLoss(ctx, s)
 	default:
-		state.gen.Renew(sendAt.Add(m.ttl - m.margin))
+		s.gen.Renew(sendAt.Add(m.ttl - m.margin))
 	}
 }
 
 // handleLoss halts minting immediately, then re-acquires a fresh worker id. If the
-// re-acquire fails (no capacity / transient), minting stays halted and the next
-// beat retries.
-func (m *Manager) handleLoss(ctx context.Context, lost managerState) {
+// re-acquire fails (no capacity / transient), minting stays halted and the next beat
+// retries. The loop is cur's only writer, so publishing the new session needs no
+// compare-and-swap guard.
+func (m *Manager) handleLoss(ctx context.Context, lost *session) {
 	// Halt minting immediately: a zero deadline returns the generator to its
 	// fail-closed state. We must stop now (not wait for the old deadline) because
 	// another process may take our worker id once the lease is lost.
@@ -254,50 +292,29 @@ func (m *Manager) handleLoss(ctx context.Context, lost managerState) {
 		slog.Warn("workerlease.reacquire_failed", "error", err)
 		return
 	}
-	if !m.replace(lost, lease, gen) {
-		// Stop won the race while we were acquiring; do not hold a lease the stopped
-		// manager can no longer renew.
-		if err := m.store.Release(context.Background(), lease); err != nil {
-			slog.Warn("workerlease.release_error", "error", err)
-		}
-		return
-	}
+	m.cur.Store(&session{lease: lease, gen: gen})
 	m.logLease("workerlease.reacquired", lease)
 }
 
-func (m *Manager) snapshot() (managerState, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.state.gen == nil {
-		return managerState{}, false
+// releaseAndClear releases the live lease and clears the running marker. It runs from
+// the loop's deferred teardown on both exit paths (Stop and ctx cancellation). The
+// lease is released before cur is cleared so a restart that observes a nil cur can
+// never collide with the lease this loop still holds.
+func (m *Manager) releaseAndClear() {
+	s := m.cur.Load()
+	if s == nil {
+		return
 	}
-	return m.state, true
-}
-
-func (m *Manager) install(state managerState) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.state = state
-}
-
-func (m *Manager) replace(old managerState, lease Lease, gen *snowflake.Generator) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	// If the installed state no longer matches the one we set out to replace, Stop
-	// (or another transition) won the race while we were acquiring; the gen check
-	// alone covers it, since clear zeroes the whole state.
-	if m.state.gen != old.gen || m.state.lease != old.lease {
-		return false
+	s.gen.Renew(time.Time{})
+	// A fresh background context, not the loop's (possibly already-cancelled) ctx, so
+	// the release still runs on the ctx-cancellation exit path — bounded so a hung
+	// release cannot stall teardown.
+	ctx, cancel := context.WithTimeout(context.Background(), m.releaseTimeout)
+	defer cancel()
+	if err := m.store.Release(ctx, s.lease); err != nil {
+		slog.Warn("workerlease.release_error", "error", err)
 	}
-	m.state.gen = gen
-	m.state.lease = lease
-	return true
-}
-
-func (m *Manager) clear() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.state = managerState{}
+	m.cur.Store(nil)
 }
 
 func (m *Manager) logLease(msg string, lease Lease) {
