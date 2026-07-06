@@ -6,9 +6,9 @@
 // [user.Grain]; do NOT rename it to UserGrain (that would stutter with
 // the package name and trip golangci-lint's revive rule).
 //
-// The grain keeps its connection set and joined-rooms set in memory only.
-// When the grain passivates, both sets are dropped and rebuilt as the
-// user's actors re-register and the user's next command arrives.
+// The grain keeps live UserConnection PIDs in memory. Joined rooms are
+// hydrated from DB-authoritative membership on activation and then maintained
+// as an in-memory working projection while the grain is active.
 package user
 
 import (
