@@ -74,7 +74,7 @@ ADR numbers are permanent identifiers assigned in creation order — they are no
 | [ADR-014](adr-014-domain-identifier-types-and-boundary-parsing.md) | Domain identifier types -- numeric Snowflake ids internally, opaque public codes externally, parsed at boundaries | Accepted | 2026-07-05 |
 | [ADR-015](adr-015-command-query-vs-notification.md) | Command/query vs. notification -- synchronous request/response or asynchronous best-effort (Room fan-out as the worked example) | Accepted | 2026-05-31 |
 | [ADR-016](adr-016-gateway-backend-tier-separation.md) | Gateway as cluster client, backend as cluster member -- tier separation | Accepted | 2026-06-03 |
-| [ADR-017](adr-017-supervision-strategy.md) | Custom supervision strategy -- Stop external-resource actors and Restart rebuildable workers | Accepted | 2026-06-08 |
+| [ADR-017](adr-017-supervision-strategy.md) | Supervision policy for non-grain actors -- Stop when a rebuilt instance can't do useful work, Restart when it can | Accepted | 2026-06-08 |
 | [ADR-018](adr-018-http-authentication-boundary.md) | HTTP authentication boundary -- middleware in the gateway, transport-agnostic primitives in auth, identity as explicit arguments | Accepted | 2026-06-13 |
 | [ADR-019](adr-019-snowflake-ids-and-worker-lease-fencing.md) | Snowflake ids and worker-lease fencing -- time-ordered ids minted safely across a cluster | Accepted | 2026-07-05 |
 | [ADR-020](adr-020-pgroonga-search-stack.md) | PGroonga search stack -- CJK-capable full-text in PostgreSQL, hand-written SQL over pgx | Accepted | 2026-07-05 |
