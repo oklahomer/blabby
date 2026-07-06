@@ -136,6 +136,26 @@ func TestActiveIDReturnsCursorOrEmpty(t *testing.T) {
 	}
 }
 
+func TestClampCursor(t *testing.T) {
+	tests := []struct {
+		name string
+		in   State
+		want int
+	}{
+		{"empty", State{Cursor: 5}, 0},
+		{"negative", State{JoinedIDs: []string{"a", "b"}, Cursor: -1}, 0},
+		{"in range", State{JoinedIDs: []string{"a", "b"}, Cursor: 1}, 1},
+		{"past end", State{JoinedIDs: []string{"a", "b"}, Cursor: 5}, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.in.ClampCursor().Cursor; got != tc.want {
+				t.Fatalf("Cursor = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveNameFallsBackToID(t *testing.T) {
 	state := State{NameForID: map[string]string{"general": "General"}}
 	if got := state.ResolveName("general"); got != "General" {
