@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-06-03
-- **Related:** [ADR-001](adr-001-grain-topology.md), [ADR-011](adr-011-cross-boundary-pid-propagation.md)
+- **Related:** [ADR-001](adr-001-grain-topology.md), [ADR-007](adr-007-database-authoritative-persistence.md), [ADR-011](adr-011-cross-boundary-pid-propagation.md)
 
 ## Context
 
@@ -91,9 +91,13 @@ may sit on a different node than the grain.
 
 ### Neutral
 
-- **The in-memory user store is per-tier.** It stays coherent across processes
-  only because its seed is fixed and immutable; a shared store becomes necessary
-  when user data becomes mutable.
+- **Both tiers share one authoritative user store.** Accounts live in the
+  PostgreSQL `service_user` table ([ADR-007](adr-007-database-authoritative-persistence.md)),
+  which each tier reaches through the tier-specific seam it needs — the gateway
+  for credential lookup, registration, and verification; the backend for the
+  `User` grain's directory and the Room grain's membership resolution. Tier
+  separation does not fragment user data or hand either tier its own copy: the
+  store is DB-authoritative and mutable, read and written through those seams.
 - **A single binary with a `--role` flag** is an alternative: it keeps one entry
   point but reintroduces role-branching that two binaries avoid.
 - **A fully cluster-agnostic edge** — gateways speaking only HTTP/gRPC to the
