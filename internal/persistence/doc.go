@@ -4,9 +4,15 @@
 // both by docker-compose (mounted as an init script for local development) and by
 // integration tests (exec'd against a clean database).
 //
+// This package holds the table repositories — UserRepo, RoomRepo, MembershipRepo,
+// VerificationRepo, and the timeline Journal — plus the PendingAccountSweeper. Each
+// takes a postgres.Querier (a pool or a transaction) per call, so a caller can
+// compose several operations into one transaction. They issue fixed parameterized
+// SQL and parse rows into typed value objects at the boundary (parse, don't
+// validate), so callers handle domain types, never bare ints or strings.
+//
 // Subpackage postgres bootstraps the pgxpool connection pool and exposes the
-// Querier abstraction — a pool or a transaction — that repositories accept per
-// call so a caller can compose several operations into one transaction. The
-// repositories are wired to the live pool and back the gateway handlers and the
-// room and user grains.
+// Querier abstraction. Subpackage workerlease leases the per-node worker id that
+// the Journal's Snowflake id source mints from; it is a lifecycle component, kept
+// separate from the repositories.
 package persistence
