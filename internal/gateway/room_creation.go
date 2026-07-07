@@ -9,7 +9,6 @@ import (
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -36,7 +35,7 @@ type creationMemberships interface {
 }
 
 type creationJournal interface {
-	AppendMembership(ctx context.Context, q postgres.Querier, roomID id.RoomID, actor id.UserRef, kind journal.MemberEventKind) (id.EventID, time.Time, error)
+	AppendMembership(ctx context.Context, q postgres.Querier, roomID id.RoomID, actor id.UserRef, kind persistence.MemberEventKind) (id.EventID, time.Time, error)
 }
 
 // roomCreateCollisionRetryLimit bounds re-running the creation transaction when a
@@ -95,7 +94,7 @@ func (s *RoomCreationService) CreateRoom(ctx context.Context, actor id.UserID, n
 		if err := s.memberships.Add(ctx, q, room.ID, ownerRef, domain.MembershipRoleOwner); err != nil {
 			return fmt.Errorf("room creation: seed owner membership: %w", err)
 		}
-		if _, _, err := s.journal.AppendMembership(ctx, q, room.ID, ownerRef, journal.MemberJoined); err != nil {
+		if _, _, err := s.journal.AppendMembership(ctx, q, room.ID, ownerRef, persistence.MemberJoined); err != nil {
 			return fmt.Errorf("room creation: founding event: %w", err)
 		}
 

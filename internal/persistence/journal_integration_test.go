@@ -1,4 +1,4 @@
-package journal
+package persistence
 
 import (
 	"context"
@@ -39,7 +39,7 @@ func TestJournalIntegration(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM event WHERE id = $1", rawID)
 	})
 
-	j := New(stubIDSource{id: rawID})
+	j := NewJournal(stubIDSource{id: rawID})
 	eventID, occurredAt, err := j.AppendMembership(ctx, pool, mustRoomID(t, 4), mustUserRef(t, 1, "alice"), MemberJoined)
 	if err != nil {
 		t.Fatalf("AppendMembership: %v", err)
@@ -73,7 +73,7 @@ func TestJournalIntegration(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM event WHERE id = $1", msgID)
 	})
-	msgEventID, msgOccurredAt, err := New(stubIDSource{id: msgID}).AppendMessage(
+	msgEventID, msgOccurredAt, err := NewJournal(stubIDSource{id: msgID}).AppendMessage(
 		ctx, pool, mustRoomID(t, 4), mustUserID(t, 1), "hello 世界")
 	if err != nil {
 		t.Fatalf("AppendMessage: %v", err)
@@ -141,7 +141,7 @@ func TestTimelineIntegration(t *testing.T) {
 	// History, oldest first: joined, three messages (one CJK, one with Groonga
 	// syntax), left. Ids ascend so the timeline order is deterministic.
 	alice := mustUserRef(t, 1, "alice")
-	if _, _, err := New(stubIDSource{id: base + 1}).AppendMembership(ctx, pool, roomID, alice, MemberJoined); err != nil {
+	if _, _, err := NewJournal(stubIDSource{id: base + 1}).AppendMembership(ctx, pool, roomID, alice, MemberJoined); err != nil {
 		t.Fatalf("AppendMembership(joined): %v", err)
 	}
 	messages := []struct {
@@ -153,16 +153,16 @@ func TestTimelineIntegration(t *testing.T) {
 		{base + 4, `50% off OR "quoted" deal`},
 	}
 	for _, m := range messages {
-		if _, _, err := New(stubIDSource{id: m.eid}).AppendMessage(ctx, pool, roomID, mustUserID(t, 1), m.text); err != nil {
+		if _, _, err := NewJournal(stubIDSource{id: m.eid}).AppendMessage(ctx, pool, roomID, mustUserID(t, 1), m.text); err != nil {
 			t.Fatalf("AppendMessage(%q): %v", m.text, err)
 		}
 	}
-	if _, _, err := New(stubIDSource{id: base + 5}).AppendMembership(ctx, pool, roomID, alice, MemberLeft); err != nil {
+	if _, _, err := NewJournal(stubIDSource{id: base + 5}).AppendMembership(ctx, pool, roomID, alice, MemberLeft); err != nil {
 		t.Fatalf("AppendMembership(left): %v", err)
 	}
 
-	j := New(nil)
-	entryIDs := func(entries []Entry) []int64 {
+	j := NewJournal(nil)
+	entryIDs := func(entries []TimelineEntry) []int64 {
 		out := make([]int64, len(entries))
 		for i, e := range entries {
 			out[i] = e.ID.Int64()

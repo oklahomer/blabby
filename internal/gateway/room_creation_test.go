@@ -9,7 +9,6 @@ import (
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -64,10 +63,10 @@ type fakeCreationJournal struct {
 	calls int
 	room  id.RoomID
 	ref   id.UserRef
-	kind  journal.MemberEventKind
+	kind  persistence.MemberEventKind
 }
 
-func (f *fakeCreationJournal) AppendMembership(_ context.Context, _ postgres.Querier, roomID id.RoomID, actor id.UserRef, kind journal.MemberEventKind) (id.EventID, time.Time, error) {
+func (f *fakeCreationJournal) AppendMembership(_ context.Context, _ postgres.Querier, roomID id.RoomID, actor id.UserRef, kind persistence.MemberEventKind) (id.EventID, time.Time, error) {
 	f.calls++
 	f.room, f.ref, f.kind = roomID, actor, kind
 	if f.err != nil {
@@ -141,7 +140,7 @@ func TestCreateRoom_CreatesOwnerAndFoundingEvent(t *testing.T) {
 	if members.calls != 1 || members.role != domain.MembershipRoleOwner || members.ref.Name() != "alice" || members.room.Int64() != 42 {
 		t.Errorf("membership Add = %+v role=%s ref=%s, want owner alice in room 42", members.room, members.role, members.ref.Name())
 	}
-	if jrnl.calls != 1 || jrnl.kind != journal.MemberJoined || jrnl.room.Int64() != 42 {
+	if jrnl.calls != 1 || jrnl.kind != persistence.MemberJoined || jrnl.room.Int64() != 42 {
 		t.Errorf("journal append = room %v kind %v, want member_joined in room 42", jrnl.room, jrnl.kind)
 	}
 	if tx.commits != 1 {

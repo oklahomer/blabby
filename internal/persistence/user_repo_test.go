@@ -100,7 +100,7 @@ type stubIDSource struct {
 	err error
 }
 
-func (s *stubIDSource) Next() (int64, error) {
+func (s stubIDSource) Next() (int64, error) {
 	if s.err != nil {
 		return 0, s.err
 	}

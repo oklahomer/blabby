@@ -1,4 +1,4 @@
-package journal
+package persistence
 
 import (
 	"context"
@@ -13,22 +13,22 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
-// EntryKind discriminates the timeline entry types a reader can encounter.
-type EntryKind int
+// TimelineEntryKind discriminates the timeline entry types a reader can encounter.
+type TimelineEntryKind int
 
 const (
 	// EntryMessage is a posted chat message.
-	EntryMessage EntryKind = iota + 1
+	EntryMessage TimelineEntryKind = iota + 1
 	// EntryMemberJoined records that a user joined the room.
 	EntryMemberJoined
 	// EntryMemberLeft records that a user left the room.
 	EntryMemberLeft
 )
 
-// parseEntryKind maps an event_type enum label onto its EntryKind, rejecting an
+// parseEntryKind maps an event_type enum label onto its TimelineEntryKind, rejecting an
 // unknown label so a schema/reader drift surfaces as an error, not a mislabeled
 // entry.
-func parseEntryKind(s string) (EntryKind, error) {
+func parseEntryKind(s string) (TimelineEntryKind, error) {
 	switch s {
 	case "message_posted":
 		return EntryMessage, nil
@@ -37,26 +37,26 @@ func parseEntryKind(s string) (EntryKind, error) {
 	case "member_left":
 		return EntryMemberLeft, nil
 	default:
-		return 0, fmt.Errorf("journal: unknown event type %q", s)
+		return 0, fmt.Errorf("persistence: unknown event type %q", s)
 	}
 }
 
-// User is the user an event is about — the message's sender or the member who
+// TimelineUser is the user an event is about — the message's sender or the member who
 // joined or left — as their public reference: the bare public code and the
 // current display name, joined from service_user at read time. Rendering
 // current names keeps the timeline consistent with the roster, and no internal
 // user id leaves the read model.
-type User struct {
+type TimelineUser struct {
 	Code id.PublicCode
 	Name string
 }
 
-// Entry is one room-timeline event: a chat message or a membership system
+// TimelineEntry is one room-timeline event: a chat message or a membership system
 // entry.
-type Entry struct {
+type TimelineEntry struct {
 	ID         id.EventID
-	Kind       EntryKind
-	User       User
+	Kind       TimelineEntryKind
+	User       TimelineUser
 	Text       string // message text; empty for membership entries
 	OccurredAt time.Time
 }
@@ -85,7 +85,7 @@ WHERE e.room_id = $1`
 // smaller id are returned. The boolean reports whether at least one more event
 // follows the page, determined by fetching Limit+1 rows and trimming the
 // look-ahead row.
-func (j *Journal) Timeline(ctx context.Context, q postgres.Querier, roomID id.RoomID, params TimelineParams) ([]Entry, bool, error) {
+func (j *Journal) Timeline(ctx context.Context, q postgres.Querier, roomID id.RoomID, params TimelineParams) ([]TimelineEntry, bool, error) {
 	query := timelineSQL
 	args := []any{roomID.Int64()}
 	if params.Before != (id.EventID{}) {
@@ -101,7 +101,7 @@ func (j *Journal) Timeline(ctx context.Context, q postgres.Querier, roomID id.Ro
 
 	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
-		return nil, false, fmt.Errorf("journal: timeline: %w", err)
+		return nil, false, fmt.Errorf("persistence: timeline: %w", err)
 	}
 	entries, err := collectEntries(rows)
 	if err != nil {
@@ -130,9 +130,9 @@ func groongaLiteralQuery(q domain.MessageQuery) string {
 }
 
 // collectEntries scans and parses every row, closing the rows on return.
-func collectEntries(rows pgx.Rows) ([]Entry, error) {
+func collectEntries(rows pgx.Rows) ([]TimelineEntry, error) {
 	defer rows.Close()
-	var out []Entry
+	var out []TimelineEntry
 	for rows.Next() {
 		var (
 			rawID      int64
@@ -143,30 +143,30 @@ func collectEntries(rows pgx.Rows) ([]Entry, error) {
 			name       string
 		)
 		if err := rows.Scan(&rawID, &rawKind, &text, &occurredAt, &rawCode, &name); err != nil {
-			return nil, fmt.Errorf("journal: scan timeline row: %w", err)
+			return nil, fmt.Errorf("persistence: scan timeline row: %w", err)
 		}
 		eventID, err := id.NewEventID(rawID)
 		if err != nil {
-			return nil, fmt.Errorf("journal: timeline row %d: %w", rawID, err)
+			return nil, fmt.Errorf("persistence: timeline row %d: %w", rawID, err)
 		}
 		kind, err := parseEntryKind(rawKind)
 		if err != nil {
-			return nil, fmt.Errorf("journal: timeline row %d: %w", rawID, err)
+			return nil, fmt.Errorf("persistence: timeline row %d: %w", rawID, err)
 		}
 		code, err := id.ParsePublicCode(rawCode)
 		if err != nil {
-			return nil, fmt.Errorf("journal: timeline row %d: user public_code: %w", rawID, err)
+			return nil, fmt.Errorf("persistence: timeline row %d: user public_code: %w", rawID, err)
 		}
-		out = append(out, Entry{
+		out = append(out, TimelineEntry{
 			ID:         eventID,
 			Kind:       kind,
-			User:       User{Code: code, Name: name},
+			User:       TimelineUser{Code: code, Name: name},
 			Text:       text,
 			OccurredAt: occurredAt,
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("journal: timeline rows: %w", err)
+		return nil, fmt.Errorf("persistence: timeline rows: %w", err)
 	}
 	return out, nil
 }

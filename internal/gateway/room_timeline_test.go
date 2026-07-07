@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
+	"github.com/oklahomer/blabby/internal/persistence"
 )
 
 // stubRoomTimeline is an in-memory RoomTimeline seeded with the dev membership
@@ -14,7 +14,7 @@ import (
 // field makes the corresponding method fail, to exercise the 503 paths.
 type stubRoomTimeline struct {
 	members   map[int64][]int64
-	entries   map[int64][]journal.Entry
+	entries   map[int64][]persistence.TimelineEntry
 	memberErr error
 	eventsErr error
 }
@@ -22,7 +22,7 @@ type stubRoomTimeline struct {
 func newStubRoomTimeline() *stubRoomTimeline {
 	return &stubRoomTimeline{
 		members: map[int64][]int64{4: {1}},
-		entries: map[int64][]journal.Entry{},
+		entries: map[int64][]persistence.TimelineEntry{},
 	}
 }
 
@@ -48,13 +48,13 @@ func (s *stubRoomTimeline) Events(_ context.Context, query TimelineQuery) (Timel
 	if !query.Query.IsZero() {
 		needle = strings.ToLower(query.Query.String())
 	}
-	var matched []journal.Entry
+	var matched []persistence.TimelineEntry
 	for _, entry := range s.entries[query.RoomID.Int64()] {
 		if query.Before != (id.EventID{}) && entry.ID.Int64() >= query.Before.Int64() {
 			continue
 		}
 		if needle != "" &&
-			(entry.Kind != journal.EntryMessage || !strings.Contains(strings.ToLower(entry.Text), needle)) {
+			(entry.Kind != persistence.EntryMessage || !strings.Contains(strings.ToLower(entry.Text), needle)) {
 			continue
 		}
 		matched = append(matched, entry)

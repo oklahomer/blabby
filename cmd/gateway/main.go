@@ -39,7 +39,6 @@ import (
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/logging"
 	"github.com/oklahomer/blabby/internal/persistence"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 	"github.com/oklahomer/blabby/internal/persistence/workerlease"
 	"github.com/oklahomer/blabby/internal/verification"
@@ -280,7 +279,7 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 		persistence.NewRoomRepo(leaseManager),
 		persistence.NewUserRepo(leaseManager),
 		persistence.NewMembershipRepo(),
-		journal.New(leaseManager),
+		persistence.NewJournal(leaseManager),
 		postgres.NewTransactor(pool),
 	)
 

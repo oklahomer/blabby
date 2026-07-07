@@ -15,7 +15,7 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
-// stubIDSource satisfies journal.IDSource; the role operations under test never
+// stubIDSource satisfies the persistence event id source; the role operations under test never
 // mint an event id, so it only has to exist.
 type stubIDSource struct{ next int64 }
 

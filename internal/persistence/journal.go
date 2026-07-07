@@ -1,4 +1,4 @@
-package journal
+package persistence
 
 import (
 	"context"
@@ -10,10 +10,10 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
-// IDSource mints the next Snowflake id for an event. It is the same one-method
+// EventIDSource mints the next Snowflake id for an event. It is the same one-method
 // contract the room repo uses, satisfied by the worker-lease Manager, which mints only
 // while it holds an unexpired lease (fail-closed).
-type IDSource interface {
+type EventIDSource interface {
 	Next() (int64, error)
 }
 
@@ -21,11 +21,11 @@ type IDSource interface {
 // postgres.Querier (pool or tx) per call, so the Room grain can append a
 // membership event inside the same transaction as the room_membership write.
 type Journal struct {
-	ids IDSource
+	ids EventIDSource
 }
 
-// New returns a Journal that mints event ids from ids.
-func New(ids IDSource) *Journal { return &Journal{ids: ids} }
+// NewJournal returns a Journal that mints event ids from ids.
+func NewJournal(ids EventIDSource) *Journal { return &Journal{ids: ids} }
 
 const appendMessageSQL = `
 INSERT INTO event (id, room_id, type, user_id, occurred_at, payload)
@@ -40,16 +40,16 @@ RETURNING occurred_at`
 func (j *Journal) AppendMessage(ctx context.Context, q postgres.Querier, roomID id.RoomID, author id.UserID, text string) (id.EventID, time.Time, error) {
 	rawID, err := j.ids.Next()
 	if err != nil {
-		return id.EventID{}, time.Time{}, fmt.Errorf("journal: mint event id: %w", err)
+		return id.EventID{}, time.Time{}, fmt.Errorf("persistence: mint event id: %w", err)
 	}
 	eventID, err := id.NewEventID(rawID)
 	if err != nil {
-		return id.EventID{}, time.Time{}, fmt.Errorf("journal: mint event id: %w", err)
+		return id.EventID{}, time.Time{}, fmt.Errorf("persistence: mint event id: %w", err)
 	}
 
 	payload, err := json.Marshal(messagePayload{Text: text})
 	if err != nil {
-		return id.EventID{}, time.Time{}, fmt.Errorf("journal: marshal payload: %w", err)
+		return id.EventID{}, time.Time{}, fmt.Errorf("persistence: marshal payload: %w", err)
 	}
 
 	var occurredAt time.Time
@@ -57,7 +57,7 @@ func (j *Journal) AppendMessage(ctx context.Context, q postgres.Querier, roomID 
 		eventID.Int64(), roomID.Int64(), author.Int64(), payload,
 	).Scan(&occurredAt)
 	if err != nil {
-		return id.EventID{}, time.Time{}, fmt.Errorf("journal: append message: %w", err)
+		return id.EventID{}, time.Time{}, fmt.Errorf("persistence: append message: %w", err)
 	}
 	return eventID, occurredAt, nil
 }
@@ -84,16 +84,16 @@ func (j *Journal) AppendMembership(ctx context.Context, q postgres.Querier, room
 
 	rawID, err := j.ids.Next()
 	if err != nil {
-		return id.EventID{}, time.Time{}, fmt.Errorf("journal: mint event id: %w", err)
+		return id.EventID{}, time.Time{}, fmt.Errorf("persistence: mint event id: %w", err)
 	}
 	eventID, err := id.NewEventID(rawID)
 	if err != nil {
-		return id.EventID{}, time.Time{}, fmt.Errorf("journal: mint event id: %w", err)
+		return id.EventID{}, time.Time{}, fmt.Errorf("persistence: mint event id: %w", err)
 	}
 
 	payload, err := json.Marshal(memberEventPayload{DisplayName: actor.Name()})
 	if err != nil {
-		return id.EventID{}, time.Time{}, fmt.Errorf("journal: marshal payload: %w", err)
+		return id.EventID{}, time.Time{}, fmt.Errorf("persistence: marshal payload: %w", err)
 	}
 
 	var occurredAt time.Time
@@ -101,7 +101,7 @@ func (j *Journal) AppendMembership(ctx context.Context, q postgres.Querier, room
 		eventID.Int64(), roomID.Int64(), eventType, actor.ID().Int64(), payload,
 	).Scan(&occurredAt)
 	if err != nil {
-		return id.EventID{}, time.Time{}, fmt.Errorf("journal: append membership: %w", err)
+		return id.EventID{}, time.Time{}, fmt.Errorf("persistence: append membership: %w", err)
 	}
 	return eventID, occurredAt, nil
 }

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -42,7 +42,7 @@ const messageOpTimeout = 3 * time.Second
 // messageStore is the production MessageStore: the journal over the backend's
 // pool. A message append is a single INSERT, so no transaction is involved.
 type messageStore struct {
-	journal *journal.Journal
+	journal *persistence.Journal
 	pool    postgres.Querier
 }
 
@@ -50,8 +50,8 @@ type messageStore struct {
 // ids from ids (the worker-lease manager). It takes the Querier interface —
 // unlike NewMembershipStore, which needs the concrete pool to build its
 // Transactor — because a message append is a single INSERT.
-func NewMessageStore(pool postgres.Querier, ids journal.IDSource) MessageStore {
-	return &messageStore{journal: journal.New(ids), pool: pool}
+func NewMessageStore(pool postgres.Querier, ids persistence.EventIDSource) MessageStore {
+	return &messageStore{journal: persistence.NewJournal(ids), pool: pool}
 }
 
 func (s *messageStore) RecordMessage(ctx context.Context, roomID id.RoomID, author id.UserID, text string) (MessageEvent, error) {

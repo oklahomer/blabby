@@ -9,7 +9,7 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
+	"github.com/oklahomer/blabby/internal/persistence"
 )
 
 // endpointRoomEvents doubles as the mux pattern and the structured-log
@@ -179,7 +179,7 @@ func (g *Gateway) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 // wire mapping — a kind added to the journal but not here — is an error so the
 // caller can fail closed rather than emit an untyped event; the compiler
 // cannot flag the non-exhaustive switch when the enum grows.
-func toRoomEvents(entries []journal.Entry) ([]roomEvent, error) {
+func toRoomEvents(entries []persistence.TimelineEntry) ([]roomEvent, error) {
 	out := make([]roomEvent, len(entries))
 	for i, entry := range entries {
 		person := &eventPerson{ID: entry.User.Code.FormatUser(), Name: entry.User.Name}
@@ -188,14 +188,14 @@ func toRoomEvents(entries []journal.Entry) ([]roomEvent, error) {
 			Timestamp: entry.OccurredAt.UnixMilli(),
 		}
 		switch entry.Kind {
-		case journal.EntryMessage:
+		case persistence.EntryMessage:
 			event.Type = "message"
 			event.Sender = person
 			event.Text = entry.Text
-		case journal.EntryMemberJoined:
+		case persistence.EntryMemberJoined:
 			event.Type = "member_joined"
 			event.User = person
-		case journal.EntryMemberLeft:
+		case persistence.EntryMemberLeft:
 			event.Type = "member_left"
 			event.User = person
 		default:

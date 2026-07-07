@@ -7,7 +7,6 @@ import (
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -26,7 +25,7 @@ type TimelineQuery struct {
 // whether at least one older event follows the last entry, so the handler can
 // emit a continuation cursor.
 type TimelinePage struct {
-	Events  []journal.Entry
+	Events  []persistence.TimelineEntry
 	HasMore bool
 }
 
@@ -47,7 +46,7 @@ type RoomTimeline interface {
 // the gateway only reads events, never mints them.
 type roomTimelineReader struct {
 	members *persistence.MembershipRepo
-	journal *journal.Journal
+	journal *persistence.Journal
 	pool    postgres.Querier
 }
 
@@ -55,7 +54,7 @@ type roomTimelineReader struct {
 func NewRoomTimelineReader(pool postgres.Querier) RoomTimeline {
 	return roomTimelineReader{
 		members: persistence.NewMembershipRepo(),
-		journal: journal.New(nil),
+		journal: persistence.NewJournal(nil),
 		pool:    pool,
 	}
 }
@@ -72,7 +71,7 @@ func (r roomTimelineReader) IsMember(ctx context.Context, roomID id.RoomID, user
 }
 
 func (r roomTimelineReader) Events(ctx context.Context, query TimelineQuery) (TimelinePage, error) {
-	entries, hasMore, err := r.journal.Timeline(ctx, r.pool, query.RoomID, journal.TimelineParams{
+	entries, hasMore, err := r.journal.Timeline(ctx, r.pool, query.RoomID, persistence.TimelineParams{
 		Query:  query.Query,
 		Before: query.Before,
 		Limit:  query.Limit,

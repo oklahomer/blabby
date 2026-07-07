@@ -10,7 +10,6 @@ import (
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -75,7 +74,7 @@ const membershipOpTimeout = 3 * time.Second
 // room_membership write and its derived event commit (or roll back) together.
 type membershipStore struct {
 	repo    *persistence.MembershipRepo
-	journal *journal.Journal
+	journal *persistence.Journal
 	tx      *postgres.Transactor
 	pool    postgres.Querier
 }
@@ -83,10 +82,10 @@ type membershipStore struct {
 // NewMembershipStore builds the production MembershipStore over pool, minting
 // event ids from ids (the worker-lease manager). Reads run against the pool
 // directly; writes run inside a transaction.
-func NewMembershipStore(pool *pgxpool.Pool, ids journal.IDSource) MembershipStore {
+func NewMembershipStore(pool *pgxpool.Pool, ids persistence.EventIDSource) MembershipStore {
 	return &membershipStore{
 		repo:    persistence.NewMembershipRepo(),
-		journal: journal.New(ids),
+		journal: persistence.NewJournal(ids),
 		tx:      postgres.NewTransactor(pool),
 		pool:    pool,
 	}
@@ -110,13 +109,13 @@ func (s *membershipStore) LoadMembers(ctx context.Context, roomID id.RoomID) ([]
 func (s *membershipStore) RecordJoin(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error) {
 	// Grain-initiated joins are ordinary members; owner seeding is the gateway's
 	// room-creation path, and role mutation belongs to a later phase.
-	return s.record(ctx, roomID, actor, journal.MemberJoined, func(ctx context.Context, q postgres.Querier) error {
+	return s.record(ctx, roomID, actor, persistence.MemberJoined, func(ctx context.Context, q postgres.Querier) error {
 		return s.repo.Add(ctx, q, roomID, actor, domain.MembershipRoleMember)
 	})
 }
 
 func (s *membershipStore) RecordLeave(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error) {
-	return s.record(ctx, roomID, actor, journal.MemberLeft, func(ctx context.Context, q postgres.Querier) error {
+	return s.record(ctx, roomID, actor, persistence.MemberLeft, func(ctx context.Context, q postgres.Querier) error {
 		return s.repo.Remove(ctx, q, roomID, actor.ID())
 	})
 }
@@ -131,7 +130,7 @@ func (s *membershipStore) record(
 	ctx context.Context,
 	roomID id.RoomID,
 	actor id.UserRef,
-	kind journal.MemberEventKind,
+	kind persistence.MemberEventKind,
 	mutate func(context.Context, postgres.Querier) error,
 ) (MembershipEvent, error) {
 	ctx, cancel := context.WithTimeout(ctx, membershipOpTimeout)

@@ -9,7 +9,6 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/persistence"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -39,7 +38,7 @@ func TestRoomCreationIntegration(t *testing.T) {
 		persistence.NewRoomRepo(ids),
 		persistence.NewUserRepo(ids),
 		persistence.NewMembershipRepo(),
-		journal.New(ids),
+		persistence.NewJournal(ids),
 		postgres.NewTransactor(pool),
 	)
 
