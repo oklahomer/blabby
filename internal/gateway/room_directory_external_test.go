@@ -7,7 +7,7 @@ import (
 
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 )
 
 // stubUserDirectory is a user.Directory for the cluster-backed integration
@@ -57,7 +57,7 @@ func (d *stubRoomDirectory) add(rawID int64, code, name string) {
 func (d *stubRoomDirectory) Resolve(_ context.Context, code id.PublicCode) (id.RoomID, error) {
 	info, ok := d.byCode[code.String()]
 	if !ok {
-		return id.RoomID{}, roomrepo.ErrRoomNotFound
+		return id.RoomID{}, persistence.ErrRoomNotFound
 	}
 	return info.ID, nil
 }

@@ -208,7 +208,7 @@ func TestListByUser(t *testing.T) {
 	if r.MetadataVersion != ts.UnixMicro() {
 		t.Errorf("MetadataVersion = %d, want %d (updated_at micros)", r.MetadataVersion, ts.UnixMicro())
 	}
-	// Joined-rooms are active-only, mirroring roomrepo's reads.
+	// Joined-rooms are active-only, mirroring the room repo's reads.
 	if !strings.Contains(gotSQL, "r.status = 'active'") {
 		t.Errorf("ListByUser SQL must filter active rooms: %s", gotSQL)
 	}

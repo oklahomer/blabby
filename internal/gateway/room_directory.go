@@ -5,8 +5,8 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
 )
 
 // RoomInfo is the gateway's view of a room for the catalogue: the internal id,
@@ -40,8 +40,8 @@ type RoomPage struct {
 
 // RoomDirectory translates the opaque, client-facing room codes (R…) to internal
 // RoomIDs and lists rooms for the catalogue. It is the gateway's seam over
-// roomrepo, so handlers never touch the database and no internal numeric id
-// reaches a client. Resolve reports roomrepo.ErrRoomNotFound for an unknown or
+// the persistence room repo, so handlers never touch the database and no internal numeric id
+// reaches a client. Resolve reports persistence.ErrRoomNotFound for an unknown or
 // inactive code.
 type RoomDirectory interface {
 	Resolve(ctx context.Context, code id.PublicCode) (id.RoomID, error)
@@ -49,18 +49,18 @@ type RoomDirectory interface {
 }
 
 // roomRepoDirectory is the production RoomDirectory: a read-only view of the room
-// table via roomrepo over the gateway's read pool. The gateway never creates
-// rooms, so roomrepo's id source is unused here.
+// table via the persistence room repo over the gateway's read pool. The gateway never creates
+// rooms, so the room repo's id source is unused here.
 type roomRepoDirectory struct {
-	repo *roomrepo.Repo
+	repo *persistence.RoomRepo
 	pool postgres.Querier
 }
 
 // NewRoomRepoDirectory builds a read-only RoomDirectory over pool. It owns the
-// roomrepo.Repo internally with a nil id source, because the gateway reads rooms
+// persistence.RoomRepo internally with a nil id source, because the gateway reads rooms
 // but never mints them — so callers never see the unused id source.
 func NewRoomRepoDirectory(pool postgres.Querier) RoomDirectory {
-	return roomRepoDirectory{repo: roomrepo.New(nil), pool: pool}
+	return roomRepoDirectory{repo: persistence.NewRoomRepo(nil), pool: pool}
 }
 
 func (d roomRepoDirectory) Resolve(ctx context.Context, code id.PublicCode) (id.RoomID, error) {
@@ -72,7 +72,7 @@ func (d roomRepoDirectory) Resolve(ctx context.Context, code id.PublicCode) (id.
 }
 
 func (d roomRepoDirectory) ListActive(ctx context.Context, query ListActiveQuery) (RoomPage, error) {
-	rooms, hasMore, err := d.repo.ListActive(ctx, d.pool, roomrepo.ListActiveParams{
+	rooms, hasMore, err := d.repo.ListActive(ctx, d.pool, persistence.RoomListActiveParams{
 		Query:   query.Query,
 		AfterID: query.After,
 		Limit:   query.Limit,
@@ -83,7 +83,7 @@ func (d roomRepoDirectory) ListActive(ctx context.Context, query ListActiveQuery
 	return RoomPage{Rooms: toRoomInfos(rooms), HasMore: hasMore}, nil
 }
 
-func toRoomInfos(rooms []roomrepo.Room) []RoomInfo {
+func toRoomInfos(rooms []persistence.Room) []RoomInfo {
 	out := make([]RoomInfo, len(rooms))
 	for i, r := range rooms {
 		out[i] = RoomInfo{ID: r.ID, Code: r.PublicCode, Name: r.DisplayName}

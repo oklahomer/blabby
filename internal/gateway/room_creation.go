@@ -11,7 +11,6 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
 )
 
 // RoomCreator creates a room owned by the acting user. The POST /rooms handler
@@ -25,7 +24,7 @@ type RoomCreator interface {
 // narrow repository surfaces room creation composes. Defined here (where they are
 // consumed) so the service tests fake repository methods, not SQL.
 type creationRooms interface {
-	Create(ctx context.Context, q postgres.Querier, params roomrepo.CreateParams) (roomrepo.Room, error)
+	Create(ctx context.Context, q postgres.Querier, params persistence.RoomCreateParams) (persistence.Room, error)
 }
 
 type creationUsers interface {
@@ -89,7 +88,7 @@ func (s *RoomCreationService) CreateRoom(ctx context.Context, actor id.UserID, n
 			return fmt.Errorf("room creation: creator ref: %w", err)
 		}
 
-		room, err := s.rooms.Create(ctx, q, roomrepo.CreateParams{Name: name, CreatedBy: actor})
+		room, err := s.rooms.Create(ctx, q, persistence.RoomCreateParams{Name: name, CreatedBy: actor})
 		if err != nil {
 			return err // ErrPublicCodeCollision drives the retry loop; else hard
 		}
@@ -109,7 +108,7 @@ func (s *RoomCreationService) CreateRoom(ctx context.Context, actor id.UserID, n
 		if err == nil {
 			return result, nil
 		}
-		if !errors.Is(err, roomrepo.ErrPublicCodeCollision) {
+		if !errors.Is(err, persistence.ErrRoomPublicCodeCollision) {
 			return RoomInfo{}, err
 		}
 		if attempt >= roomCreateCollisionRetryLimit {

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 )
 
 // stubRoomDirectory is an in-memory RoomDirectory seeded with the dev rooms
@@ -44,7 +44,7 @@ func (d *stubRoomDirectory) Resolve(_ context.Context, code id.PublicCode) (id.R
 	}
 	info, ok := d.byCode[code.String()]
 	if !ok {
-		return id.RoomID{}, roomrepo.ErrRoomNotFound
+		return id.RoomID{}, persistence.ErrRoomNotFound
 	}
 	return info.ID, nil
 }

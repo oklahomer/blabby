@@ -11,7 +11,6 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
 )
 
 // fakeCreationRooms returns one queued result per Create call, so a collision
@@ -19,17 +18,17 @@ import (
 type fakeCreationRooms struct {
 	results []roomResult
 	calls   int
-	last    roomrepo.CreateParams
+	last    persistence.RoomCreateParams
 }
 
 type roomResult struct {
-	room roomrepo.Room
+	room persistence.Room
 	err  error
 }
 
-func (f *fakeCreationRooms) Create(_ context.Context, _ postgres.Querier, params roomrepo.CreateParams) (roomrepo.Room, error) {
+func (f *fakeCreationRooms) Create(_ context.Context, _ postgres.Querier, params persistence.RoomCreateParams) (persistence.Room, error) {
 	if f.calls >= len(f.results) {
-		return roomrepo.Room{}, errors.New("unexpected Create")
+		return persistence.Room{}, errors.New("unexpected Create")
 	}
 	f.last = params
 	result := f.results[f.calls]
@@ -94,7 +93,7 @@ func creationUser(t *testing.T, displayName string) persistence.User {
 	return persistence.User{ID: uid, PublicCode: code, DisplayName: displayName}
 }
 
-func createdRoom(t *testing.T, rawID int64, code, name string) roomrepo.Room {
+func createdRoom(t *testing.T, rawID int64, code, name string) persistence.Room {
 	t.Helper()
 	rid, err := id.NewRoomID(rawID)
 	if err != nil {
@@ -104,7 +103,7 @@ func createdRoom(t *testing.T, rawID int64, code, name string) roomrepo.Room {
 	if err != nil {
 		t.Fatalf("ParsePublicCode: %v", err)
 	}
-	return roomrepo.Room{ID: rid, PublicCode: pc, DisplayName: name, Status: domain.RoomStatusActive}
+	return persistence.Room{ID: rid, PublicCode: pc, DisplayName: name, Status: domain.RoomStatusActive}
 }
 
 func creationName(t *testing.T, raw string) domain.RoomName {
@@ -153,7 +152,7 @@ func TestCreateRoom_CreatesOwnerAndFoundingEvent(t *testing.T) {
 func TestCreateRoom_RetriesPublicCodeCollision(t *testing.T) {
 	actor := mustUserID(t, "1")
 	rooms := &fakeCreationRooms{results: []roomResult{
-		{err: roomrepo.ErrPublicCodeCollision},
+		{err: persistence.ErrRoomPublicCodeCollision},
 		{room: createdRoom(t, 42, "K000000042", "Standup")},
 	}}
 	svc, tx := newCreationService(rooms, &fakeCreationUsers{user: creationUser(t, "alice")}, &fakeCreationMemberships{}, &fakeCreationJournal{})
@@ -172,12 +171,12 @@ func TestCreateRoom_RetriesPublicCodeCollision(t *testing.T) {
 func TestCreateRoom_ExhaustsCollisionRetries(t *testing.T) {
 	results := make([]roomResult, roomCreateCollisionRetryLimit+1)
 	for i := range results {
-		results[i] = roomResult{err: roomrepo.ErrPublicCodeCollision}
+		results[i] = roomResult{err: persistence.ErrRoomPublicCodeCollision}
 	}
 	svc, _ := newCreationService(&fakeCreationRooms{results: results}, &fakeCreationUsers{user: creationUser(t, "alice")}, &fakeCreationMemberships{}, &fakeCreationJournal{})
 
 	_, err := svc.CreateRoom(context.Background(), mustUserID(t, "1"), creationName(t, "Standup"))
-	if err == nil || !errors.Is(err, roomrepo.ErrPublicCodeCollision) {
+	if err == nil || !errors.Is(err, persistence.ErrRoomPublicCodeCollision) {
 		t.Fatalf("CreateRoom = %v, want exhausted-collision error wrapping the sentinel", err)
 	}
 }

@@ -11,7 +11,7 @@ import (
 )
 
 // IDSource mints the next Snowflake id for an event. It is the same one-method
-// contract roomrepo uses, satisfied by the worker-lease Manager, which mints only
+// contract the room repo uses, satisfied by the worker-lease Manager, which mints only
 // while it holds an unexpired lease (fail-closed).
 type IDSource interface {
 	Next() (int64, error)

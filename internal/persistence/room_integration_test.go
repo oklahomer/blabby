@@ -1,4 +1,4 @@
-package roomrepo
+package persistence
 
 import (
 	"context"
@@ -40,8 +40,8 @@ func TestRoomRepoIntegration(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM room WHERE id = $1", rawID)
 	})
 
-	repo := New(&stubIDSource{id: rawID})
-	created, err := repo.Create(ctx, pool, CreateParams{
+	repo := NewRoomRepo(&stubIDSource{id: rawID})
+	created, err := repo.Create(ctx, pool, RoomCreateParams{
 		Name:      mustRoomName(t, "Integration Room"),
 		CreatedBy: mustUserID(t, 1), // seed user alice
 	})
@@ -110,7 +110,7 @@ func TestRoomRepoIntegration(t *testing.T) {
 
 	// ListActive includes the freshly created active room and hides the
 	// archived one.
-	active, _, err := repo.ListActive(ctx, pool, ListActiveParams{Limit: 10000})
+	active, _, err := repo.ListActive(ctx, pool, RoomListActiveParams{Limit: 10000})
 	if err != nil {
 		t.Fatalf("ListActive: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestRoomRepoIntegration(t *testing.T) {
 	firstID := seedRoom(rawID+2, "Alpha "+marker)
 	secondID := seedRoom(rawID+3, "Beta "+marker)
 
-	page1, hasMore, err := repo.ListActive(ctx, pool, ListActiveParams{
+	page1, hasMore, err := repo.ListActive(ctx, pool, RoomListActiveParams{
 		Query: mustQuery(strings.ToUpper(marker)), Limit: 1,
 	})
 	if err != nil {
@@ -163,7 +163,7 @@ func TestRoomRepoIntegration(t *testing.T) {
 	if len(page1) != 1 || page1[0].ID != firstID || !hasMore {
 		t.Fatalf("page 1 = %v (hasMore=%t), want just room %d with more", roomIDs(page1), hasMore, firstID.Int64())
 	}
-	page2, hasMore, err := repo.ListActive(ctx, pool, ListActiveParams{
+	page2, hasMore, err := repo.ListActive(ctx, pool, RoomListActiveParams{
 		Query: mustQuery(strings.ToUpper(marker)), AfterID: page1[0].ID, Limit: 1,
 	})
 	if err != nil {
@@ -177,7 +177,7 @@ func TestRoomRepoIntegration(t *testing.T) {
 	// single-character wildcard, or the X-variant room would match too.
 	underscoreID := seedRoom(rawID+4, fmt.Sprintf("under_score%d", rawID))
 	seedRoom(rawID+5, fmt.Sprintf("underXscore%d", rawID))
-	escaped, _, err := repo.ListActive(ctx, pool, ListActiveParams{
+	escaped, _, err := repo.ListActive(ctx, pool, RoomListActiveParams{
 		Query: mustQuery(fmt.Sprintf("under_score%d", rawID)), Limit: 10,
 	})
 	if err != nil {

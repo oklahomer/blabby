@@ -42,10 +42,10 @@ var (
 // duplicate to its specific sentinel — a recoverable public_code clash, or a taken
 // email/handle.
 const (
-	uniqueViolation       = "23505"
-	publicCodeConstraint  = "service_user_public_code_key"
-	mailAddressConstraint = "service_user_mail_address_key"
-	handleNormConstraint  = "service_user_handle_norm_key"
+	uniqueViolation          = "23505"
+	userPublicCodeConstraint = "service_user_public_code_key"
+	mailAddressConstraint    = "service_user_mail_address_key"
+	handleNormConstraint     = "service_user_handle_norm_key"
 )
 
 // userColumns is the fixed projection scanUser expects, in order. status is cast
@@ -222,7 +222,7 @@ func classifyCreateError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 		switch pgErr.ConstraintName {
-		case publicCodeConstraint:
+		case userPublicCodeConstraint:
 			return ErrUserPublicCodeCollision
 		case mailAddressConstraint:
 			return ErrMailAddressTaken

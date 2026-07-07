@@ -42,7 +42,6 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
 	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/persistence/workerlease"
 	"github.com/oklahomer/blabby/internal/verification"
@@ -280,7 +279,7 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	// same lease, writing the room, its owner membership, and the member_joined
 	// timeline event in one transaction.
 	roomCreation := gateway.NewRoomCreationService(
-		roomrepo.New(leaseManager),
+		persistence.NewRoomRepo(leaseManager),
 		persistence.NewUserRepo(leaseManager),
 		membershiprepo.New(),
 		journal.New(leaseManager),

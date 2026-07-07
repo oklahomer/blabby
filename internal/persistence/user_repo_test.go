@@ -123,7 +123,7 @@ func createParams(t *testing.T) UserCreateParams {
 	}
 }
 
-func TestCreate_Success(t *testing.T) {
+func TestUserCreate_Success(t *testing.T) {
 	const uid int64 = 9000001
 	var gotSQL string
 	var gotArgs []any
@@ -166,7 +166,7 @@ func TestCreate_Success(t *testing.T) {
 	}
 }
 
-func TestCreate_MintErrorSkipsDB(t *testing.T) {
+func TestUserCreate_MintErrorSkipsDB(t *testing.T) {
 	sentinel := errors.New("lease expired")
 	calls := 0
 	fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
@@ -183,14 +183,14 @@ func TestCreate_MintErrorSkipsDB(t *testing.T) {
 	}
 }
 
-func TestCreate_ReportsPublicCodeCollision(t *testing.T) {
+func TestUserCreate_ReportsPublicCodeCollision(t *testing.T) {
 	// Create does not retry in place (that would break inside a caller's
 	// transaction); it reports the collision so the caller re-runs the operation.
 	calls := 0
 	fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
 		calls++
 		return fakeRow{scan: func(...any) error {
-			return &pgconn.PgError{Code: uniqueViolation, ConstraintName: publicCodeConstraint}
+			return &pgconn.PgError{Code: uniqueViolation, ConstraintName: userPublicCodeConstraint}
 		}}
 	}}
 
@@ -203,7 +203,7 @@ func TestCreate_ReportsPublicCodeCollision(t *testing.T) {
 	}
 }
 
-func TestCreate_ClassifiesDuplicateByConstraint(t *testing.T) {
+func TestUserCreate_ClassifiesDuplicateByConstraint(t *testing.T) {
 	// A 23505 is mapped to a specific sentinel by the constraint name, so
 	// registration can distinguish a taken email from a taken handle.
 	tests := []struct {
@@ -235,7 +235,7 @@ func TestCreate_ClassifiesDuplicateByConstraint(t *testing.T) {
 	}
 }
 
-func TestCreate_PrimaryKeyCollisionIsHardError(t *testing.T) {
+func TestUserCreate_PrimaryKeyCollisionIsHardError(t *testing.T) {
 	// A 23505 on the primary key (a duplicate minted UserID) is not an expected
 	// duplicate: it must surface as a hard error, not any of the duplicate sentinels.
 	fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
@@ -255,7 +255,7 @@ func TestCreate_PrimaryKeyCollisionIsHardError(t *testing.T) {
 	}
 }
 
-func TestCreate_PropagatesHardError(t *testing.T) {
+func TestUserCreate_PropagatesHardError(t *testing.T) {
 	sentinel := errors.New("db down")
 	calls := 0
 	fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {

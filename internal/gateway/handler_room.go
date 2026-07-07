@@ -13,7 +13,7 @@ import (
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 )
 
 const (
@@ -212,7 +212,7 @@ func (g *Gateway) requireRoomID(w http.ResponseWriter, r *http.Request, endpoint
 	}
 	roomID, err := g.rooms.Resolve(r.Context(), code)
 	switch {
-	case errors.Is(err, roomrepo.ErrRoomNotFound):
+	case errors.Is(err, persistence.ErrRoomNotFound):
 		slog.Warn("room handler rejected request",
 			"endpoint", endpoint, "method", r.Method,
 			"user_id", userID, "reason", "room_not_found")

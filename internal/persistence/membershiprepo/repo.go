@@ -64,7 +64,7 @@ ORDER BY r.id`
 // (joined to room for public_code/name/status), ordered by id. The User grain
 // hydrates its joined-rooms cache from this on activation. Archived rooms are
 // omitted — an inactive room is not a usable joined room (mirrors the active-only
-// reads in roomrepo).
+// reads in the room repo).
 func (r *Repo) ListByUser(ctx context.Context, q postgres.Querier, userID id.UserID) ([]domain.RoomRef, error) {
 	rows, err := q.Query(ctx, listByUserSQL, userID.Int64())
 	if err != nil {
