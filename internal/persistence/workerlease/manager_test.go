@@ -82,13 +82,34 @@ func (f *fakeStore) acquires() int {
 	return f.acquireCalls
 }
 
+func (f *fakeStore) releasedOK() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.released
+}
+
+// waitFor polls cond until it holds or a short deadline elapses. Used to assert on
+// effects the lease loop produces asynchronously (e.g. release on ctx cancellation),
+// which have no channel to synchronize on from the test.
+func waitFor(t *testing.T, cond func() bool, what string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
 // newTestManager builds a manager wired to a fake clock starting well after the
 // epoch (so ids stay positive) with a 30s ttl / 5s margin (deadline = send + 25s).
 //
-// Tests built on it call Start and then drive the lease loop by calling tick
-// directly. That stays deterministic because the real heartbeat uses the default
-// 10s interval, which never fires within these sub-second tests — so the manual
-// tick is the only one.
+// Tests built on it call Start and then drive the lease loop by calling beat
+// directly. That stays deterministic because the real loop uses the default 10s
+// renew interval, which never fires within these sub-second tests — so the manual
+// beat is the only one.
 func newTestManager(t *testing.T, store LeaseStore, clk *fakeClock) *Manager {
 	t.Helper()
 	clk.t = snowflake.Epoch().Add(24 * time.Hour)
@@ -168,7 +189,7 @@ func TestRenewExtendsTheDeadline(t *testing.T) {
 	defer m.Stop()
 
 	clk.advance(20 * time.Second) // still within the initial deadline (25s)
-	m.tick(context.Background())  // renew → new deadline = now + 25s = 45s
+	m.beat(context.Background())  // renew → new deadline = now + 25s = 45s
 
 	clk.advance(20 * time.Second) // now 40s: past the old 25s deadline, within the new 45s
 	if _, err := m.Next(); err != nil {
@@ -188,7 +209,7 @@ func TestTransientRenewErrorDoesNotExtendTheDeadline(t *testing.T) {
 	// A transient renew error is logged and leaves the deadline untouched.
 	store.set(func(s *fakeStore) { s.renewErr = errors.New("db blip") })
 	clk.advance(10 * time.Second) // now 10s, still within the 25s deadline
-	m.tick(context.Background())
+	m.beat(context.Background())
 	if _, err := m.Next(); err != nil {
 		t.Fatalf("within the deadline after a transient error, Next should mint: %v", err)
 	}
@@ -214,14 +235,14 @@ func TestLeaseLossHaltsThenReacquires(t *testing.T) {
 
 	// Lease lost AND no capacity to re-acquire → minting halts.
 	store.set(func(s *fakeStore) { s.renewHeld = false; s.acquireErr = ErrNoCapacity })
-	m.tick(context.Background())
+	m.beat(context.Background())
 	if _, err := m.Next(); !errors.Is(err, snowflake.ErrLeaseExpired) {
 		t.Fatalf("after loss without capacity, Next = %v, want ErrLeaseExpired", err)
 	}
 
 	// Capacity returns → the next beat re-acquires and minting resumes.
 	store.set(func(s *fakeStore) { s.acquireErr = nil })
-	m.tick(context.Background())
+	m.beat(context.Background())
 	if _, err := m.Next(); err != nil {
 		t.Fatalf("after re-acquire, Next should mint, got %v", err)
 	}
@@ -250,6 +271,84 @@ func TestStartStopReleasesTheLease(t *testing.T) {
 	m.Stop()
 	if !store.released {
 		t.Fatal("Stop did not release the lease")
+	}
+}
+
+func TestContextCancellationReleasesTheLease(t *testing.T) {
+	clk := &fakeClock{}
+	clk.t = snowflake.Epoch().Add(24 * time.Hour)
+	store := &fakeStore{renewHeld: true}
+	m, err := NewManager(store, "test", WithClock(clk.now))
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop() // no-op after the loop has already exited
+
+	// Cancelling the Start context tears the loop down: the lease is released and
+	// minting halts, without a Stop call.
+	cancel()
+	waitFor(t, func() bool { return store.releasedOK() }, "lease released after ctx cancellation")
+	if _, err := m.Next(); !errors.Is(err, ErrNotStarted) {
+		t.Fatalf("Next after ctx cancellation: got %v, want ErrNotStarted", err)
+	}
+}
+
+// blockingReleaseStore acquires and renews normally but blocks Release until its
+// context is cancelled, then reports whether that cancellation was observed. It lets
+// a test prove Stop gives up on a stuck release after releaseTimeout instead of
+// hanging on the loop's teardown forever.
+type blockingReleaseStore struct {
+	releaseObservedCtx chan struct{}
+}
+
+var _ LeaseStore = (*blockingReleaseStore)(nil)
+
+func (s *blockingReleaseStore) Acquire(context.Context, string, time.Duration) (Lease, error) {
+	return Lease{WorkerID: 0}, nil
+}
+
+func (s *blockingReleaseStore) Renew(context.Context, Lease, time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (s *blockingReleaseStore) Release(ctx context.Context, _ Lease) error {
+	<-ctx.Done()
+	close(s.releaseObservedCtx)
+	return ctx.Err()
+}
+
+func TestStopReturnsWhenReleaseBlocks(t *testing.T) {
+	clk := &fakeClock{}
+	clk.t = snowflake.Epoch().Add(24 * time.Hour)
+	store := &blockingReleaseStore{releaseObservedCtx: make(chan struct{})}
+	m, err := NewManager(store, "test", WithClock(clk.now))
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	m.releaseTimeout = 50 * time.Millisecond // keep the test well under a second
+
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Stop's teardown release blocks; it must give up after releaseTimeout rather
+	// than hang. A generous guard distinguishes "bounded" from "hung".
+	stopped := make(chan struct{})
+	go func() { m.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop hung on a blocked release instead of giving up after releaseTimeout")
+	}
+	select {
+	case <-store.releaseObservedCtx:
+	default:
+		t.Fatal("release was not driven by its bounded context")
 	}
 }
 
