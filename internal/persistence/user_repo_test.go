@@ -3,7 +3,6 @@ package persistence
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,104 +15,10 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
-// fakeQuerier is an in-memory postgres.Querier for exercising the repo's control
-// flow without a database. queryRow drives the single-row paths (Create, the
-// FindBy* lookups, ResolveByPublicCode); exec drives SetStatus.
-type fakeQuerier struct {
-	queryRow func(sql string, args ...any) pgx.Row
-	query    func(sql string, args ...any) (pgx.Rows, error)
-	exec     func(sql string, args ...any) (pgconn.CommandTag, error)
-}
-
-var _ postgres.Querier = (*fakeQuerier)(nil)
-
-func (f *fakeQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	return f.exec(sql, args...)
-}
-
-func (f *fakeQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
-	return f.query(sql, args...)
-}
-
-func (f *fakeQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
-	return f.queryRow(sql, args...)
-}
-
-// fakeRow is a one-row pgx.Row stub. Set scan to compute the result (e.g. to
-// capture query args or return a custom error); or set values for a fixed row, or
-// err for a fixed failure.
-type fakeRow struct {
-	scan   func(dest ...any) error
-	values []any
-	err    error
-}
-
-func (r fakeRow) Scan(dest ...any) error {
-	switch {
-	case r.scan != nil:
-		return r.scan(dest...)
-	case r.err != nil:
-		return r.err
-	default:
-		return assignAll(dest, r.values)
-	}
-}
-
-// assignAll copies column values into the Scan destinations, matching the types
-// scanUser passes (*int64, *string, *[]byte, *time.Time) plus the bare *int64
-// ResolveByPublicCode scans.
-func assignAll(dest []any, values []any) error {
-	if len(dest) != len(values) {
-		return fmt.Errorf("fake scan: %d destinations, %d values", len(dest), len(values))
-	}
-	for i := range dest {
-		switch d := dest[i].(type) {
-		case *int64:
-			*d = values[i].(int64)
-		case *int:
-			*d = values[i].(int)
-		case *string:
-			*d = values[i].(string)
-		case *bool:
-			*d = values[i].(bool)
-		case *[]byte:
-			*d = values[i].([]byte)
-		case *time.Time:
-			*d = values[i].(time.Time)
-		case **time.Time:
-			*d = values[i].(*time.Time)
-		default:
-			return fmt.Errorf("fake scan: unsupported destination %T", dest[i])
-		}
-	}
-	return nil
-}
-
 // userValues builds one row in the scanUser column order.
 func userValues(uid int64, code, mail, handle, handleNorm, displayName string, hash []byte, status string) []any {
 	ts := time.Unix(0, 0).UTC()
 	return []any{uid, code, mail, handle, handleNorm, displayName, hash, status, ts, ts}
-}
-
-type stubIDSource struct {
-	id  int64
-	err error
-}
-
-func (s stubIDSource) Next() (int64, error) {
-	if s.err != nil {
-		return 0, s.err
-	}
-	return s.id, nil
-}
-
-func mustUserID(t *testing.T, v int64) id.UserID {
-	t.Helper()
-	uid, err := id.NewUserID(v)
-	if err != nil {
-		t.Fatalf("NewUserID(%d): %v", v, err)
-	}
-	return uid
 }
 
 func mustMailAddress(t *testing.T, raw string) domain.MailAddress {

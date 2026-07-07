@@ -14,32 +14,6 @@ import (
 	"github.com/oklahomer/blabby/internal/id"
 )
 
-// fakeRows replays a fixed set of rows (each a slice of column values in the
-// scanRoom order) through the pgx.Rows contract collectRooms depends on.
-type fakeRows struct {
-	rows [][]any
-	idx  int
-	err  error
-}
-
-func (f *fakeRows) Close()                                       {}
-func (f *fakeRows) Err() error                                   { return f.err }
-func (f *fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
-func (f *fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
-func (f *fakeRows) Values() ([]any, error)                       { return nil, nil }
-func (f *fakeRows) RawValues() [][]byte                          { return nil }
-func (f *fakeRows) Conn() *pgx.Conn                              { return nil }
-
-func (f *fakeRows) Next() bool {
-	if f.idx >= len(f.rows) {
-		return false
-	}
-	f.idx++
-	return true
-}
-
-func (f *fakeRows) Scan(dest ...any) error { return assignAll(dest, f.rows[f.idx-1]) }
-
 // roomValues builds one row in the scanRoom column order.
 func roomValues(rid int64, code, name string, createdBy int64, status string) []any {
 	ts := time.Unix(0, 0).UTC()
@@ -53,15 +27,6 @@ func mustRoomName(t *testing.T, raw string) domain.RoomName {
 		t.Fatalf("NewRoomName(%q): %v", raw, err)
 	}
 	return name
-}
-
-func mustRoomID(t *testing.T, v int64) id.RoomID {
-	t.Helper()
-	rid, err := id.NewRoomID(v)
-	if err != nil {
-		t.Fatalf("NewRoomID(%d): %v", v, err)
-	}
-	return rid
 }
 
 func TestRoomCreate_Success(t *testing.T) {

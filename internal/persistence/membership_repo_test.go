@@ -11,25 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/oklahomer/blabby/internal/domain"
-	"github.com/oklahomer/blabby/internal/id"
 )
-
-func mustUserRef(t *testing.T, rawID int64, name string) id.UserRef {
-	t.Helper()
-	uid, err := id.NewUserID(rawID)
-	if err != nil {
-		t.Fatalf("NewUserID(%d): %v", rawID, err)
-	}
-	code, err := id.NewPublicCode()
-	if err != nil {
-		t.Fatalf("NewPublicCode: %v", err)
-	}
-	ref, err := id.NewUserRef(uid, code, name)
-	if err != nil {
-		t.Fatalf("NewUserRef(%d,%q): %v", rawID, name, err)
-	}
-	return ref
-}
 
 func TestListByRoom(t *testing.T) {
 	ts := time.Unix(100, 0).UTC()
