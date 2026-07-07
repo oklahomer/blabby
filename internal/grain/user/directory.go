@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
 )
 
 // resolveTimeout bounds a single directory lookup. It is owned here (the callee),
@@ -17,17 +17,17 @@ import (
 const resolveTimeout = 3 * time.Second
 
 // repoDirectory is the production Directory: it resolves a user's display name
-// from service_user via userrepo over the backend's pool, so every cluster member
+// from service_user via the persistence user repo over the backend's pool, so every cluster member
 // resolves the same profile from the one shared source.
 type repoDirectory struct {
-	repo *userrepo.Repo
+	repo *persistence.UserRepo
 	pool postgres.Querier
 }
 
-// NewRepoDirectory builds a Directory over pool. It owns a userrepo.Repo with a
+// NewRepoDirectory builds a Directory over pool. It owns a persistence.UserRepo with a
 // nil id source: resolving a profile reads accounts but never mints them.
 func NewRepoDirectory(pool postgres.Querier) Directory {
-	return repoDirectory{repo: userrepo.New(nil), pool: pool}
+	return repoDirectory{repo: persistence.NewUserRepo(nil), pool: pool}
 }
 
 func (d repoDirectory) Resolve(ctx context.Context, userID id.UserID) (id.UserRef, error) {
@@ -35,7 +35,7 @@ func (d repoDirectory) Resolve(ctx context.Context, userID id.UserID) (id.UserRe
 	defer cancel()
 
 	user, err := d.repo.FindByID(ctx, d.pool, userID)
-	if errors.Is(err, userrepo.ErrUserNotFound) {
+	if errors.Is(err, persistence.ErrUserNotFound) {
 		return id.UserRef{}, ErrProfileNotFound
 	}
 	if err != nil {

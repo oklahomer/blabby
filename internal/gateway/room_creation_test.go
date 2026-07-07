@@ -8,10 +8,10 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
 )
 
 // fakeCreationRooms returns one queued result per Create call, so a collision
@@ -38,11 +38,11 @@ func (f *fakeCreationRooms) Create(_ context.Context, _ postgres.Querier, params
 }
 
 type fakeCreationUsers struct {
-	user userrepo.User
+	user persistence.User
 	err  error
 }
 
-func (f *fakeCreationUsers) FindByID(context.Context, postgres.Querier, id.UserID) (userrepo.User, error) {
+func (f *fakeCreationUsers) FindByID(context.Context, postgres.Querier, id.UserID) (persistence.User, error) {
 	return f.user, f.err
 }
 
@@ -81,7 +81,7 @@ func (f *fakeCreationJournal) AppendMembership(_ context.Context, _ postgres.Que
 	return eid, time.Unix(1000, 0), nil
 }
 
-func creationUser(t *testing.T, displayName string) userrepo.User {
+func creationUser(t *testing.T, displayName string) persistence.User {
 	t.Helper()
 	uid, err := id.NewUserID(1)
 	if err != nil {
@@ -91,7 +91,7 @@ func creationUser(t *testing.T, displayName string) userrepo.User {
 	if err != nil {
 		t.Fatalf("ParsePublicCode: %v", err)
 	}
-	return userrepo.User{ID: uid, PublicCode: code, DisplayName: displayName}
+	return persistence.User{ID: uid, PublicCode: code, DisplayName: displayName}
 }
 
 func createdRoom(t *testing.T, rawID int64, code, name string) roomrepo.Room {
@@ -189,7 +189,7 @@ func TestCreateRoom_FailuresRollBack(t *testing.T) {
 		members *fakeCreationMemberships
 		jrnl    *fakeCreationJournal
 	}{
-		{name: "creator lookup fails", users: &fakeCreationUsers{err: userrepo.ErrUserNotFound}, members: &fakeCreationMemberships{}, jrnl: &fakeCreationJournal{}},
+		{name: "creator lookup fails", users: &fakeCreationUsers{err: persistence.ErrUserNotFound}, members: &fakeCreationMemberships{}, jrnl: &fakeCreationJournal{}},
 		{name: "owner membership write fails", users: &fakeCreationUsers{user: creationUser(t, "alice")}, members: &fakeCreationMemberships{err: errors.New("insert failed")}, jrnl: &fakeCreationJournal{}},
 		{name: "founding event append fails", users: &fakeCreationUsers{user: creationUser(t, "alice")}, members: &fakeCreationMemberships{}, jrnl: &fakeCreationJournal{err: errors.New("append failed")}},
 	}

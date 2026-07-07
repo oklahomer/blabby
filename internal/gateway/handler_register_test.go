@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/internal/errcode"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 )
 
@@ -70,7 +70,7 @@ func TestHandleRegister(t *testing.T) {
 		{
 			name:          "duplicate email returns 409",
 			body:          validBody,
-			registrar:     &fakeRegistrar{err: userrepo.ErrMailAddressTaken},
+			registrar:     &fakeRegistrar{err: persistence.ErrMailAddressTaken},
 			wantStatus:    http.StatusConflict,
 			wantErrorCode: errcode.EmailAlreadyRegistered,
 			wantReached:   true,
@@ -78,7 +78,7 @@ func TestHandleRegister(t *testing.T) {
 		{
 			name:          "duplicate handle returns 409",
 			body:          validBody,
-			registrar:     &fakeRegistrar{err: userrepo.ErrHandleTaken},
+			registrar:     &fakeRegistrar{err: persistence.ErrHandleTaken},
 			wantStatus:    http.StatusConflict,
 			wantErrorCode: errcode.HandleAlreadyTaken,
 			wantReached:   true,

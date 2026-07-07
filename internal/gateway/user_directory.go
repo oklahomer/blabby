@@ -11,8 +11,8 @@ import (
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
 )
 
 // dummyHashPassword is lazily hashed once to seed the timing-equalizer. Its
@@ -33,13 +33,13 @@ var dummyPasswordHash = sync.OnceValue(func() []byte {
 // context, so a stalled database must not block the connection actor.
 const authDBTimeout = 3 * time.Second
 
-// UserRepoDirectory is the gateway's seam over userrepo for authentication: it
+// UserRepoDirectory is the gateway's seam over the persistence user repo for authentication: it
 // verifies login credentials and resolves the U… token subject to an internal
 // UserID. One type satisfies both auth.CredentialVerifier and
 // auth.PublicCodeResolver — the gateway builds it once and passes it as both,
 // the way the retired in-memory store backed both lookup and resolution.
 type UserRepoDirectory struct {
-	repo      *userrepo.Repo
+	repo      *persistence.UserRepo
 	pool      postgres.Querier
 	dummyHash []byte
 }
@@ -50,12 +50,12 @@ var (
 )
 
 // NewUserRepoDirectory builds a UserRepoDirectory over pool. It owns a
-// userrepo.Repo with a nil id source: login and token validation read accounts
+// persistence.UserRepo with a nil id source: login and token validation read accounts
 // but never mint them. It precomputes a dummy bcrypt hash so a login for an
 // unknown email spends the same time as one for a known email with a wrong
 // password, denying a timing oracle for account enumeration.
 func NewUserRepoDirectory(pool postgres.Querier) *UserRepoDirectory {
-	return &UserRepoDirectory{repo: userrepo.New(nil), pool: pool, dummyHash: dummyPasswordHash()}
+	return &UserRepoDirectory{repo: persistence.NewUserRepo(nil), pool: pool, dummyHash: dummyPasswordHash()}
 }
 
 // VerifyCredentials looks up the account by normalized email and checks the
@@ -80,7 +80,7 @@ func (d *UserRepoDirectory) VerifyCredentials(ctx context.Context, mailAddress, 
 	}
 
 	user, err := d.repo.FindByEmail(ctx, d.pool, addr)
-	if errors.Is(err, userrepo.ErrUserNotFound) {
+	if errors.Is(err, persistence.ErrUserNotFound) {
 		// Compare against the dummy hash so a missing account is not faster to
 		// reject than a wrong password. The result is intentionally discarded.
 		_ = auth.VerifyPassword(d.dummyHash, password)
@@ -120,7 +120,7 @@ func (d *UserRepoDirectory) ResolveUserID(ctx context.Context, code id.PublicCod
 	defer cancel()
 
 	userID, err := d.repo.ResolveByPublicCode(ctx, d.pool, code)
-	if errors.Is(err, userrepo.ErrUserNotFound) {
+	if errors.Is(err, persistence.ErrUserNotFound) {
 		return id.UserID{}, auth.ErrPublicCodeUnknown
 	}
 	if err != nil {

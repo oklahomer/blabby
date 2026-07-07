@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/oklahomer/blabby/internal/domain"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
 	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 )
 
@@ -51,7 +51,7 @@ func TestRegistrationIntegration(t *testing.T) {
 
 	sender := &recordingVerificationSender{}
 	svc := NewRegistrationService(
-		userrepo.New(&incrementingIDSource{next: base}),
+		persistence.NewUserRepo(&incrementingIDSource{next: base}),
 		verifyrepo.New(),
 		sender,
 		postgres.NewTransactor(pool),
@@ -75,7 +75,7 @@ func TestRegistrationIntegration(t *testing.T) {
 		t.Fatalf("sender got %d calls to %q, want 1 to %q", sender.calls, sender.to.String(), mail.String())
 	}
 
-	users := userrepo.New(nil)
+	users := persistence.NewUserRepo(nil)
 	created, err := users.FindByEmail(ctx, pool, mail)
 	if err != nil {
 		t.Fatalf("FindByEmail after register: %v", err)
@@ -124,7 +124,7 @@ func TestRegistrationIntegration(t *testing.T) {
 
 	// A different email reusing the same handle is rejected.
 	otherMail := mustIntegrationMail(t, "itest2-"+suffix+"@example.com")
-	if _, err := svc.Register(ctx, RegisterParams{MailAddress: otherMail, Handle: handle, Password: "supersecret12"}); !errors.Is(err, userrepo.ErrHandleTaken) {
+	if _, err := svc.Register(ctx, RegisterParams{MailAddress: otherMail, Handle: handle, Password: "supersecret12"}); !errors.Is(err, persistence.ErrHandleTaken) {
 		t.Fatalf("Register(duplicate handle) = %v, want ErrHandleTaken", err)
 	}
 }

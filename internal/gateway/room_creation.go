@@ -8,10 +8,10 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
 )
 
 // RoomCreator creates a room owned by the acting user. The POST /rooms handler
@@ -29,7 +29,7 @@ type creationRooms interface {
 }
 
 type creationUsers interface {
-	FindByID(ctx context.Context, q postgres.Querier, userID id.UserID) (userrepo.User, error)
+	FindByID(ctx context.Context, q postgres.Querier, userID id.UserID) (persistence.User, error)
 }
 
 type creationMemberships interface {

@@ -8,14 +8,14 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
 	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/verification"
 )
 
 type userResult struct {
-	user userrepo.User
+	user persistence.User
 	err  error
 }
 
@@ -23,25 +23,25 @@ type fakeRegistrationUsers struct {
 	findResults    []userResult
 	createResults  []userResult
 	setStatusErr   error
-	lastCreate     userrepo.CreateParams
+	lastCreate     persistence.UserCreateParams
 	lastSetStatus  domain.UserStatus
 	findCalls      int
 	createCalls    int
 	setStatusCalls int
 }
 
-func (f *fakeRegistrationUsers) FindByEmail(context.Context, postgres.Querier, domain.MailAddress) (userrepo.User, error) {
+func (f *fakeRegistrationUsers) FindByEmail(context.Context, postgres.Querier, domain.MailAddress) (persistence.User, error) {
 	if f.findCalls >= len(f.findResults) {
-		return userrepo.User{}, errors.New("unexpected FindByEmail")
+		return persistence.User{}, errors.New("unexpected FindByEmail")
 	}
 	result := f.findResults[f.findCalls]
 	f.findCalls++
 	return result.user, result.err
 }
 
-func (f *fakeRegistrationUsers) Create(_ context.Context, _ postgres.Querier, params userrepo.CreateParams) (userrepo.User, error) {
+func (f *fakeRegistrationUsers) Create(_ context.Context, _ postgres.Querier, params persistence.UserCreateParams) (persistence.User, error) {
 	if f.createCalls >= len(f.createResults) {
-		return userrepo.User{}, errors.New("unexpected Create")
+		return persistence.User{}, errors.New("unexpected Create")
 	}
 	f.lastCreate = params
 	result := f.createResults[f.createCalls]
@@ -161,12 +161,12 @@ func registrationParams(t *testing.T) RegisterParams {
 	}
 }
 
-func pendingAlice(t *testing.T) userrepo.User {
+func pendingAlice(t *testing.T) persistence.User {
 	t.Helper()
 	return registrationUser(t, 42, "A000000042", domain.UserStatusPending)
 }
 
-func registrationUser(t *testing.T, rawID int64, rawCode string, status domain.UserStatus) userrepo.User {
+func registrationUser(t *testing.T, rawID int64, rawCode string, status domain.UserStatus) persistence.User {
 	t.Helper()
 	userID, err := id.NewUserID(rawID)
 	if err != nil {
@@ -185,7 +185,7 @@ func registrationUser(t *testing.T, rawID int64, rawCode string, status domain.U
 		t.Fatalf("NewHandle: %v", err)
 	}
 	now := time.Unix(0, 0).UTC()
-	return userrepo.User{
+	return persistence.User{
 		ID:           userID,
 		PublicCode:   code,
 		MailAddress:  mail,
@@ -221,7 +221,7 @@ func TestRegistrationService_NewAccountSendsPIN(t *testing.T) {
 	sender := &recordingVerificationSender{}
 	users := &fakeRegistrationUsers{
 		findResults: []userResult{
-			{err: userrepo.ErrUserNotFound},
+			{err: persistence.ErrUserNotFound},
 		},
 		createResults: []userResult{
 			{user: registrationUser(t, 99, "A000000099", domain.UserStatusPending)},
@@ -290,11 +290,11 @@ func TestRegistrationService_EmailInsertRaceRetriesAsPendingResend(t *testing.T)
 	sender := &recordingVerificationSender{}
 	users := &fakeRegistrationUsers{
 		findResults: []userResult{
-			{err: userrepo.ErrUserNotFound},
+			{err: persistence.ErrUserNotFound},
 			{user: pendingAlice(t)},
 		},
 		createResults: []userResult{
-			{err: userrepo.ErrMailAddressTaken},
+			{err: persistence.ErrMailAddressTaken},
 		},
 	}
 	verify := &fakeRegistrationVerifications{

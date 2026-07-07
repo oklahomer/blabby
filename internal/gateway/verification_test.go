@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/oklahomer/blabby/internal/domain"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/verification"
 )
@@ -146,7 +146,7 @@ func TestVerify_UnknownAccountOrChallengeIsUniform(t *testing.T) {
 	}{
 		{
 			name:   "no account",
-			users:  &fakeRegistrationUsers{findResults: []userResult{{err: userrepo.ErrUserNotFound}}},
+			users:  &fakeRegistrationUsers{findResults: []userResult{{err: persistence.ErrUserNotFound}}},
 			verify: &fakeRegistrationVerifications{},
 		},
 		{
@@ -188,7 +188,7 @@ func TestResend_NonPendingOrUnknownIsSilentNoOp(t *testing.T) {
 		users *fakeRegistrationUsers
 	}{
 		{"active account", &fakeRegistrationUsers{findResults: []userResult{{user: registrationUser(t, 42, "A000000042", domain.UserStatusActive)}}}},
-		{"unknown account", &fakeRegistrationUsers{findResults: []userResult{{err: userrepo.ErrUserNotFound}}}},
+		{"unknown account", &fakeRegistrationUsers{findResults: []userResult{{err: persistence.ErrUserNotFound}}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

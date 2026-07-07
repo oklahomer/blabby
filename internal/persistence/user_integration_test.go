@@ -1,4 +1,4 @@
-package userrepo
+package persistence
 
 import (
 	"context"
@@ -41,8 +41,8 @@ func TestUserRepoIntegration(t *testing.T) {
 	mail := mustMailAddress(t, fmt.Sprintf("itest-%d@example.com", rawID))
 	handle := mustHandle(t, fmt.Sprintf("itest_%d", rawID))
 
-	repo := New(&stubIDSource{id: rawID})
-	created, err := repo.Create(ctx, pool, CreateParams{
+	repo := NewUserRepo(&stubIDSource{id: rawID})
+	created, err := repo.Create(ctx, pool, UserCreateParams{
 		MailAddress:  mail,
 		Handle:       handle,
 		DisplayName:  "Integration User",

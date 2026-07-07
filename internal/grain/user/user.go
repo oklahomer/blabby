@@ -95,7 +95,7 @@ var ErrProfileNotFound = errors.New("user: profile not found")
 
 // Directory resolves a user's profile (a UserRef of id + public code + display
 // name) from their identity. The User grain seeds its UserRef from it on
-// activation; the production implementation reads service_user via userrepo (see
+// activation; the production implementation reads service_user via the persistence user repo (see
 // NewRepoDirectory). A one-method interface so the grain unit-tests can inject a
 // fake (or omit it and fall back to a code-less identity).
 //

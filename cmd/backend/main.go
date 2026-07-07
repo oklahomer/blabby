@@ -120,7 +120,7 @@ func run(dbCfg postgres.Config, cc clusterboot.Config) error {
 		return fmt.Errorf("build pending-account sweeper: %w", err)
 	}
 
-	// The User grain's display-name directory reads service_user via userrepo over
+	// The User grain's display-name directory reads service_user via the persistence user repo over
 	// this same pool, so every member resolves identical UserRefs from the one
 	// shared source.
 	deps := clusterboot.GrainDeps{

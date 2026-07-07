@@ -37,7 +37,7 @@ func (k MemberEventKind) eventType() (string, error) {
 // memberEventPayload is the JSONB payload for a membership event. It carries the
 // actor's display name so a consumer renders the system line ("— alice joined —")
 // without a lookup. The actor's id lives in the event's user_id column, not here.
-// The actor's public code joins this payload once userrepo lands.
+// The actor's public code is not carried in this payload yet.
 type memberEventPayload struct {
 	DisplayName string `json:"display_name"`
 }

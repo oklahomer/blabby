@@ -7,8 +7,8 @@ import (
 	"log/slog"
 
 	"github.com/oklahomer/blabby/internal/domain"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
 	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/verification"
 )
@@ -56,7 +56,7 @@ func (s *RegistrationService) Verify(ctx context.Context, params VerifyParams) e
 	txErr := s.tx.WithinTx(ctx, func(q postgres.Querier) error {
 		user, err := s.users.FindByEmail(ctx, q, params.MailAddress)
 		if err != nil {
-			if errors.Is(err, userrepo.ErrUserNotFound) {
+			if errors.Is(err, persistence.ErrUserNotFound) {
 				return invalid()
 			}
 			return fmt.Errorf("verify: find user: %w", err)
@@ -111,7 +111,7 @@ func (s *RegistrationService) Resend(ctx context.Context, params ResendParams) e
 		shouldSend = false
 		user, err := s.users.FindByEmail(ctx, q, params.MailAddress)
 		if err != nil {
-			if errors.Is(err, userrepo.ErrUserNotFound) {
+			if errors.Is(err, persistence.ErrUserNotFound) {
 				return nil
 			}
 			return fmt.Errorf("resend: find user: %w", err)

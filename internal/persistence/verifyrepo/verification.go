@@ -3,7 +3,7 @@
 // failed-attempt count that locks the challenge, and the resend bookkeeping
 // (last_sent_at / resend_count) that bounds how often a fresh PIN can be issued.
 //
-// Like internal/persistence/userrepo, the repo issues raw parameterized SQL and
+// Like the other persistence repositories, the repo issues raw parameterized SQL and
 // parses rows into a typed value object at the boundary (parse, don't validate).
 // It is hash-agnostic: callers pass an already-hashed PIN as bytes, so the hashing
 // scheme lives with the verification domain, not here.

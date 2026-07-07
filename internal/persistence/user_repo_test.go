@@ -1,4 +1,4 @@
-package userrepo
+package persistence
 
 import (
 	"context"
@@ -112,9 +112,9 @@ func mustHandle(t *testing.T, raw string) domain.Handle {
 	return handle
 }
 
-func createParams(t *testing.T) CreateParams {
+func createParams(t *testing.T) UserCreateParams {
 	t.Helper()
-	return CreateParams{
+	return UserCreateParams{
 		MailAddress:  mustMailAddress(t, "alice@example.com"),
 		Handle:       mustHandle(t, "Alice"),
 		DisplayName:  "Alice",
@@ -137,7 +137,7 @@ func TestCreate_Success(t *testing.T) {
 		}}
 	}}
 
-	user, err := New(&stubIDSource{id: uid}).Create(context.Background(), fq, createParams(t))
+	user, err := NewUserRepo(&stubIDSource{id: uid}).Create(context.Background(), fq, createParams(t))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestCreate_MintErrorSkipsDB(t *testing.T) {
 		return fakeRow{scan: func(...any) error { return nil }}
 	}}
 
-	_, err := New(&stubIDSource{err: sentinel}).Create(context.Background(), fq, createParams(t))
+	_, err := NewUserRepo(&stubIDSource{err: sentinel}).Create(context.Background(), fq, createParams(t))
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("Create: got %v, want the mint error", err)
 	}
@@ -194,9 +194,9 @@ func TestCreate_ReportsPublicCodeCollision(t *testing.T) {
 		}}
 	}}
 
-	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
-	if !errors.Is(err, ErrPublicCodeCollision) {
-		t.Fatalf("Create: got %v, want ErrPublicCodeCollision", err)
+	_, err := NewUserRepo(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
+	if !errors.Is(err, ErrUserPublicCodeCollision) {
+		t.Fatalf("Create: got %v, want ErrUserPublicCodeCollision", err)
 	}
 	if calls != 1 {
 		t.Fatalf("queried %d times, want 1 (Create does not retry internally)", calls)
@@ -224,7 +224,7 @@ func TestCreate_ClassifiesDuplicateByConstraint(t *testing.T) {
 				}}
 			}}
 
-			_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
+			_, err := NewUserRepo(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("Create: got %v, want %v", err, tc.want)
 			}
@@ -244,11 +244,11 @@ func TestCreate_PrimaryKeyCollisionIsHardError(t *testing.T) {
 		}}
 	}}
 
-	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
+	_, err := NewUserRepo(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
 	if err == nil {
 		t.Fatal("Create: want an error for a primary-key collision")
 	}
-	for _, sentinel := range []error{ErrPublicCodeCollision, ErrMailAddressTaken, ErrHandleTaken} {
+	for _, sentinel := range []error{ErrUserPublicCodeCollision, ErrMailAddressTaken, ErrHandleTaken} {
 		if errors.Is(err, sentinel) {
 			t.Fatalf("a primary-key collision must not be classified as %v", sentinel)
 		}
@@ -263,7 +263,7 @@ func TestCreate_PropagatesHardError(t *testing.T) {
 		return fakeRow{scan: func(...any) error { return sentinel }}
 	}}
 
-	_, err := New(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
+	_, err := NewUserRepo(&stubIDSource{id: 7}).Create(context.Background(), fq, createParams(t))
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("Create: got %v, want the db error", err)
 	}
@@ -276,7 +276,7 @@ func TestCreate_PropagatesHardError(t *testing.T) {
 // their WHERE clause and the argument they bind.
 type findByCase struct {
 	name    string
-	call    func(*Repo, postgres.Querier) (User, error)
+	call    func(*UserRepo, postgres.Querier) (User, error)
 	wantArg any
 }
 
@@ -284,21 +284,21 @@ func findByCases(t *testing.T) []findByCase {
 	return []findByCase{
 		{
 			name: "FindByEmail",
-			call: func(r *Repo, q postgres.Querier) (User, error) {
+			call: func(r *UserRepo, q postgres.Querier) (User, error) {
 				return r.FindByEmail(context.Background(), q, mustMailAddress(t, "alice@example.com"))
 			},
 			wantArg: "alice@example.com",
 		},
 		{
 			name: "FindByHandle",
-			call: func(r *Repo, q postgres.Querier) (User, error) {
+			call: func(r *UserRepo, q postgres.Querier) (User, error) {
 				return r.FindByHandle(context.Background(), q, mustHandle(t, "Alice"))
 			},
 			wantArg: "alice",
 		},
 		{
 			name: "FindByID",
-			call: func(r *Repo, q postgres.Querier) (User, error) {
+			call: func(r *UserRepo, q postgres.Querier) (User, error) {
 				return r.FindByID(context.Background(), q, mustUserID(t, 42))
 			},
 			wantArg: int64(42),
@@ -318,7 +318,7 @@ func TestFindBy_Success(t *testing.T) {
 				}}
 			}}
 
-			user, err := tc.call(New(nil), fq)
+			user, err := tc.call(NewUserRepo(nil), fq)
 			if err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
@@ -339,7 +339,7 @@ func TestFindBy_RejectsInconsistentHandleNorm(t *testing.T) {
 		}}
 	}}
 
-	_, err := New(nil).FindByID(context.Background(), fq, mustUserID(t, 42))
+	_, err := NewUserRepo(nil).FindByID(context.Background(), fq, mustUserID(t, 42))
 	if err == nil || !strings.Contains(err.Error(), "handle_norm") {
 		t.Fatalf("FindByID err = %v, want handle_norm integrity error", err)
 	}
@@ -351,7 +351,7 @@ func TestFindBy_NotFound(t *testing.T) {
 			fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
 				return fakeRow{scan: func(...any) error { return pgx.ErrNoRows }}
 			}}
-			if _, err := tc.call(New(nil), fq); !errors.Is(err, ErrUserNotFound) {
+			if _, err := tc.call(NewUserRepo(nil), fq); !errors.Is(err, ErrUserNotFound) {
 				t.Fatalf("%s: got %v, want ErrUserNotFound", tc.name, err)
 			}
 		})
@@ -370,7 +370,7 @@ func TestResolveByPublicCode_Success(t *testing.T) {
 		return fakeRow{scan: func(dest ...any) error { return assignAll(dest, []any{int64(42)}) }}
 	}}
 
-	uid, err := New(nil).ResolveByPublicCode(context.Background(), fq, code)
+	uid, err := NewUserRepo(nil).ResolveByPublicCode(context.Background(), fq, code)
 	if err != nil {
 		t.Fatalf("ResolveByPublicCode: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestResolveByPublicCode_NotFound(t *testing.T) {
 		return fakeRow{scan: func(...any) error { return pgx.ErrNoRows }}
 	}}
 	code, _ := id.NewPublicCode()
-	if _, err := New(nil).ResolveByPublicCode(context.Background(), fq, code); !errors.Is(err, ErrUserNotFound) {
+	if _, err := NewUserRepo(nil).ResolveByPublicCode(context.Background(), fq, code); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("ResolveByPublicCode: got %v, want ErrUserNotFound", err)
 	}
 }
@@ -397,7 +397,7 @@ func TestSetStatus_Success(t *testing.T) {
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}}
 
-	if err := New(nil).SetStatus(context.Background(), fq, mustUserID(t, 42), domain.UserStatusActive); err != nil {
+	if err := NewUserRepo(nil).SetStatus(context.Background(), fq, mustUserID(t, 42), domain.UserStatusActive); err != nil {
 		t.Fatalf("SetStatus: %v", err)
 	}
 	if gotArgs[0].(int64) != 42 || gotArgs[1].(string) != "active" {
@@ -413,7 +413,7 @@ func TestSetStatus_NotFound(t *testing.T) {
 	fq := &fakeQuerier{exec: func(string, ...any) (pgconn.CommandTag, error) {
 		return pgconn.NewCommandTag("UPDATE 0"), nil
 	}}
-	if err := New(nil).SetStatus(context.Background(), fq, mustUserID(t, 99), domain.UserStatusActive); !errors.Is(err, ErrUserNotFound) {
+	if err := NewUserRepo(nil).SetStatus(context.Background(), fq, mustUserID(t, 99), domain.UserStatusActive); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("SetStatus(missing): got %v, want ErrUserNotFound", err)
 	}
 }
@@ -426,7 +426,7 @@ func TestSetPasswordHash_Success(t *testing.T) {
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}}
 
-	if err := New(nil).SetPasswordHash(context.Background(), fq, mustUserID(t, 42), []byte("$2a$12$new")); err != nil {
+	if err := NewUserRepo(nil).SetPasswordHash(context.Background(), fq, mustUserID(t, 42), []byte("$2a$12$new")); err != nil {
 		t.Fatalf("SetPasswordHash: %v", err)
 	}
 	if gotArgs[0].(int64) != 42 || string(gotArgs[1].([]byte)) != "$2a$12$new" {
@@ -441,7 +441,7 @@ func TestSetPasswordHash_NotFound(t *testing.T) {
 	fq := &fakeQuerier{exec: func(string, ...any) (pgconn.CommandTag, error) {
 		return pgconn.NewCommandTag("UPDATE 0"), nil
 	}}
-	if err := New(nil).SetPasswordHash(context.Background(), fq, mustUserID(t, 99), []byte("x")); !errors.Is(err, ErrUserNotFound) {
+	if err := NewUserRepo(nil).SetPasswordHash(context.Background(), fq, mustUserID(t, 99), []byte("x")); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("SetPasswordHash(missing): got %v, want ErrUserNotFound", err)
 	}
 }
@@ -451,7 +451,7 @@ func TestSetStatus_PropagatesError(t *testing.T) {
 	fq := &fakeQuerier{exec: func(string, ...any) (pgconn.CommandTag, error) {
 		return pgconn.CommandTag{}, sentinel
 	}}
-	if err := New(nil).SetStatus(context.Background(), fq, mustUserID(t, 1), domain.UserStatusActive); !errors.Is(err, sentinel) {
+	if err := NewUserRepo(nil).SetStatus(context.Background(), fq, mustUserID(t, 1), domain.UserStatusActive); !errors.Is(err, sentinel) {
 		t.Fatalf("SetStatus: got %v, want the db error", err)
 	}
 }

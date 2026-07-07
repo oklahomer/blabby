@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/oklahomer/blabby/internal/domain"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
 )
 
 // TestRoomCreationIntegration exercises the creation service against a real
@@ -39,7 +39,7 @@ func TestRoomCreationIntegration(t *testing.T) {
 	ids := &incrementingIDSource{next: base}
 	svc := NewRoomCreationService(
 		roomrepo.New(ids),
-		userrepo.New(ids),
+		persistence.NewUserRepo(ids),
 		membershiprepo.New(),
 		journal.New(ids),
 		postgres.NewTransactor(pool),
