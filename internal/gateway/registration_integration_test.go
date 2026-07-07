@@ -12,7 +12,6 @@ import (
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 )
 
 // incrementingIDSource hands out unique, monotonically increasing ids seeded from a
@@ -52,7 +51,7 @@ func TestRegistrationIntegration(t *testing.T) {
 	sender := &recordingVerificationSender{}
 	svc := NewRegistrationService(
 		persistence.NewUserRepo(&incrementingIDSource{next: base}),
-		verifyrepo.New(),
+		persistence.NewVerificationRepo(),
 		sender,
 		postgres.NewTransactor(pool),
 		RegistrationPolicy{PinTTL: 10 * time.Minute, ResendMinInterval: time.Minute, MaxResendCount: 5, MaxVerifyAttempts: 5, CollisionRetries: 3},
@@ -83,7 +82,7 @@ func TestRegistrationIntegration(t *testing.T) {
 	if created.Status != domain.UserStatusPending {
 		t.Fatalf("status = %q, want pending", created.Status)
 	}
-	verify := verifyrepo.New()
+	verify := persistence.NewVerificationRepo()
 	challenge, err := verify.FindByUser(ctx, pool, created.ID)
 	if err != nil {
 		t.Fatalf("FindByUser (verification): %v", err)
@@ -118,7 +117,7 @@ func TestRegistrationIntegration(t *testing.T) {
 	if activated.Status != domain.UserStatusActive {
 		t.Fatalf("status = %q, want active", activated.Status)
 	}
-	if _, err := verify.FindByUser(ctx, pool, created.ID); !errors.Is(err, verifyrepo.ErrVerificationNotFound) {
+	if _, err := verify.FindByUser(ctx, pool, created.ID); !errors.Is(err, persistence.ErrVerificationNotFound) {
 		t.Fatalf("FindByUser after verify = %v, want challenge cleared", err)
 	}
 

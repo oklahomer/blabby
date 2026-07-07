@@ -8,7 +8,6 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/persistence"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/verification"
 )
 
@@ -25,7 +24,7 @@ func aliceMail(t *testing.T) domain.MailAddress {
 // pinChallenge builds a verification row whose pin_hash matches the returned raw
 // PIN, with the given attempt count and expiry, so a test can submit the right or a
 // wrong PIN against it.
-func pinChallenge(t *testing.T, attempts int, expiresAt time.Time) (verifyrepo.Verification, string) {
+func pinChallenge(t *testing.T, attempts int, expiresAt time.Time) (persistence.Verification, string) {
 	t.Helper()
 	pin, err := verification.NewPIN()
 	if err != nil {
@@ -36,7 +35,7 @@ func pinChallenge(t *testing.T, attempts int, expiresAt time.Time) (verifyrepo.V
 		t.Fatalf("Hash: %v", err)
 	}
 	uid := pendingAlice(t).ID
-	return verifyrepo.Verification{UserID: uid, PinHash: hash, ExpiresAt: expiresAt, Attempts: attempts}, pin.String()
+	return persistence.Verification{UserID: uid, PinHash: hash, ExpiresAt: expiresAt, Attempts: attempts}, pin.String()
 }
 
 // liveChallengeExpiry is well after the fake clock (time.Unix(1000, 0)), so a
@@ -152,7 +151,7 @@ func TestVerify_UnknownAccountOrChallengeIsUniform(t *testing.T) {
 		{
 			name:   "no challenge",
 			users:  &fakeRegistrationUsers{findResults: []userResult{{user: pendingAlice(t)}}},
-			verify: &fakeRegistrationVerifications{findResults: []verificationResult{{err: verifyrepo.ErrVerificationNotFound}}},
+			verify: &fakeRegistrationVerifications{findResults: []verificationResult{{err: persistence.ErrVerificationNotFound}}},
 		},
 	}
 	for _, tc := range tests {
@@ -208,10 +207,10 @@ func TestResend_NonPendingOrUnknownIsSilentNoOp(t *testing.T) {
 func TestResend_RateLimitedSurfacesAndDoesNotSend(t *testing.T) {
 	sender := &recordingVerificationSender{}
 	users := &fakeRegistrationUsers{findResults: []userResult{{user: pendingAlice(t)}}}
-	verify := &fakeRegistrationVerifications{resendResults: []error{verifyrepo.ErrVerificationRateLimited}}
+	verify := &fakeRegistrationVerifications{resendResults: []error{persistence.ErrVerificationRateLimited}}
 	svc, _ := newRegistrationServiceForTest(users, verify, sender)
 
-	if err := svc.Resend(context.Background(), ResendParams{MailAddress: aliceMail(t)}); !errors.Is(err, verifyrepo.ErrVerificationRateLimited) {
+	if err := svc.Resend(context.Background(), ResendParams{MailAddress: aliceMail(t)}); !errors.Is(err, persistence.ErrVerificationRateLimited) {
 		t.Fatalf("Resend err = %v, want ErrVerificationRateLimited", err)
 	}
 	if sender.calls != 0 {

@@ -12,7 +12,6 @@ import (
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/verification"
 )
 
@@ -52,9 +51,9 @@ type registrationUsers interface {
 }
 
 type registrationVerifications interface {
-	Create(ctx context.Context, q postgres.Querier, params verifyrepo.CreateParams) error
-	Resend(ctx context.Context, q postgres.Querier, params verifyrepo.ResendParams, policy verifyrepo.ResendPolicy) error
-	FindByUser(ctx context.Context, q postgres.Querier, userID id.UserID) (verifyrepo.Verification, error)
+	Create(ctx context.Context, q postgres.Querier, params persistence.VerificationCreateParams) error
+	Resend(ctx context.Context, q postgres.Querier, params persistence.VerificationResendParams, policy persistence.VerificationResendPolicy) error
+	FindByUser(ctx context.Context, q postgres.Querier, userID id.UserID) (persistence.Verification, error)
 	IncrementAttempts(ctx context.Context, q postgres.Querier, userID id.UserID) (int, error)
 	Delete(ctx context.Context, q postgres.Querier, userID id.UserID) error
 }
@@ -102,7 +101,7 @@ type RegistrationService struct {
 // NewRegistrationService builds a RegistrationService. users must mint ids (its
 // IDSource is the gateway's worker-lease manager), since registration creates new
 // accounts.
-func NewRegistrationService(users *persistence.UserRepo, verify *verifyrepo.Repo, sender verification.Sender, tx transactor, policy RegistrationPolicy) *RegistrationService {
+func NewRegistrationService(users *persistence.UserRepo, verify *persistence.VerificationRepo, sender verification.Sender, tx transactor, policy RegistrationPolicy) *RegistrationService {
 	return &RegistrationService{
 		users:  users,
 		verify: verify,
@@ -197,7 +196,7 @@ func (s *RegistrationService) createPending(ctx context.Context, q postgres.Quer
 		return persistence.User{}, verification.PIN{}, err
 	}
 	now := s.now()
-	if err := s.verify.Create(ctx, q, verifyrepo.CreateParams{
+	if err := s.verify.Create(ctx, q, persistence.VerificationCreateParams{
 		UserID:    user.ID,
 		PinHash:   pinHash,
 		ExpiresAt: now.Add(s.policy.PinTTL),
@@ -209,7 +208,7 @@ func (s *RegistrationService) createPending(ctx context.Context, q postgres.Quer
 }
 
 // resendPending issues a fresh PIN for an already-pending account, enforcing the
-// resend budget. It returns verifyrepo.ErrVerificationRateLimited when the budget
+// resend budget. It returns persistence.ErrVerificationRateLimited when the budget
 // or minimum interval is exhausted.
 func (s *RegistrationService) resendPending(ctx context.Context, q postgres.Querier, userID id.UserID) (verification.PIN, error) {
 	pin, pinHash, err := newHashedPIN()
@@ -217,12 +216,12 @@ func (s *RegistrationService) resendPending(ctx context.Context, q postgres.Quer
 		return verification.PIN{}, err
 	}
 	now := s.now()
-	err = s.verify.Resend(ctx, q, verifyrepo.ResendParams{
+	err = s.verify.Resend(ctx, q, persistence.VerificationResendParams{
 		UserID:    userID,
 		PinHash:   pinHash,
 		ExpiresAt: now.Add(s.policy.PinTTL),
 		SentAt:    now,
-	}, verifyrepo.ResendPolicy{
+	}, persistence.VerificationResendPolicy{
 		PreviousSentBefore: now.Add(-s.policy.ResendMinInterval),
 		MaxResendCount:     s.policy.MaxResendCount,
 	})

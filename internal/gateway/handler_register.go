@@ -11,7 +11,6 @@ import (
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/persistence"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 )
 
 // endpointRegister is the mux pattern for handleRegister.
@@ -98,7 +97,7 @@ func (g *Gateway) writeRegisterError(w http.ResponseWriter, err error) {
 		WriteErrorResponse(w, http.StatusConflict, ErrEmailAlreadyRegistered("email already registered"))
 	case errors.Is(err, persistence.ErrHandleTaken):
 		WriteErrorResponse(w, http.StatusConflict, ErrHandleAlreadyTaken("handle already taken"))
-	case errors.Is(err, verifyrepo.ErrVerificationRateLimited):
+	case errors.Is(err, persistence.ErrVerificationRateLimited):
 		WriteErrorResponse(w, http.StatusTooManyRequests, ErrVerificationRateLimited("too many verification attempts; please wait and try again"))
 	default:
 		slog.Error("registration failed", "error", err.Error())

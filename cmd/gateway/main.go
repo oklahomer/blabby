@@ -41,7 +41,6 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/journal"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/persistence/workerlease"
 	"github.com/oklahomer/blabby/internal/verification"
 )
@@ -268,7 +267,7 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	}
 	registration := gateway.NewRegistrationService(
 		persistence.NewUserRepo(leaseManager),
-		verifyrepo.New(),
+		persistence.NewVerificationRepo(),
 		verifySender,
 		postgres.NewTransactor(pool),
 		gateway.DefaultRegistrationPolicy(),

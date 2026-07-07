@@ -10,7 +10,6 @@ import (
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/verification"
 )
 
@@ -56,7 +55,7 @@ func (f *fakeRegistrationUsers) SetStatus(_ context.Context, _ postgres.Querier,
 }
 
 type verificationResult struct {
-	verification verifyrepo.Verification
+	verification persistence.Verification
 	err          error
 }
 
@@ -66,9 +65,9 @@ type fakeRegistrationVerifications struct {
 	findResults    []verificationResult
 	incrementErr   error
 	deleteErr      error
-	lastCreate     verifyrepo.CreateParams
-	lastResend     verifyrepo.ResendParams
-	lastPolicy     verifyrepo.ResendPolicy
+	lastCreate     persistence.VerificationCreateParams
+	lastResend     persistence.VerificationResendParams
+	lastPolicy     persistence.VerificationResendPolicy
 	createCalls    int
 	resendCalls    int
 	findCalls      int
@@ -76,7 +75,7 @@ type fakeRegistrationVerifications struct {
 	deleteCalls    int
 }
 
-func (f *fakeRegistrationVerifications) Create(_ context.Context, _ postgres.Querier, params verifyrepo.CreateParams) error {
+func (f *fakeRegistrationVerifications) Create(_ context.Context, _ postgres.Querier, params persistence.VerificationCreateParams) error {
 	if f.createCalls >= len(f.createResults) {
 		return errors.New("unexpected verification Create")
 	}
@@ -86,7 +85,7 @@ func (f *fakeRegistrationVerifications) Create(_ context.Context, _ postgres.Que
 	return err
 }
 
-func (f *fakeRegistrationVerifications) Resend(_ context.Context, _ postgres.Querier, params verifyrepo.ResendParams, policy verifyrepo.ResendPolicy) error {
+func (f *fakeRegistrationVerifications) Resend(_ context.Context, _ postgres.Querier, params persistence.VerificationResendParams, policy persistence.VerificationResendPolicy) error {
 	if f.resendCalls >= len(f.resendResults) {
 		return errors.New("unexpected verification Resend")
 	}
@@ -97,9 +96,9 @@ func (f *fakeRegistrationVerifications) Resend(_ context.Context, _ postgres.Que
 	return err
 }
 
-func (f *fakeRegistrationVerifications) FindByUser(_ context.Context, _ postgres.Querier, _ id.UserID) (verifyrepo.Verification, error) {
+func (f *fakeRegistrationVerifications) FindByUser(_ context.Context, _ postgres.Querier, _ id.UserID) (persistence.Verification, error) {
 	if f.findCalls >= len(f.findResults) {
-		return verifyrepo.Verification{}, errors.New("unexpected FindByUser")
+		return persistence.Verification{}, errors.New("unexpected FindByUser")
 	}
 	result := f.findResults[f.findCalls]
 	f.findCalls++
@@ -331,12 +330,12 @@ func TestRegistrationService_PendingResendRateLimitedDoesNotSend(t *testing.T) {
 		},
 	}
 	verify := &fakeRegistrationVerifications{
-		resendResults: []error{verifyrepo.ErrVerificationRateLimited},
+		resendResults: []error{persistence.ErrVerificationRateLimited},
 	}
 	svc, tx := newRegistrationServiceForTest(users, verify, sender)
 
 	_, err := svc.Register(context.Background(), registrationParams(t))
-	if !errors.Is(err, verifyrepo.ErrVerificationRateLimited) {
+	if !errors.Is(err, persistence.ErrVerificationRateLimited) {
 		t.Fatalf("Register err = %v, want ErrVerificationRateLimited", err)
 	}
 	if tx.commits != 0 {

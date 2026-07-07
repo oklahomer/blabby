@@ -11,7 +11,6 @@ import (
 
 	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/persistence"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 )
 
 // fakeRegistrar is a stub Registrar: it records the params it received and returns
@@ -86,7 +85,7 @@ func TestHandleRegister(t *testing.T) {
 		{
 			name:          "resend rate limited returns 429",
 			body:          validBody,
-			registrar:     &fakeRegistrar{err: verifyrepo.ErrVerificationRateLimited},
+			registrar:     &fakeRegistrar{err: persistence.ErrVerificationRateLimited},
 			wantStatus:    http.StatusTooManyRequests,
 			wantErrorCode: errcode.VerificationRateLimited,
 			wantReached:   true,

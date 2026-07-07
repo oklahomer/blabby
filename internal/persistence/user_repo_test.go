@@ -70,6 +70,8 @@ func assignAll(dest []any, values []any) error {
 		switch d := dest[i].(type) {
 		case *int64:
 			*d = values[i].(int64)
+		case *int:
+			*d = values[i].(int)
 		case *string:
 			*d = values[i].(string)
 		case *bool:
@@ -78,6 +80,8 @@ func assignAll(dest []any, values []any) error {
 			*d = values[i].([]byte)
 		case *time.Time:
 			*d = values[i].(time.Time)
+		case **time.Time:
+			*d = values[i].(*time.Time)
 		default:
 			return fmt.Errorf("fake scan: unsupported destination %T", dest[i])
 		}
