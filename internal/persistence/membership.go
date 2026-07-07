@@ -1,12 +1,11 @@
-// Package membershiprepo persists and reads the room_membership table — the
-// DB-authoritative record of who belongs to which room and in what role. The Room
-// grain is the sole writer (add/remove on a real join/leave transition); the User
-// grain only reads its joined rooms. Current-state only: a leave deletes the row.
-//
-// Like the sibling repos it issues fixed parameterized SQL and parses rows into
-// typed value objects at the boundary (parse, don't validate), so the rest of the
-// codebase handles UserID/RoomRef/MembershipRole, never bare ints or strings.
-package membershiprepo
+// The room_membership table is the DB-authoritative record of who belongs to which
+// room and in what role. The Room grain is the sole writer (add/remove on a real
+// join/leave transition); the User grain only reads its joined rooms. Current-state
+// only: a leave deletes the row. Rows are parsed into typed value objects at the
+// boundary (parse, don't validate), so callers handle UserID/RoomRef/MembershipRole,
+// never bare ints or strings.
+
+package persistence
 
 import (
 	"fmt"
@@ -38,19 +37,19 @@ type memberRow struct {
 func (mr memberRow) toDomain() (Member, error) {
 	userID, err := id.NewUserID(mr.userID)
 	if err != nil {
-		return Member{}, fmt.Errorf("membershiprepo: row user_id: %w", err)
+		return Member{}, fmt.Errorf("persistence: row user_id: %w", err)
 	}
 	code, err := id.ParsePublicCode(mr.publicCode)
 	if err != nil {
-		return Member{}, fmt.Errorf("membershiprepo: row public_code: %w", err)
+		return Member{}, fmt.Errorf("persistence: row public_code: %w", err)
 	}
 	ref, err := id.NewUserRef(userID, code, mr.displayName)
 	if err != nil {
-		return Member{}, fmt.Errorf("membershiprepo: row user_ref: %w", err)
+		return Member{}, fmt.Errorf("persistence: row user_ref: %w", err)
 	}
 	role, err := domain.ParseMembershipRole(mr.role)
 	if err != nil {
-		return Member{}, fmt.Errorf("membershiprepo: row role: %w", err)
+		return Member{}, fmt.Errorf("persistence: row role: %w", err)
 	}
 	return Member{User: ref, Role: role, JoinedAt: mr.joinedAt}, nil
 }
@@ -68,15 +67,15 @@ type joinedRoomRow struct {
 func (jr joinedRoomRow) toDomain() (domain.RoomRef, error) {
 	roomID, err := id.NewRoomID(jr.roomID)
 	if err != nil {
-		return domain.RoomRef{}, fmt.Errorf("membershiprepo: row room_id: %w", err)
+		return domain.RoomRef{}, fmt.Errorf("persistence: row room_id: %w", err)
 	}
 	code, err := id.ParsePublicCode(jr.publicCode)
 	if err != nil {
-		return domain.RoomRef{}, fmt.Errorf("membershiprepo: row public_code: %w", err)
+		return domain.RoomRef{}, fmt.Errorf("persistence: row public_code: %w", err)
 	}
 	status, err := domain.ParseRoomStatus(jr.status)
 	if err != nil {
-		return domain.RoomRef{}, fmt.Errorf("membershiprepo: row status: %w", err)
+		return domain.RoomRef{}, fmt.Errorf("persistence: row status: %w", err)
 	}
 	return domain.RoomRef{
 		ID:         roomID,

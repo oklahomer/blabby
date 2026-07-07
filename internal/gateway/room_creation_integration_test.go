@@ -10,7 +10,6 @@ import (
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/journal"
-	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -39,7 +38,7 @@ func TestRoomCreationIntegration(t *testing.T) {
 	svc := NewRoomCreationService(
 		persistence.NewRoomRepo(ids),
 		persistence.NewUserRepo(ids),
-		membershiprepo.New(),
+		persistence.NewMembershipRepo(),
 		journal.New(ids),
 		postgres.NewTransactor(pool),
 	)

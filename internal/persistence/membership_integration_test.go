@@ -1,4 +1,4 @@
-package membershiprepo
+package persistence
 
 import (
 	"context"
@@ -34,7 +34,7 @@ func TestMembershipRepoIntegration(t *testing.T) {
 	// defer would close the pool before any t.Cleanup could use it.
 	t.Cleanup(pool.Close)
 
-	repo := New()
+	repo := NewMembershipRepo()
 	roomID := mustRoomID(t, 4)
 	seedOwner := mustUserID(t, 1)
 	scratch := mustUserID(t, 3)
@@ -79,8 +79,8 @@ func TestMembershipRepoIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListByUser: %v", err)
 	}
-	if !containsRoom(joined, roomID) {
-		t.Fatalf("user 1 joined rooms = %v, want room 4", roomIDs(joined))
+	if !containsRoomRef(joined, roomID) {
+		t.Fatalf("user 1 joined rooms = %v, want room 4", roomRefIDs(joined))
 	}
 
 	// Add user 3 (charlie) to room 4, confirm, then remove and confirm gone.
@@ -175,7 +175,7 @@ func findMember(members []Member, userID id.UserID) (Member, bool) {
 	return Member{}, false
 }
 
-func containsRoom(rooms []domain.RoomRef, want id.RoomID) bool {
+func containsRoomRef(rooms []domain.RoomRef, want id.RoomID) bool {
 	for _, r := range rooms {
 		if r.ID == want {
 			return true
@@ -184,7 +184,7 @@ func containsRoom(rooms []domain.RoomRef, want id.RoomID) bool {
 	return false
 }
 
-func roomIDs(rooms []domain.RoomRef) []int64 {
+func roomRefIDs(rooms []domain.RoomRef) []int64 {
 	out := make([]int64, len(rooms))
 	for i, r := range rooms {
 		out[i] = r.ID.Int64()

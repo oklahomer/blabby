@@ -39,9 +39,25 @@ func (f *fakeQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.R
 	return f.queryRow(sql, args...)
 }
 
-type fakeRow struct{ scan func(dest ...any) error }
+// fakeRow is a one-row pgx.Row stub. Set scan to compute the result (e.g. to
+// capture query args or return a custom error); or set values for a fixed row, or
+// err for a fixed failure.
+type fakeRow struct {
+	scan   func(dest ...any) error
+	values []any
+	err    error
+}
 
-func (r fakeRow) Scan(dest ...any) error { return r.scan(dest...) }
+func (r fakeRow) Scan(dest ...any) error {
+	switch {
+	case r.scan != nil:
+		return r.scan(dest...)
+	case r.err != nil:
+		return r.err
+	default:
+		return assignAll(dest, r.values)
+	}
+}
 
 // assignAll copies column values into the Scan destinations, matching the types
 // scanUser passes (*int64, *string, *[]byte, *time.Time) plus the bare *int64
@@ -56,6 +72,8 @@ func assignAll(dest []any, values []any) error {
 			*d = values[i].(int64)
 		case *string:
 			*d = values[i].(string)
+		case *bool:
+			*d = values[i].(bool)
 		case *[]byte:
 			*d = values[i].([]byte)
 		case *time.Time:

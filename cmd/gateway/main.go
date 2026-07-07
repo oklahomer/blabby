@@ -40,7 +40,6 @@ import (
 	"github.com/oklahomer/blabby/internal/logging"
 	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/journal"
-	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/persistence/workerlease"
@@ -281,7 +280,7 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	roomCreation := gateway.NewRoomCreationService(
 		persistence.NewRoomRepo(leaseManager),
 		persistence.NewUserRepo(leaseManager),
-		membershiprepo.New(),
+		persistence.NewMembershipRepo(),
 		journal.New(leaseManager),
 		postgres.NewTransactor(pool),
 	)

@@ -9,8 +9,8 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/journal"
-	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -51,7 +51,7 @@ type MembershipStore interface {
 	RecordJoin(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error)
 	// RecordLeave durably removes actor and appends a member_left event in one
 	// transaction, returning the event identity for fan-out. It returns
-	// membershiprepo.ErrOwnerCannotLeave (wrapped) when actor owns the room.
+	// persistence.ErrOwnerCannotLeave (wrapped) when actor owns the room.
 	RecordLeave(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error)
 	// RecordRoleChange durably sets target's role after checking, in the same
 	// transaction, that actor's role permits it (domain.CanSetRole). It returns
@@ -74,7 +74,7 @@ const membershipOpTimeout = 3 * time.Second
 // repository, the journal, and a transactor over the backend's pool, so a
 // room_membership write and its derived event commit (or roll back) together.
 type membershipStore struct {
-	repo    *membershiprepo.Repo
+	repo    *persistence.MembershipRepo
 	journal *journal.Journal
 	tx      *postgres.Transactor
 	pool    postgres.Querier
@@ -85,7 +85,7 @@ type membershipStore struct {
 // directly; writes run inside a transaction.
 func NewMembershipStore(pool *pgxpool.Pool, ids journal.IDSource) MembershipStore {
 	return &membershipStore{
-		repo:    membershiprepo.New(),
+		repo:    persistence.NewMembershipRepo(),
 		journal: journal.New(ids),
 		tx:      postgres.NewTransactor(pool),
 		pool:    pool,

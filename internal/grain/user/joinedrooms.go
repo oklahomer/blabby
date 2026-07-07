@@ -6,7 +6,7 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -26,16 +26,16 @@ type JoinedRoomLoader interface {
 const loadTimeout = 3 * time.Second
 
 // membershipJoinedRoomLoader is the production JoinedRoomLoader: a read-only view
-// of the caller's joined rooms via membershiprepo over the backend's pool.
+// of the caller's joined rooms via the persistence membership repo over the backend's pool.
 type membershipJoinedRoomLoader struct {
-	repo *membershiprepo.Repo
+	repo *persistence.MembershipRepo
 	pool postgres.Querier
 }
 
 // NewJoinedRoomLoader builds a JoinedRoomLoader over pool. It owns a
-// membershiprepo.Repo internally; the User grain only reads its joined rooms.
+// persistence.MembershipRepo internally; the User grain only reads its joined rooms.
 func NewJoinedRoomLoader(pool postgres.Querier) JoinedRoomLoader {
-	return membershipJoinedRoomLoader{repo: membershiprepo.New(), pool: pool}
+	return membershipJoinedRoomLoader{repo: persistence.NewMembershipRepo(), pool: pool}
 }
 
 func (l membershipJoinedRoomLoader) ListJoinedRooms(ctx context.Context, userID id.UserID) ([]domain.RoomRef, error) {

@@ -29,7 +29,7 @@ import (
 	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/middleware"
-	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 )
 
 // Event-name constants for every log line this package emits. Follow the
@@ -388,7 +388,7 @@ func (g *Grain) Leave(req *roompb.LeaveRequest, ctx cluster.GrainContext) (*room
 	// Persist the transition (row delete + member_left event, one txn) before
 	// mutating in-memory state or fanning out (fail-closed).
 	evt, err := g.recordLeave(ctx, leaver)
-	if errors.Is(err, membershiprepo.ErrOwnerCannotLeave) {
+	if errors.Is(err, persistence.ErrOwnerCannotLeave) {
 		slog.Warn(eventRoomMemberLeaveRejected,
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
@@ -473,7 +473,7 @@ func (g *Grain) recordLeave(ctx cluster.GrainContext, leaver id.UserRef) (Member
 		return MembershipEvent{}, nil
 	}
 	evt, err := g.membership.RecordLeave(context.Background(), g.state.roomRef().ID, leaver)
-	if err != nil && errors.Is(err, membershiprepo.ErrOwnerCannotLeave) {
+	if err != nil && errors.Is(err, persistence.ErrOwnerCannotLeave) {
 		return MembershipEvent{}, err
 	}
 	if err != nil {

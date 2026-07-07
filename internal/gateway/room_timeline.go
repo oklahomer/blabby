@@ -6,8 +6,8 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/journal"
-	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -42,11 +42,11 @@ type RoomTimeline interface {
 	Events(ctx context.Context, query TimelineQuery) (TimelinePage, error)
 }
 
-// roomTimelineReader is the production RoomTimeline: membershiprepo and the
+// roomTimelineReader is the production RoomTimeline: the persistence membership repo and the
 // journal over the gateway's read pool. The journal's id source is nil because
 // the gateway only reads events, never mints them.
 type roomTimelineReader struct {
-	members *membershiprepo.Repo
+	members *persistence.MembershipRepo
 	journal *journal.Journal
 	pool    postgres.Querier
 }
@@ -54,7 +54,7 @@ type roomTimelineReader struct {
 // NewRoomTimelineReader builds a read-only RoomTimeline over pool.
 func NewRoomTimelineReader(pool postgres.Querier) RoomTimeline {
 	return roomTimelineReader{
-		members: membershiprepo.New(),
+		members: persistence.NewMembershipRepo(),
 		journal: journal.New(nil),
 		pool:    pool,
 	}
@@ -62,7 +62,7 @@ func NewRoomTimelineReader(pool postgres.Querier) RoomTimeline {
 
 func (r roomTimelineReader) IsMember(ctx context.Context, roomID id.RoomID, userID id.UserID) (bool, error) {
 	_, err := r.members.GetRole(ctx, r.pool, roomID, userID)
-	if errors.Is(err, membershiprepo.ErrMembershipNotFound) {
+	if errors.Is(err, persistence.ErrMembershipNotFound) {
 		return false, nil
 	}
 	if err != nil {
