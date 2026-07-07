@@ -4,7 +4,9 @@
 // both by docker-compose (mounted as an init script for local development) and by
 // integration tests (exec'd against a clean database).
 //
-// Subpackage postgres bootstraps the pgxpool connection pool from configuration.
-// The repositories that query the pool are added in later phases; the grains are
-// not yet wired to them, so Phase 1's in-memory behavior is unchanged.
+// Subpackage postgres bootstraps the pgxpool connection pool and exposes the
+// Querier abstraction — a pool or a transaction — that repositories accept per
+// call so a caller can compose several operations into one transaction. The
+// repositories are wired to the live pool and back the gateway handlers and the
+// room and user grains.
 package persistence
