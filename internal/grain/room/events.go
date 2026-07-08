@@ -84,10 +84,10 @@ func protoUserRef(u id.UserRef) *commonpb.UserRef {
 // (R…) for clients.
 func protoRoomRef(r domain.RoomRef) *commonpb.RoomRef {
 	return &commonpb.RoomRef{
-		RoomId:          r.ID.String(),
-		PublicCode:      r.PublicCode.String(),
-		Name:            r.Name,
-		Status:          string(r.Status),
-		MetadataVersion: r.MetadataVersion,
+		RoomId:          r.ID().String(),
+		PublicCode:      r.PublicCode().String(),
+		Name:            r.Name(),
+		Status:          string(r.Status()),
+		MetadataVersion: r.MetadataVersion(),
 	}
 }

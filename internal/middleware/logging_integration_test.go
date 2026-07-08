@@ -31,7 +31,12 @@ func (activeRoomLoader) LoadRoom(_ context.Context, roomID id.RoomID) (domain.Ro
 	if err != nil {
 		return domain.RoomRef{}, err
 	}
-	return domain.RoomRef{ID: roomID, PublicCode: code, Name: "Room " + roomID.String(), Status: domain.RoomStatusActive}, nil
+	return domain.NewRoomRef(domain.RoomRefParams{
+		ID:         roomID,
+		PublicCode: code,
+		Name:       "Room " + roomID.String(),
+		Status:     domain.RoomStatusActive,
+	})
 }
 
 // stubDirectory resolves every id to a UserRef with a valid public code, so the

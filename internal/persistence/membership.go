@@ -77,7 +77,7 @@ func (jr joinedRoomRow) toDomain() (domain.RoomRef, error) {
 	if err != nil {
 		return domain.RoomRef{}, fmt.Errorf("persistence: row status: %w", err)
 	}
-	return domain.RoomRef{
+	ref, err := domain.NewRoomRef(domain.RoomRefParams{
 		ID:         roomID,
 		PublicCode: code,
 		Name:       jr.name,
@@ -86,5 +86,9 @@ func (jr joinedRoomRow) toDomain() (domain.RoomRef, error) {
 		// microsecond precision, so two metadata writes in the same millisecond
 		// don't collapse to one version under a receiver's "ignore older" check.
 		MetadataVersion: jr.updatedAt.UnixMicro(),
-	}, nil
+	})
+	if err != nil {
+		return domain.RoomRef{}, fmt.Errorf("persistence: row room ref: %w", err)
+	}
+	return ref, nil
 }

@@ -177,7 +177,7 @@ func findMember(members []Member, userID id.UserID) (Member, bool) {
 
 func containsRoomRef(rooms []domain.RoomRef, want id.RoomID) bool {
 	for _, r := range rooms {
-		if r.ID == want {
+		if r.ID() == want {
 			return true
 		}
 	}
@@ -187,7 +187,7 @@ func containsRoomRef(rooms []domain.RoomRef, want id.RoomID) bool {
 func roomRefIDs(rooms []domain.RoomRef) []int64 {
 	out := make([]int64, len(rooms))
 	for i, r := range rooms {
-		out[i] = r.ID.Int64()
+		out[i] = r.ID().Int64()
 	}
 	return out
 }

@@ -582,24 +582,24 @@ func parseRoomRef(p *commonpb.RoomRef) (domain.RoomRef, error) {
 	if err != nil {
 		return domain.RoomRef{}, fmt.Errorf("status: %w", err)
 	}
-	return domain.RoomRef{
+	return domain.NewRoomRef(domain.RoomRefParams{
 		ID:              roomID,
 		PublicCode:      code,
 		Name:            p.GetName(),
 		Status:          status,
 		MetadataVersion: p.GetMetadataVersion(),
-	}, nil
+	})
 }
 
 // protoRoomRef renders a cached domain.RoomRef back onto the wire for
 // GetJoinedRooms. The gateway prefixes the public code (R…) for clients.
 func protoRoomRef(r domain.RoomRef) *commonpb.RoomRef {
 	return &commonpb.RoomRef{
-		RoomId:          r.ID.String(),
-		PublicCode:      r.PublicCode.String(),
-		Name:            r.Name,
-		Status:          string(r.Status),
-		MetadataVersion: r.MetadataVersion,
+		RoomId:          r.ID().String(),
+		PublicCode:      r.PublicCode().String(),
+		Name:            r.Name(),
+		Status:          string(r.Status()),
+		MetadataVersion: r.MetadataVersion(),
 	}
 }
 

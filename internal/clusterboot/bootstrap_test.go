@@ -38,12 +38,12 @@ func (activeAnyRoomLoader) LoadRoom(_ context.Context, roomID id.RoomID) (domain
 	if err != nil {
 		return domain.RoomRef{}, err
 	}
-	return domain.RoomRef{
+	return domain.NewRoomRef(domain.RoomRefParams{
 		ID:         roomID,
 		PublicCode: code,
 		Name:       "Room " + roomID.String(),
 		Status:     domain.RoomStatusActive,
-	}, nil
+	})
 }
 
 // TestBuildConstructsCluster exercises both provider branches of Build. Build

@@ -226,7 +226,7 @@ func (g *Grain) hydrate(ctx cluster.GrainContext) bool {
 
 	ref, err := g.loader.LoadRoom(context.Background(), roomID)
 	switch {
-	case err == nil && ref.Status == domain.RoomStatusActive:
+	case err == nil && ref.Status() == domain.RoomStatusActive:
 		g.state.loadRoom(ref)
 		return true
 	case errors.Is(err, ErrRoomNotFound):
@@ -243,7 +243,7 @@ func (g *Grain) hydrate(ctx cluster.GrainContext) bool {
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"reason", errcode.RoomNotFound.Status(),
-			"status", string(ref.Status),
+			"status", string(ref.Status()),
 		)
 		return false
 	default:
@@ -263,7 +263,7 @@ func (g *Grain) loadMembers() {
 	if g.membership == nil {
 		return
 	}
-	roomID := g.state.roomRef().ID
+	roomID := g.state.roomRef().ID()
 	members, err := g.membership.LoadMembers(context.Background(), roomID)
 	if err != nil {
 		panic(fmt.Errorf("room: load members %s: %w", roomID, err))
@@ -430,7 +430,7 @@ func (g *Grain) recordMessage(ctx cluster.GrainContext, author id.UserID, text s
 	if g.messages == nil {
 		return MessageEvent{}, nil
 	}
-	evt, err := g.messages.RecordMessage(context.Background(), g.state.roomRef().ID, author, text)
+	evt, err := g.messages.RecordMessage(context.Background(), g.state.roomRef().ID(), author, text)
 	if err != nil {
 		slog.Error(eventRoomMessageWriteFailed,
 			"grain_type", ctx.Kind(),
@@ -450,7 +450,7 @@ func (g *Grain) recordJoin(ctx cluster.GrainContext, joiner id.UserRef) (Members
 	if g.membership == nil {
 		return MembershipEvent{}, nil
 	}
-	evt, err := g.membership.RecordJoin(context.Background(), g.state.roomRef().ID, joiner)
+	evt, err := g.membership.RecordJoin(context.Background(), g.state.roomRef().ID(), joiner)
 	if err != nil {
 		slog.Error(eventRoomMembershipWriteFailed,
 			"grain_type", ctx.Kind(),
@@ -472,7 +472,7 @@ func (g *Grain) recordLeave(ctx cluster.GrainContext, leaver id.UserRef) (Member
 	if g.membership == nil {
 		return MembershipEvent{}, nil
 	}
-	evt, err := g.membership.RecordLeave(context.Background(), g.state.roomRef().ID, leaver)
+	evt, err := g.membership.RecordLeave(context.Background(), g.state.roomRef().ID(), leaver)
 	if err != nil && errors.Is(err, persistence.ErrOwnerCannotLeave) {
 		return MembershipEvent{}, err
 	}
