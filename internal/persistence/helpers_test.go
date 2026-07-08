@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
@@ -143,7 +144,7 @@ func mustRoomID(t *testing.T, v int64) id.RoomID {
 	return rid
 }
 
-func mustUserRef(t *testing.T, rawID int64, name string) id.UserRef {
+func mustUserRef(t *testing.T, rawID int64, name string) domain.UserRef {
 	t.Helper()
 	uid, err := id.NewUserID(rawID)
 	if err != nil {
@@ -153,7 +154,7 @@ func mustUserRef(t *testing.T, rawID int64, name string) id.UserRef {
 	if err != nil {
 		t.Fatalf("NewPublicCode: %v", err)
 	}
-	ref, err := id.NewUserRef(uid, code, name)
+	ref, err := domain.NewUserRef(uid, code, name)
 	if err != nil {
 		t.Fatalf("NewUserRef(%d,%q): %v", rawID, name, err)
 	}

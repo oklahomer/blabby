@@ -31,11 +31,11 @@ type creationUsers interface {
 }
 
 type creationMemberships interface {
-	Add(ctx context.Context, q postgres.Querier, roomID id.RoomID, ref id.UserRef, role domain.MembershipRole) error
+	Add(ctx context.Context, q postgres.Querier, roomID id.RoomID, ref domain.UserRef, role domain.MembershipRole) error
 }
 
 type creationJournal interface {
-	AppendMembership(ctx context.Context, q postgres.Querier, roomID id.RoomID, actor id.UserRef, kind persistence.MemberEventKind) (id.EventID, time.Time, error)
+	AppendMembership(ctx context.Context, q postgres.Querier, roomID id.RoomID, actor domain.UserRef, kind persistence.MemberEventKind) (id.EventID, time.Time, error)
 }
 
 // roomCreateCollisionRetryLimit bounds re-running the creation transaction when a
@@ -82,7 +82,7 @@ func (s *RoomCreationService) CreateRoom(ctx context.Context, actor id.UserID, n
 		if err != nil {
 			return fmt.Errorf("room creation: resolve creator: %w", err)
 		}
-		ownerRef, err := id.NewUserRef(actor, user.PublicCode, user.DisplayName)
+		ownerRef, err := domain.NewUserRef(actor, user.PublicCode, user.DisplayName)
 		if err != nil {
 			return fmt.Errorf("room creation: creator ref: %w", err)
 		}

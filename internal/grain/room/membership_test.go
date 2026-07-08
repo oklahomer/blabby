@@ -20,7 +20,7 @@ import (
 // the actor of every RecordJoin/RecordLeave, returns a configurable event, and
 // can be made to fail to exercise the grain's fail-closed path.
 type fakeMembershipStore struct {
-	loaded        []id.UserRef
+	loaded        []domain.UserRef
 	loadErr       error
 	event         room.MembershipEvent
 	joinErr       error
@@ -46,11 +46,11 @@ type transferCall struct {
 	newOwner id.UserID
 }
 
-func (f *fakeMembershipStore) LoadMembers(context.Context, id.RoomID) ([]id.UserRef, error) {
+func (f *fakeMembershipStore) LoadMembers(context.Context, id.RoomID) ([]domain.UserRef, error) {
 	return f.loaded, f.loadErr
 }
 
-func (f *fakeMembershipStore) RecordJoin(_ context.Context, _ id.RoomID, actor id.UserRef) (room.MembershipEvent, error) {
+func (f *fakeMembershipStore) RecordJoin(_ context.Context, _ id.RoomID, actor domain.UserRef) (room.MembershipEvent, error) {
 	f.joinCalls = append(f.joinCalls, actor.ID())
 	if f.joinErr != nil {
 		return room.MembershipEvent{}, f.joinErr
@@ -58,7 +58,7 @@ func (f *fakeMembershipStore) RecordJoin(_ context.Context, _ id.RoomID, actor i
 	return f.event, nil
 }
 
-func (f *fakeMembershipStore) RecordLeave(_ context.Context, _ id.RoomID, actor id.UserRef) (room.MembershipEvent, error) {
+func (f *fakeMembershipStore) RecordLeave(_ context.Context, _ id.RoomID, actor domain.UserRef) (room.MembershipEvent, error) {
 	f.leaveCalls = append(f.leaveCalls, actor.ID())
 	if f.leaveErr != nil {
 		return room.MembershipEvent{}, f.leaveErr
@@ -77,13 +77,13 @@ func (f *fakeMembershipStore) RecordOwnershipTransfer(_ context.Context, _ id.Ro
 }
 
 // userRefFor builds a validated UserRef for tests seeding the member cache.
-func userRefFor(t *testing.T, rawID, name string) id.UserRef {
+func userRefFor(t *testing.T, rawID, name string) domain.UserRef {
 	t.Helper()
 	code, err := id.NewPublicCode()
 	if err != nil {
 		t.Fatalf("NewPublicCode: %v", err)
 	}
-	ref, err := id.NewUserRef(mustUserID(t, rawID), code, name)
+	ref, err := domain.NewUserRef(mustUserID(t, rawID), code, name)
 	if err != nil {
 		t.Fatalf("user ref %s/%s: %v", rawID, name, err)
 	}
@@ -174,7 +174,7 @@ func TestGrain_Join_FailClosedOnWriteError(t *testing.T) {
 func TestGrain_Leave_PersistsAndCarriesEvent(t *testing.T) {
 	evt := eventFixture(t)
 	store := &fakeMembershipStore{
-		loaded: []id.UserRef{userRefFor(t, "1", "Alice")},
+		loaded: []domain.UserRef{userRefFor(t, "1", "Alice")},
 		event:  evt,
 	}
 	g, notifier := newStoreGrain(t, store)
@@ -207,7 +207,7 @@ func TestGrain_Leave_PersistsAndCarriesEvent(t *testing.T) {
 
 func TestGrain_Leave_FailClosedOnWriteError(t *testing.T) {
 	store := &fakeMembershipStore{
-		loaded:   []id.UserRef{userRefFor(t, "1", "Alice")},
+		loaded:   []domain.UserRef{userRefFor(t, "1", "Alice")},
 		leaveErr: errFake("db delete failed"),
 	}
 	g, notifier := newStoreGrain(t, store)
@@ -229,7 +229,7 @@ func TestGrain_Leave_FailClosedOnWriteError(t *testing.T) {
 
 func TestGrain_Leave_OwnerIsRefused(t *testing.T) {
 	store := &fakeMembershipStore{
-		loaded:   []id.UserRef{userRefFor(t, "1", "Alice")},
+		loaded:   []domain.UserRef{userRefFor(t, "1", "Alice")},
 		leaveErr: persistence.ErrOwnerCannotLeave,
 	}
 	g, notifier := newStoreGrain(t, store)
@@ -252,7 +252,7 @@ func TestGrain_Leave_OwnerIsRefused(t *testing.T) {
 
 func TestGrain_Activation_LoadsMembers(t *testing.T) {
 	store := &fakeMembershipStore{
-		loaded: []id.UserRef{userRefFor(t, "1", "Alice"), userRefFor(t, "2", "Bob")},
+		loaded: []domain.UserRef{userRefFor(t, "1", "Alice"), userRefFor(t, "2", "Bob")},
 	}
 	g, _ := newStoreGrain(t, store)
 

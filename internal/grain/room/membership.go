@@ -44,14 +44,14 @@ var ErrRolePermissionDenied = errors.New("room: role permission denied")
 type MembershipStore interface {
 	// LoadMembers returns the room's current members, for the activation-time
 	// member cache. An empty room yields an empty slice, not an error.
-	LoadMembers(ctx context.Context, roomID id.RoomID) ([]id.UserRef, error)
+	LoadMembers(ctx context.Context, roomID id.RoomID) ([]domain.UserRef, error)
 	// RecordJoin durably adds actor as a member and appends a member_joined event
 	// in one transaction, returning the event identity for fan-out.
-	RecordJoin(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error)
+	RecordJoin(ctx context.Context, roomID id.RoomID, actor domain.UserRef) (MembershipEvent, error)
 	// RecordLeave durably removes actor and appends a member_left event in one
 	// transaction, returning the event identity for fan-out. It returns
 	// persistence.ErrOwnerCannotLeave (wrapped) when actor owns the room.
-	RecordLeave(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error)
+	RecordLeave(ctx context.Context, roomID id.RoomID, actor domain.UserRef) (MembershipEvent, error)
 	// RecordRoleChange durably sets target's role after checking, in the same
 	// transaction, that actor's role permits it (domain.CanSetRole). It returns
 	// ErrRolePermissionDenied when the policy refuses. Roles are not part of the
@@ -91,7 +91,7 @@ func NewMembershipStore(pool *pgxpool.Pool, ids persistence.EventIDSource) Membe
 	}
 }
 
-func (s *membershipStore) LoadMembers(ctx context.Context, roomID id.RoomID) ([]id.UserRef, error) {
+func (s *membershipStore) LoadMembers(ctx context.Context, roomID id.RoomID) ([]domain.UserRef, error) {
 	ctx, cancel := context.WithTimeout(ctx, membershipOpTimeout)
 	defer cancel()
 
@@ -99,14 +99,14 @@ func (s *membershipStore) LoadMembers(ctx context.Context, roomID id.RoomID) ([]
 	if err != nil {
 		return nil, err
 	}
-	refs := make([]id.UserRef, len(members))
+	refs := make([]domain.UserRef, len(members))
 	for i, m := range members {
 		refs[i] = m.User
 	}
 	return refs, nil
 }
 
-func (s *membershipStore) RecordJoin(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error) {
+func (s *membershipStore) RecordJoin(ctx context.Context, roomID id.RoomID, actor domain.UserRef) (MembershipEvent, error) {
 	// Grain-initiated joins are ordinary members; owner seeding is the gateway's
 	// room-creation path, and role mutation belongs to a later phase.
 	return s.record(ctx, roomID, actor, persistence.MemberJoined, func(ctx context.Context, q postgres.Querier) error {
@@ -114,7 +114,7 @@ func (s *membershipStore) RecordJoin(ctx context.Context, roomID id.RoomID, acto
 	})
 }
 
-func (s *membershipStore) RecordLeave(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error) {
+func (s *membershipStore) RecordLeave(ctx context.Context, roomID id.RoomID, actor domain.UserRef) (MembershipEvent, error) {
 	return s.record(ctx, roomID, actor, persistence.MemberLeft, func(ctx context.Context, q postgres.Querier) error {
 		return s.repo.Remove(ctx, q, roomID, actor.ID())
 	})
@@ -129,7 +129,7 @@ func (s *membershipStore) RecordLeave(ctx context.Context, roomID id.RoomID, act
 func (s *membershipStore) record(
 	ctx context.Context,
 	roomID id.RoomID,
-	actor id.UserRef,
+	actor domain.UserRef,
 	kind persistence.MemberEventKind,
 	mutate func(context.Context, postgres.Querier) error,
 ) (MembershipEvent, error) {

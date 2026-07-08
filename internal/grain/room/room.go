@@ -446,7 +446,7 @@ func (g *Grain) recordMessage(ctx cluster.GrainContext, author id.UserID, text s
 // recordJoin durably persists a join (membership row + member_joined event in one
 // transaction) and returns the event identity for fan-out. With no membership
 // store wired it is a no-op returning a zero event; production always wires one.
-func (g *Grain) recordJoin(ctx cluster.GrainContext, joiner id.UserRef) (MembershipEvent, error) {
+func (g *Grain) recordJoin(ctx cluster.GrainContext, joiner domain.UserRef) (MembershipEvent, error) {
 	if g.membership == nil {
 		return MembershipEvent{}, nil
 	}
@@ -468,7 +468,7 @@ func (g *Grain) recordJoin(ctx cluster.GrainContext, joiner id.UserRef) (Members
 // event in one transaction. An owner-refused leave is an expected business
 // outcome the caller maps to its own rejection; only real write failures are
 // logged here.
-func (g *Grain) recordLeave(ctx cluster.GrainContext, leaver id.UserRef) (MembershipEvent, error) {
+func (g *Grain) recordLeave(ctx cluster.GrainContext, leaver domain.UserRef) (MembershipEvent, error) {
 	if g.membership == nil {
 		return MembershipEvent{}, nil
 	}
@@ -605,22 +605,22 @@ func (g *Grain) fanOutForward(ctx cluster.GrainContext, recipients []id.UserID, 
 	})
 }
 
-// parseUserRef parses an inbound proto UserRef into a validated id.UserRef (id +
+// parseUserRef parses an inbound proto UserRef into a validated domain.UserRef (id +
 // public code + display name) at the grain boundary (parse, don't validate). A
 // nil ref, an invalid id, a missing/invalid public code, or an empty name is
 // rejected so handlers can return INVALID_REQUEST. Requiring the public code
 // here means a sender/actor whose public identity could not be resolved fails
 // closed rather than fanning its internal id out to clients.
-func parseUserRef(p *commonpb.UserRef) (id.UserRef, error) {
+func parseUserRef(p *commonpb.UserRef) (domain.UserRef, error) {
 	userID, err := id.ParseUserID(p.GetId())
 	if err != nil {
-		return id.UserRef{}, err
+		return domain.UserRef{}, err
 	}
 	code, err := id.ParsePublicCode(p.GetPublicCode())
 	if err != nil {
-		return id.UserRef{}, fmt.Errorf("user_ref: public_code: %w", err)
+		return domain.UserRef{}, fmt.Errorf("user_ref: public_code: %w", err)
 	}
-	return id.NewUserRef(userID, code, p.GetName())
+	return domain.NewUserRef(userID, code, p.GetName())
 }
 
 func joinErr(code errcode.Code, msg string) *roompb.JoinResponse {

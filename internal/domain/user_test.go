@@ -1,9 +1,10 @@
-package id_test
+package domain_test
 
 import (
 	"strings"
 	"testing"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 )
 
@@ -14,15 +15,6 @@ func mustUserID(t *testing.T, raw int64) id.UserID {
 		t.Fatalf("NewUserID(%d): %v", raw, err)
 	}
 	return u
-}
-
-func mustPublicCode(t *testing.T, raw string) id.PublicCode {
-	t.Helper()
-	c, err := id.ParsePublicCode(raw)
-	if err != nil {
-		t.Fatalf("ParsePublicCode(%q): %v", raw, err)
-	}
-	return c
 }
 
 func TestNewUserRef(t *testing.T) {
@@ -50,7 +42,7 @@ func TestNewUserRef(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ref, err := id.NewUserRef(tc.userID, tc.code, tc.display)
+			ref, err := domain.NewUserRef(tc.userID, tc.code, tc.display)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got ref %+v", ref)
@@ -74,7 +66,7 @@ func TestNewUserRef(t *testing.T) {
 }
 
 func TestUserRefPublicID(t *testing.T) {
-	ref, err := id.NewUserRef(mustUserID(t, 1), mustPublicCode(t, "A000000001"), "Alice")
+	ref, err := domain.NewUserRef(mustUserID(t, 1), mustPublicCode(t, "A000000001"), "Alice")
 	if err != nil {
 		t.Fatalf("NewUserRef: %v", err)
 	}

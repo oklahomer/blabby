@@ -106,7 +106,7 @@ var ErrProfileNotFound = errors.New("user: profile not found")
 // it resolves the same profile on every cluster member — including renames, unlike
 // a per-node store.
 type Directory interface {
-	Resolve(ctx context.Context, userID id.UserID) (id.UserRef, error)
+	Resolve(ctx context.Context, userID id.UserID) (domain.UserRef, error)
 }
 
 // Option configures a User kind built by NewKind.

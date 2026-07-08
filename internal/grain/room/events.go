@@ -8,14 +8,13 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/domain"
-	"github.com/oklahomer/blabby/internal/id"
 )
 
 // buildJoinedEvent shapes the NotifyRoomEvent payload sent to every current
 // member when a user joins. room carries the room's reference metadata (the
 // connection renders its public code); joiner carries the subject's id and
 // display name; evt carries the durable event's id and timestamp.
-func buildJoinedEvent(room domain.RoomRef, joiner id.UserRef, evt MembershipEvent) *userpb.NotifyRoomEventRequest {
+func buildJoinedEvent(room domain.RoomRef, joiner domain.UserRef, evt MembershipEvent) *userpb.NotifyRoomEventRequest {
 	req := &userpb.NotifyRoomEventRequest{
 		Room:      protoRoomRef(room),
 		User:      protoUserRef(joiner),
@@ -27,7 +26,7 @@ func buildJoinedEvent(room domain.RoomRef, joiner id.UserRef, evt MembershipEven
 
 // buildLeftEvent shapes the NotifyRoomEvent payload sent to every member of
 // the pre-removal snapshot when a user leaves.
-func buildLeftEvent(room domain.RoomRef, leaver id.UserRef, evt MembershipEvent) *userpb.NotifyRoomEventRequest {
+func buildLeftEvent(room domain.RoomRef, leaver domain.UserRef, evt MembershipEvent) *userpb.NotifyRoomEventRequest {
 	req := &userpb.NotifyRoomEventRequest{
 		Room:      protoRoomRef(room),
 		User:      protoUserRef(leaver),
@@ -54,7 +53,7 @@ func applyMembershipEvent(req *userpb.NotifyRoomEventRequest, evt MembershipEven
 // carries the author's id and display name; eventID is the durable
 // message_posted event id ("" when the grain runs storeless in unit tests),
 // so a client can order and dedup the live frame against timeline history.
-func buildForwardMessage(room domain.RoomRef, sender id.UserRef, text string, timestamp time.Time, eventID string) *userpb.ForwardMessageRequest {
+func buildForwardMessage(room domain.RoomRef, sender domain.UserRef, text string, timestamp time.Time, eventID string) *userpb.ForwardMessageRequest {
 	return &userpb.ForwardMessageRequest{
 		Room:      protoRoomRef(room),
 		Sender:    protoUserRef(sender),
@@ -64,12 +63,12 @@ func buildForwardMessage(room domain.RoomRef, sender id.UserRef, text string, ti
 	}
 }
 
-// protoUserRef converts the user identity ref (id.UserRef: id + public code +
+// protoUserRef converts the user identity ref (domain.UserRef: id + public code +
 // display name) into the wire UserRef carried by fan-out payloads. The public
 // code is what a connection renders as the client-facing U…; the internal id
 // travels only for server-side correlation, never onto a client frame. The
 // status field stays empty — fan-out consumers do not use it.
-func protoUserRef(u id.UserRef) *commonpb.UserRef {
+func protoUserRef(u domain.UserRef) *commonpb.UserRef {
 	return &commonpb.UserRef{
 		Id:         u.ID().String(),
 		Name:       u.Name(),

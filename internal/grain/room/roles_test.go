@@ -8,7 +8,6 @@ import (
 	roompb "github.com/oklahomer/blabby/gen/room"
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/room"
-	"github.com/oklahomer/blabby/internal/id"
 	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
 )
 
@@ -25,9 +24,9 @@ func rolesGrain(t *testing.T, store room.MembershipStore) *room.Grain {
 	return g
 }
 
-func aliceAndBob(t *testing.T) []id.UserRef {
+func aliceAndBob(t *testing.T) []domain.UserRef {
 	t.Helper()
-	return []id.UserRef{userRefFor(t, "1", "Alice"), userRefFor(t, "2", "Bob")}
+	return []domain.UserRef{userRefFor(t, "1", "Alice"), userRefFor(t, "2", "Bob")}
 }
 
 func protoActor(id, name string) *commonpb.UserRef {

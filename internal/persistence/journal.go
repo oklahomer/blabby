@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
@@ -76,7 +77,7 @@ RETURNING occurred_at`
 // The caller runs this inside the same transaction as the authoritative
 // room_membership change, so the row and its derived timeline event commit (or
 // roll back) together.
-func (j *Journal) AppendMembership(ctx context.Context, q postgres.Querier, roomID id.RoomID, actor id.UserRef, kind MemberEventKind) (id.EventID, time.Time, error) {
+func (j *Journal) AppendMembership(ctx context.Context, q postgres.Querier, roomID id.RoomID, actor domain.UserRef, kind MemberEventKind) (id.EventID, time.Time, error) {
 	eventType, err := kind.eventType()
 	if err != nil {
 		return id.EventID{}, time.Time{}, err

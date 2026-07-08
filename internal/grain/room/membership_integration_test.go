@@ -91,7 +91,7 @@ func TestMembershipStore_RoleOps_Integration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewPublicCode: %v", err)
 		}
-		ref, err := id.NewUserRef(u.uid, code, u.name)
+		ref, err := domain.NewUserRef(u.uid, code, u.name)
 		if err != nil {
 			t.Fatalf("NewUserRef: %v", err)
 		}

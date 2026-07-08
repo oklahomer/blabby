@@ -78,7 +78,7 @@ const addSQL = `INSERT INTO room_membership (room_id, user_id, role) VALUES ($1,
 // Add inserts a membership row. The Room grain calls this only after confirming
 // from its cache that the user is not already a member, so a duplicate (the
 // composite PK) is a contract violation surfaced as a hard error, not silenced.
-func (r *MembershipRepo) Add(ctx context.Context, q postgres.Querier, roomID id.RoomID, ref id.UserRef, role domain.MembershipRole) error {
+func (r *MembershipRepo) Add(ctx context.Context, q postgres.Querier, roomID id.RoomID, ref domain.UserRef, role domain.MembershipRole) error {
 	if _, err := q.Exec(ctx, addSQL, roomID.Int64(), ref.ID().Int64(), string(role)); err != nil {
 		return fmt.Errorf("persistence: add: %w", err)
 	}

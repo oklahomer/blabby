@@ -2,9 +2,6 @@ package domain
 
 import (
 	"fmt"
-	"time"
-
-	"github.com/oklahomer/blabby/internal/id"
 )
 
 // MembershipRole is a member's role in a room, mirroring the membership_role SQL
@@ -49,41 +46,4 @@ func CanSetRole(actorRole, targetRole, newRole MembershipRole) bool {
 // the room's ownership. Only the owner may hand the room over.
 func CanTransferOwnership(actorRole MembershipRole) bool {
 	return actorRole == MembershipRoleOwner
-}
-
-// MembershipRef is the room-centric view of one membership: who the member is
-// (UserRef) plus their relationship metadata. The Room grain caches these keyed by
-// UserID, so it can fan out messages and member events with sender/member public
-// code, display name, and role without querying the User grain per message.
-//
-// It does not carry a RoomID (the owning Room grain already knows the room) nor a
-// top-level UserID (the map key and User.ID carry that identity).
-type MembershipRef struct {
-	User            UserRef
-	Role            MembershipRole
-	JoinedAt        time.Time
-	MetadataVersion int64
-}
-
-// JoinedRoomRef is the user-centric mirror of MembershipRef: which room was joined
-// (RoomRef) plus the relationship metadata. The User grain caches these keyed by
-// RoomID, so GetJoinedRooms can return room descriptors and membership metadata
-// directly without a room-repository lookup per request.
-type JoinedRoomRef struct {
-	Room            RoomRef
-	Role            MembershipRole
-	JoinedAt        time.Time
-	MetadataVersion int64
-}
-
-// MembershipRecord is a self-identifying membership row: it carries both ids
-// because it is not nested under a room or user. Use it for database rows, batch
-// query results, audit logs, or queue/event payloads, where the relationship must
-// identify itself.
-type MembershipRecord struct {
-	RoomID          id.RoomID
-	UserID          id.UserID
-	Role            MembershipRole
-	JoinedAt        time.Time
-	MetadataVersion int64
 }

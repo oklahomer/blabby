@@ -48,11 +48,11 @@ type fakeCreationMemberships struct {
 	err   error
 	calls int
 	room  id.RoomID
-	ref   id.UserRef
+	ref   domain.UserRef
 	role  domain.MembershipRole
 }
 
-func (f *fakeCreationMemberships) Add(_ context.Context, _ postgres.Querier, roomID id.RoomID, ref id.UserRef, role domain.MembershipRole) error {
+func (f *fakeCreationMemberships) Add(_ context.Context, _ postgres.Querier, roomID id.RoomID, ref domain.UserRef, role domain.MembershipRole) error {
 	f.calls++
 	f.room, f.ref, f.role = roomID, ref, role
 	return f.err
@@ -62,11 +62,11 @@ type fakeCreationJournal struct {
 	err   error
 	calls int
 	room  id.RoomID
-	ref   id.UserRef
+	ref   domain.UserRef
 	kind  persistence.MemberEventKind
 }
 
-func (f *fakeCreationJournal) AppendMembership(_ context.Context, _ postgres.Querier, roomID id.RoomID, actor id.UserRef, kind persistence.MemberEventKind) (id.EventID, time.Time, error) {
+func (f *fakeCreationJournal) AppendMembership(_ context.Context, _ postgres.Querier, roomID id.RoomID, actor domain.UserRef, kind persistence.MemberEventKind) (id.EventID, time.Time, error) {
 	f.calls++
 	f.room, f.ref, f.kind = roomID, actor, kind
 	if f.err != nil {

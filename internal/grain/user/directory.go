@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
@@ -30,16 +31,16 @@ func NewRepoDirectory(pool postgres.Querier) Directory {
 	return repoDirectory{repo: persistence.NewUserRepo(nil), pool: pool}
 }
 
-func (d repoDirectory) Resolve(ctx context.Context, userID id.UserID) (id.UserRef, error) {
+func (d repoDirectory) Resolve(ctx context.Context, userID id.UserID) (domain.UserRef, error) {
 	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
 
 	user, err := d.repo.FindByID(ctx, d.pool, userID)
 	if errors.Is(err, persistence.ErrUserNotFound) {
-		return id.UserRef{}, ErrProfileNotFound
+		return domain.UserRef{}, ErrProfileNotFound
 	}
 	if err != nil {
-		return id.UserRef{}, fmt.Errorf("user: resolve directory: %w", err)
+		return domain.UserRef{}, fmt.Errorf("user: resolve directory: %w", err)
 	}
-	return id.NewUserRef(userID, user.PublicCode, user.DisplayName)
+	return domain.NewUserRef(userID, user.PublicCode, user.DisplayName)
 }

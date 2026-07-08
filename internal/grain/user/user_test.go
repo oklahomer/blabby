@@ -20,6 +20,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	roompb "github.com/oklahomer/blabby/gen/room"
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/user"
 	"github.com/oklahomer/blabby/internal/id"
 	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
@@ -962,11 +963,11 @@ func TestGrain_NewKind_ReturnsRegisteredKind(t *testing.T) {
 // by the test: a fixed UserRef on success, or a non-nil error to exercise the
 // directory-miss fallback.
 type resolveDirStub struct {
-	ref id.UserRef
+	ref domain.UserRef
 	err error
 }
 
-func (d resolveDirStub) Resolve(context.Context, id.UserID) (id.UserRef, error) {
+func (d resolveDirStub) Resolve(context.Context, id.UserID) (domain.UserRef, error) {
 	return d.ref, d.err
 }
 
@@ -985,7 +986,7 @@ func TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParsePublicCode: %v", err)
 	}
-	seededRef, err := id.NewUserRef(aliceID, aliceCode, "Alice Display")
+	seededRef, err := domain.NewUserRef(aliceID, aliceCode, "Alice Display")
 	if err != nil {
 		t.Fatalf("NewUserRef: %v", err)
 	}

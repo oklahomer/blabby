@@ -18,7 +18,7 @@ import (
 // per-request room lookup. The key is the routing-truth RoomID; the value's
 // nested RoomRef.ID carries the same identity (an owner/key id repeated inside a
 // nested ref is allowed). The cache is interim RoomRef-only; it gains role and
-// joined-time (JoinedRoomRef) once membership is persisted.
+// joined-time once the membership relationship is cached alongside the room.
 type userState struct {
 	connections map[string]*actor.PID
 	joinedRooms map[id.RoomID]domain.RoomRef

@@ -9,6 +9,7 @@ import (
 	"github.com/asynkron/protoactor-go/actor"
 
 	userpb "github.com/oklahomer/blabby/gen/user"
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
 	"github.com/oklahomer/blabby/internal/id"
@@ -20,9 +21,9 @@ import (
 // real grains to the connection.
 type stubDirectory struct{ name string }
 
-func (d stubDirectory) Resolve(_ context.Context, uid id.UserID) (id.UserRef, error) {
+func (d stubDirectory) Resolve(_ context.Context, uid id.UserID) (domain.UserRef, error) {
 	code, _ := id.NewPublicCode()
-	return id.NewUserRef(uid, code, d.name)
+	return domain.NewUserRef(uid, code, d.name)
 }
 
 // fanoutProbe is a regular actor that records the fan-out messages a User

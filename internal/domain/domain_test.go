@@ -138,7 +138,11 @@ func TestRefPublicIDs(t *testing.T) {
 	if got := roomRef.PublicID(); got != "RG000000004" {
 		t.Errorf("RoomRef.PublicID() = %q, want RG000000004", got)
 	}
-	if got := (domain.UserRef{PublicCode: code}).PublicID(); got != "UG000000004" {
+	userRef, err := domain.NewUserRef(mustUserID(t, 1), code, "Alice")
+	if err != nil {
+		t.Fatalf("NewUserRef: %v", err)
+	}
+	if got := userRef.PublicID(); got != "UG000000004" {
 		t.Errorf("UserRef.PublicID() = %q, want UG000000004", got)
 	}
 }
