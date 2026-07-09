@@ -34,7 +34,16 @@ func joinedRoomRef(t *testing.T, rawID, rawCode, name string) domain.RoomRef {
 	if err != nil {
 		t.Fatalf("public code %s: %v", rawCode, err)
 	}
-	return domain.RoomRef{ID: rid, PublicCode: code, Name: name, Status: domain.RoomStatusActive}
+	ref, err := domain.NewRoomRef(domain.RoomRefParams{
+		ID:         rid,
+		PublicCode: code,
+		Name:       name,
+		Status:     domain.RoomStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("NewRoomRef(%s): %v", rawID, err)
+	}
+	return ref
 }
 
 func TestGrain_Init_HydratesJoinedRooms(t *testing.T) {

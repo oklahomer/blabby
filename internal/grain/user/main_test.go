@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	roompb "github.com/oklahomer/blabby/gen/room"
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/user"
 	"github.com/oklahomer/blabby/internal/id"
 	clustertest "github.com/oklahomer/blabby/internal/testutil/cluster"
@@ -62,9 +63,9 @@ const seededDisplayName = "Alice Example"
 // assert the seeded name flows into the Room grain.
 type fakeDirectory struct{}
 
-func (fakeDirectory) Resolve(_ context.Context, uid id.UserID) (id.UserRef, error) {
+func (fakeDirectory) Resolve(_ context.Context, uid id.UserID) (domain.UserRef, error) {
 	code, _ := id.NewPublicCode()
-	return id.NewUserRef(uid, code, seededDisplayName)
+	return domain.NewUserRef(uid, code, seededDisplayName)
 }
 
 func TestMain(m *testing.M) {

@@ -106,7 +106,7 @@ var ErrProfileNotFound = errors.New("user: profile not found")
 // it resolves the same profile on every cluster member — including renames, unlike
 // a per-node store.
 type Directory interface {
-	Resolve(ctx context.Context, userID id.UserID) (id.UserRef, error)
+	Resolve(ctx context.Context, userID id.UserID) (domain.UserRef, error)
 }
 
 // Option configures a User kind built by NewKind.
@@ -567,8 +567,8 @@ func parseRoomError(ctx cluster.GrainContext, operation string, roomID id.RoomID
 
 // parseRoomRef parses the proto RoomRef carried on a Join response into a typed
 // domain.RoomRef at the grain boundary (parse, don't validate). A nil ref, an
-// invalid id or public code, or an unknown status is rejected so the caller can
-// fail closed rather than cache a degraded entry.
+// invalid id or public code, an unknown status, or a blank/over-long name is
+// rejected so the caller can fail closed rather than cache a degraded entry.
 func parseRoomRef(p *commonpb.RoomRef) (domain.RoomRef, error) {
 	roomID, err := id.ParseRoomID(p.GetRoomId())
 	if err != nil {
@@ -582,24 +582,24 @@ func parseRoomRef(p *commonpb.RoomRef) (domain.RoomRef, error) {
 	if err != nil {
 		return domain.RoomRef{}, fmt.Errorf("status: %w", err)
 	}
-	return domain.RoomRef{
+	return domain.NewRoomRef(domain.RoomRefParams{
 		ID:              roomID,
 		PublicCode:      code,
 		Name:            p.GetName(),
 		Status:          status,
 		MetadataVersion: p.GetMetadataVersion(),
-	}, nil
+	})
 }
 
 // protoRoomRef renders a cached domain.RoomRef back onto the wire for
 // GetJoinedRooms. The gateway prefixes the public code (R…) for clients.
 func protoRoomRef(r domain.RoomRef) *commonpb.RoomRef {
 	return &commonpb.RoomRef{
-		RoomId:          r.ID.String(),
-		PublicCode:      r.PublicCode.String(),
-		Name:            r.Name,
-		Status:          string(r.Status),
-		MetadataVersion: r.MetadataVersion,
+		RoomId:          r.ID().String(),
+		PublicCode:      r.PublicCode().String(),
+		Name:            r.Name(),
+		Status:          string(r.Status()),
+		MetadataVersion: r.MetadataVersion(),
 	}
 }
 

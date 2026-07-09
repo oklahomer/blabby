@@ -72,11 +72,15 @@ func (l roomRepoLoader) LoadRoom(ctx context.Context, roomID id.RoomID) (domain.
 	// metadata writes in the same millisecond do not collapse to one version
 	// under a receiver's "ignore older" check. A monotonic revision column is the
 	// eventual robust form; this is the interim stand-in.
-	return domain.RoomRef{
+	ref, err := domain.NewRoomRef(domain.RoomRefParams{
 		ID:              room.ID,
 		PublicCode:      room.PublicCode,
 		Name:            room.DisplayName,
 		Status:          room.Status,
 		MetadataVersion: room.UpdatedAt.UnixMicro(),
-	}, nil
+	})
+	if err != nil {
+		return domain.RoomRef{}, fmt.Errorf("room: load room: %w", err)
+	}
+	return ref, nil
 }

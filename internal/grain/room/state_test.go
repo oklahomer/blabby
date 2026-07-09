@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 )
 
@@ -17,16 +18,16 @@ func mustUserID(t *testing.T, raw string) id.UserID {
 	return u
 }
 
-// mustUserRef builds a typed id.UserRef from a raw id and display name,
+// mustUserRef builds a typed domain.UserRef from a raw id and display name,
 // failing the test on any construction error. It keeps the member-cache
 // tests readable now that addMember/refreshMember take a UserRef.
-func mustUserRef(t *testing.T, rawID, name string) id.UserRef {
+func mustUserRef(t *testing.T, rawID, name string) domain.UserRef {
 	t.Helper()
 	code, err := id.NewPublicCode()
 	if err != nil {
 		t.Fatalf("NewPublicCode: %v", err)
 	}
-	ref, err := id.NewUserRef(mustUserID(t, rawID), code, name)
+	ref, err := domain.NewUserRef(mustUserID(t, rawID), code, name)
 	if err != nil {
 		t.Fatalf("mustUserRef(%q, %q): %v", rawID, name, err)
 	}
@@ -142,7 +143,7 @@ func TestRoomState_MemberRef_CachesNameAndRefresh(t *testing.T) {
 
 func TestRoomState_MemberIDs_Sorted(t *testing.T) {
 	s := newRoomState()
-	for _, ref := range []id.UserRef{mustUserRef(t, "3", "3"), mustUserRef(t, "1", "1"), mustUserRef(t, "2", "2")} {
+	for _, ref := range []domain.UserRef{mustUserRef(t, "3", "3"), mustUserRef(t, "1", "1"), mustUserRef(t, "2", "2")} {
 		s.addMember(ref)
 	}
 

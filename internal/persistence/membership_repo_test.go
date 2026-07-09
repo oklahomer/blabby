@@ -76,11 +76,11 @@ func TestListByUser(t *testing.T) {
 		t.Fatalf("rooms: got %d, want 1", len(rooms))
 	}
 	r := rooms[0]
-	if r.ID.Int64() != 4 || r.PublicCode.String() != "G000000004" || r.Name != "General" || r.Status != domain.RoomStatusActive {
+	if r.ID().Int64() != 4 || r.PublicCode().String() != "G000000004" || r.Name() != "General" || r.Status() != domain.RoomStatusActive {
 		t.Errorf("room = %+v", r)
 	}
-	if r.MetadataVersion != ts.UnixMicro() {
-		t.Errorf("MetadataVersion = %d, want %d (updated_at micros)", r.MetadataVersion, ts.UnixMicro())
+	if r.MetadataVersion() != ts.UnixMicro() {
+		t.Errorf("MetadataVersion = %d, want %d (updated_at micros)", r.MetadataVersion(), ts.UnixMicro())
 	}
 	// Joined-rooms are active-only, mirroring the room repo's reads.
 	if !strings.Contains(gotSQL, "r.status = 'active'") {

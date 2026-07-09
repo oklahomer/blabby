@@ -47,7 +47,7 @@ func (s stubRoomLoader) LoadRoom(_ context.Context, roomID id.RoomID) (domain.Ro
 func seededLoader(refs ...domain.RoomRef) stubRoomLoader {
 	m := make(map[id.RoomID]domain.RoomRef, len(refs))
 	for _, r := range refs {
-		m[r.ID] = r
+		m[r.ID()] = r
 	}
 	return stubRoomLoader{rooms: m}
 }
@@ -69,7 +69,16 @@ func roomRef(t *testing.T, raw string, status domain.RoomStatus) domain.RoomRef 
 	if err != nil {
 		t.Fatalf("roomRef public code: %v", err)
 	}
-	return domain.RoomRef{ID: rid, PublicCode: code, Name: "Room " + raw, Status: status}
+	ref, err := domain.NewRoomRef(domain.RoomRefParams{
+		ID:         rid,
+		PublicCode: code,
+		Name:       "Room " + raw,
+		Status:     status,
+	})
+	if err != nil {
+		t.Fatalf("NewRoomRef(%q): %v", raw, err)
+	}
+	return ref
 }
 
 // activeRoomRef builds an active RoomRef for a decimal RoomID, so test files that

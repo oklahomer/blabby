@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence"
@@ -16,12 +17,12 @@ import (
 // connection now require (a code-less self fails closed and drops frames).
 type stubUserDirectory struct{}
 
-func (stubUserDirectory) Resolve(_ context.Context, uid id.UserID) (id.UserRef, error) {
+func (stubUserDirectory) Resolve(_ context.Context, uid id.UserID) (domain.UserRef, error) {
 	code, err := id.ParsePublicCode("A000000001")
 	if err != nil {
-		return id.UserRef{}, err
+		return domain.UserRef{}, err
 	}
-	return id.NewUserRef(uid, code, fmt.Sprintf("user-%s", uid))
+	return domain.NewUserRef(uid, code, fmt.Sprintf("user-%s", uid))
 }
 
 // stubRoomDirectory is an in-memory gateway.RoomDirectory for the external

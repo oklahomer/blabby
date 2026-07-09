@@ -31,7 +31,12 @@ func (activeRoomLoader) LoadRoom(_ context.Context, roomID id.RoomID) (domain.Ro
 	if err != nil {
 		return domain.RoomRef{}, err
 	}
-	return domain.RoomRef{ID: roomID, PublicCode: code, Name: "Room " + roomID.String(), Status: domain.RoomStatusActive}, nil
+	return domain.NewRoomRef(domain.RoomRefParams{
+		ID:         roomID,
+		PublicCode: code,
+		Name:       "Room " + roomID.String(),
+		Status:     domain.RoomStatusActive,
+	})
 }
 
 // stubDirectory resolves every id to a UserRef with a valid public code, so the
@@ -39,12 +44,12 @@ func (activeRoomLoader) LoadRoom(_ context.Context, roomID id.RoomID) (domain.Ro
 // every command (a code-less self fails closed at the Room boundary).
 type stubDirectory struct{}
 
-func (stubDirectory) Resolve(_ context.Context, uid id.UserID) (id.UserRef, error) {
+func (stubDirectory) Resolve(_ context.Context, uid id.UserID) (domain.UserRef, error) {
 	code, err := id.ParsePublicCode("A000000001")
 	if err != nil {
-		return id.UserRef{}, err
+		return domain.UserRef{}, err
 	}
-	return id.NewUserRef(uid, code, "user-"+uid.String())
+	return domain.NewUserRef(uid, code, "user-"+uid.String())
 }
 
 // syncBuffer is a goroutine-safe *bytes.Buffer wrapper. The slog handler

@@ -19,12 +19,31 @@ func mustRoomID(t *testing.T, raw string) id.RoomID {
 	return r
 }
 
+// mustRoomRef builds a valid active ref for state tests. The public code is a
+// fixed arbitrary value because these tests never render it; identity is the id.
+func mustRoomRef(t *testing.T, rawID, name string) domain.RoomRef {
+	t.Helper()
+	code, err := id.ParsePublicCode("G000000004")
+	if err != nil {
+		t.Fatalf("ParsePublicCode: %v", err)
+	}
+	ref, err := domain.NewRoomRef(domain.RoomRefParams{
+		ID:         mustRoomID(t, rawID),
+		PublicCode: code,
+		Name:       name,
+		Status:     domain.RoomStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("NewRoomRef(%s): %v", rawID, err)
+	}
+	return ref
+}
+
 // joinRoomID records a minimal active ref for raw in s, for membership-set tests
 // that care only about which rooms are joined, not the cached metadata.
 func joinRoomID(t *testing.T, s *userState, raw string) {
 	t.Helper()
-	rid := mustRoomID(t, raw)
-	s.joinRoom(domain.RoomRef{ID: rid, Status: domain.RoomStatusActive})
+	s.joinRoom(mustRoomRef(t, raw, "Room "+raw))
 }
 
 func TestUserState_AddConnection(t *testing.T) {
@@ -208,13 +227,13 @@ func TestUserState_JoinedRooms(t *testing.T) {
 func TestUserState_JoinedRoomRefs(t *testing.T) {
 	t.Run("returns cached refs sorted by room id", func(t *testing.T) {
 		s := newUserState()
-		s.joinRoom(domain.RoomRef{ID: mustRoomID(t, "22"), Name: "Room 22", Status: domain.RoomStatusActive})
-		s.joinRoom(domain.RoomRef{ID: mustRoomID(t, "20"), Name: "Room 20", Status: domain.RoomStatusActive})
+		s.joinRoom(mustRoomRef(t, "22", "Room 22"))
+		s.joinRoom(mustRoomRef(t, "20", "Room 20"))
 
 		got := s.joinedRoomRefs()
 		want := []domain.RoomRef{
-			{ID: mustRoomID(t, "20"), Name: "Room 20", Status: domain.RoomStatusActive},
-			{ID: mustRoomID(t, "22"), Name: "Room 22", Status: domain.RoomStatusActive},
+			mustRoomRef(t, "20", "Room 20"),
+			mustRoomRef(t, "22", "Room 22"),
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("joinedRoomRefs: got %v, want %v", got, want)
@@ -223,11 +242,11 @@ func TestUserState_JoinedRoomRefs(t *testing.T) {
 
 	t.Run("re-join refreshes the cached ref", func(t *testing.T) {
 		s := newUserState()
-		s.joinRoom(domain.RoomRef{ID: mustRoomID(t, "4"), Name: "Old", Status: domain.RoomStatusActive})
-		s.joinRoom(domain.RoomRef{ID: mustRoomID(t, "4"), Name: "New", Status: domain.RoomStatusActive})
+		s.joinRoom(mustRoomRef(t, "4", "Old"))
+		s.joinRoom(mustRoomRef(t, "4", "New"))
 
 		got := s.joinedRoomRefs()
-		if len(got) != 1 || got[0].Name != "New" {
+		if len(got) != 1 || got[0].Name() != "New" {
 			t.Errorf("joinedRoomRefs after re-join: got %v, want a single ref named New", got)
 		}
 	})

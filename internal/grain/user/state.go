@@ -18,7 +18,7 @@ import (
 // per-request room lookup. The key is the routing-truth RoomID; the value's
 // nested RoomRef.ID carries the same identity (an owner/key id repeated inside a
 // nested ref is allowed). The cache is interim RoomRef-only; it gains role and
-// joined-time (JoinedRoomRef) once membership is persisted.
+// joined-time once the membership relationship is cached alongside the room.
 type userState struct {
 	connections map[string]*actor.PID
 	joinedRooms map[id.RoomID]domain.RoomRef
@@ -77,7 +77,7 @@ func (s *userState) connectionPIDs() []*actor.PID {
 // joinRoom records ref in the joined set, keyed by its own RoomID. Re-joining
 // overwrites the cached ref so a re-join refreshes the room's metadata snapshot.
 func (s *userState) joinRoom(ref domain.RoomRef) {
-	s.joinedRooms[ref.ID] = ref
+	s.joinedRooms[ref.ID()] = ref
 }
 
 // leaveRoom drops roomID from the joined set. No-op if absent.
@@ -102,6 +102,6 @@ func (s *userState) joinedRoomRefs() []domain.RoomRef {
 	for _, ref := range s.joinedRooms {
 		out = append(out, ref)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID.Int64() < out[j].ID.Int64() })
+	sort.Slice(out, func(i, j int) bool { return out[i].ID().Int64() < out[j].ID().Int64() })
 	return out
 }

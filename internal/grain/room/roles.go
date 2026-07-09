@@ -53,7 +53,7 @@ func (g *Grain) SetMemberRole(req *roompb.SetMemberRoleRequest, ctx cluster.Grai
 		return setRoleErr(errcode.InternalError, "role management unavailable"), nil
 	}
 
-	err = g.membership.RecordRoleChange(context.Background(), g.state.roomRef().ID, actor.ID(), targetID, role)
+	err = g.membership.RecordRoleChange(context.Background(), g.state.roomRef().ID(), actor.ID(), targetID, role)
 	switch {
 	case errors.Is(err, ErrRolePermissionDenied):
 		g.logRoleRejected(ctx, eventRoomRoleChangeRejected, actor.ID().String(), errcode.RoomPermissionDenied, nil)
@@ -111,7 +111,7 @@ func (g *Grain) TransferOwnership(req *roompb.TransferOwnershipRequest, ctx clus
 		return transferErr(errcode.InternalError, "role management unavailable"), nil
 	}
 
-	err = g.membership.RecordOwnershipTransfer(context.Background(), g.state.roomRef().ID, actor.ID(), newOwnerID)
+	err = g.membership.RecordOwnershipTransfer(context.Background(), g.state.roomRef().ID(), actor.ID(), newOwnerID)
 	switch {
 	case errors.Is(err, ErrRolePermissionDenied):
 		g.logRoleRejected(ctx, eventRoomOwnershipTransferRejected, actor.ID().String(), errcode.RoomPermissionDenied, nil)

@@ -21,7 +21,16 @@ func eventsRoomRef(t *testing.T) domain.RoomRef {
 	if err != nil {
 		t.Fatalf("public code: %v", err)
 	}
-	return domain.RoomRef{ID: rid, PublicCode: code, Name: "General", Status: domain.RoomStatusActive}
+	ref, err := domain.NewRoomRef(domain.RoomRefParams{
+		ID:         rid,
+		PublicCode: code,
+		Name:       "General",
+		Status:     domain.RoomStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("NewRoomRef: %v", err)
+	}
+	return ref
 }
 
 // sampleMembershipEvent builds a non-zero MembershipEvent so the fan-out
