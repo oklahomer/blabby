@@ -3,7 +3,6 @@
 package clusterboot
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,7 +13,6 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +30,7 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence/accountgc"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 	"github.com/oklahomer/blabby/internal/persistence/workerlease"
+	"github.com/oklahomer/blabby/internal/testutil/logcapture"
 )
 
 const (
@@ -71,23 +70,6 @@ func (p *connectionProbe) Receive(ctx actor.Context) {
 	case *userpb.NotifyRoomEventRequest:
 		p.notifications <- msg
 	}
-}
-
-type traceCapture struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (c *traceCapture) Write(p []byte) (int, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.buf.Write(p)
-}
-
-func (c *traceCapture) String() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.buf.String()
 }
 
 type traceStep struct {
@@ -192,7 +174,7 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 		assertMessage(t, recoveryAfter, bodyMarker)
 		assertNoMessage(t, recoveryBefore, "departed User grain retained its old connection")
 
-		assertTrace(t, trace.lines(t),
+		assertTrace(t, captureLines(t, trace),
 			traceStep{event: "server.cluster.member_left", attrs: map[string]string{"node_address": victimAddress}},
 			traceStep{event: "grain.activated", attrs: map[string]string{"grain_type": userKind.name, "grain_id": recoveryUserID}},
 			traceStep{event: "user.connection.registered", attrs: map[string]string{"grain_id": recoveryUserID}},
@@ -222,7 +204,7 @@ func TestMultiMemberDepartureAndReactivation(t *testing.T) {
 		assertMessage(t, routingConnection, bodyMarker)
 		assertNoAdditionalMessage(t, routingConnection, bodyMarker)
 
-		assertTrace(t, trace.lines(t),
+		assertTrace(t, captureLines(t, trace),
 			traceStep{event: "server.cluster.member_left", attrs: map[string]string{"node_address": victimAddress}},
 			traceStep{event: "grain.activated", attrs: map[string]string{"grain_type": roomKind.name, "grain_id": roomID}},
 			traceStep{event: "room.message.posted", attrs: map[string]string{"grain_id": roomID}},
@@ -731,16 +713,12 @@ func assertNoAdditionalMessage(t *testing.T, probe *connectionProbe, deliveredTe
 	}
 }
 
-func startTraceCapture(t *testing.T) *traceCapture {
+func startTraceCapture(t *testing.T) *logcapture.Buffer {
 	t.Helper()
-	capture := &traceCapture{}
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(capture, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-	return capture
+	return logcapture.JSON(t, slog.LevelDebug)
 }
 
-func (c *traceCapture) lines(t *testing.T) []map[string]any {
+func captureLines(t *testing.T, c *logcapture.Buffer) []map[string]any {
 	t.Helper()
 	var lines []map[string]any
 	for _, raw := range strings.Split(strings.TrimSpace(c.String()), "\n") {
@@ -787,7 +765,7 @@ func lineMatches(line map[string]any, step traceStep) bool {
 	return true
 }
 
-func assertLogOmits(t *testing.T, capture *traceCapture, marker string) {
+func assertLogOmits(t *testing.T, capture *logcapture.Buffer, marker string) {
 	t.Helper()
 	if strings.Contains(capture.String(), marker) {
 		t.Errorf("recovery logs leaked message body %q", marker)

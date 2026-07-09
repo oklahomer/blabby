@@ -1,9 +1,7 @@
 package room_test
 
 import (
-	"bytes"
 	"context"
-	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
@@ -18,6 +16,7 @@ import (
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/id"
 	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
+	"github.com/oklahomer/blabby/internal/testutil/logcapture"
 )
 
 // testRoomID is the grain identity used across these tests. It must be a valid
@@ -622,10 +621,7 @@ func TestGrain_Activation_PanicsOnTransientLoadError(t *testing.T) {
 // internal/middleware/logging_test.go for those assertions.
 
 func TestGrain_ReceiveDefault_LogsUnhandled(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	buf := logcapture.Text(t)
 
 	g, _, _ := newGrain(t)
 	g.ReceiveDefault(graintest.NewFakeGrainContextWithMessage("general", struct{ X int }{X: 42}))
@@ -670,10 +666,7 @@ func TestGrain_FanOutNotifyError_LoggedNotFatal(t *testing.T) {
 }
 
 func TestGrain_DomainLogsCarryEnvelopeAttrs(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	buf := logcapture.Text(t)
 
 	g, _, _ := newGrain(t)
 	mustJoin(t, g, "1")

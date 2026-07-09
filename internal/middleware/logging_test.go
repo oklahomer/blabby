@@ -12,6 +12,7 @@ import (
 	"github.com/asynkron/protoactor-go/cluster"
 
 	"github.com/oklahomer/blabby/internal/middleware"
+	"github.com/oklahomer/blabby/internal/testutil/logcapture"
 )
 
 // fakeReceiverContext is the minimal actor.ReceiverContext implementation
@@ -46,15 +47,15 @@ func newFakeCtx(id string) *fakeReceiverContext {
 
 // decode parses the captured JSON stream into a slice of objects. Empty
 // trailing lines are tolerated (slog ends every record with '\n').
-func decodeLines(t *testing.T, buf *bytes.Buffer) []map[string]any {
+func decodeLines(t *testing.T, raw string) []map[string]any {
 	t.Helper()
 	var out []map[string]any
-	for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte{'\n'}) {
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
 		if len(line) == 0 {
 			continue
 		}
 		var entry map[string]any
-		if err := json.Unmarshal(line, &entry); err != nil {
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			t.Fatalf("malformed json line %q: %v", line, err)
 		}
 		out = append(out, entry)
@@ -66,15 +67,10 @@ func decodeLines(t *testing.T, buf *bytes.Buffer) []map[string]any {
 // the message envelope. Returns the captured JSON-buffered lines.
 func invokeMiddleware(t *testing.T, mw actor.ReceiverMiddleware, ctx actor.ReceiverContext, msg any) []map[string]any {
 	t.Helper()
-	buf := &bytes.Buffer{}
-	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-
 	// Replace slog.Default() so middlewares constructed without
 	// WithLogger still funnel output through the buffer; tests using
 	// WithLogger directly are unaffected.
-	prev := slog.Default()
-	slog.SetDefault(logger)
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	buf := logcapture.JSON(t, slog.LevelDebug)
 
 	called := false
 	next := func(_ actor.ReceiverContext, _ *actor.MessageEnvelope) { called = true }
@@ -82,7 +78,7 @@ func invokeMiddleware(t *testing.T, mw actor.ReceiverMiddleware, ctx actor.Recei
 	if !called {
 		t.Fatal("middleware did not call next")
 	}
-	return decodeLines(t, buf)
+	return decodeLines(t, buf.String())
 }
 
 // TestGrainLogging_ExtractsClusterIdentityFromPartitionPID verifies the
@@ -279,11 +275,8 @@ func TestGrainLogging_WithLoggerRoutesOutput(t *testing.T) {
 	buf := &bytes.Buffer{}
 	dedicated := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	// Pin slog.Default() to a no-op so we can tell which logger wrote.
-	noopBuf := &bytes.Buffer{}
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(noopBuf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	// Pin slog.Default() to a separate capture so we can tell which logger wrote.
+	noopBuf := logcapture.JSON(t, slog.LevelInfo)
 
 	mw := middleware.GrainLogging("RoomGrain", middleware.WithLogger(dedicated))
 	next := func(_ actor.ReceiverContext, _ *actor.MessageEnvelope) {}
@@ -292,7 +285,7 @@ func TestGrainLogging_WithLoggerRoutesOutput(t *testing.T) {
 	if buf.Len() == 0 {
 		t.Errorf("dedicated logger produced no output")
 	}
-	if noopBuf.Len() != 0 {
+	if noopBuf.String() != "" {
 		t.Errorf("default logger received output despite WithLogger: %s", noopBuf.String())
 	}
 }
@@ -311,7 +304,7 @@ func TestGrainLogging_LifecycleLogsBeforeNextOnStopping(t *testing.T) {
 		// Swallow the simulated handler panic; the assertion below
 		// proves the log line was emitted before it.
 		_ = recover()
-		lines := decodeLines(t, buf)
+		lines := decodeLines(t, buf.String())
 		if len(lines) != 1 {
 			t.Fatalf("expected 1 lifecycle line before panic, got %d", len(lines))
 		}

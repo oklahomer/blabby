@@ -1,11 +1,9 @@
 package user_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"reflect"
 	"strings"
 	"sync"
@@ -24,6 +22,7 @@ import (
 	"github.com/oklahomer/blabby/internal/grain/user"
 	"github.com/oklahomer/blabby/internal/id"
 	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
+	"github.com/oklahomer/blabby/internal/testutil/logcapture"
 )
 
 // mustRoomID is a test helper that constructs a typed id.RoomID, failing
@@ -883,7 +882,7 @@ func TestGrain_MultiDeviceEcho(t *testing.T) {
 // --- Logging compliance --------------------------------------------------
 
 func TestGrain_DomainLogsCarryGrainTypeAndOutcome(t *testing.T) {
-	buf := captureLogs(t)
+	buf := logcapture.Text(t)
 	h := newGrain(t)
 	mustRegister(t, h, actor.NewPID("addr", "conn-1"))
 
@@ -902,7 +901,7 @@ func TestGrain_DomainLogsCarryGrainTypeAndOutcome(t *testing.T) {
 func TestGrain_DoesNotLogMessageText(t *testing.T) {
 	t.Run("SendMessage logs text_len but not text", func(t *testing.T) {
 		const text = "secret-payload"
-		buf := captureLogs(t)
+		buf := logcapture.Text(t)
 		h := newGrain(t)
 
 		_, _ = h.g.SendMessage(&userpb.SendMessageRequest{RoomId: "4", Text: text}, fakeUserCtx("1"))
@@ -919,7 +918,7 @@ func TestGrain_DoesNotLogMessageText(t *testing.T) {
 
 	t.Run("ForwardMessage logs text_len but not text", func(t *testing.T) {
 		const text = "secret-payload"
-		buf := captureLogs(t)
+		buf := logcapture.Text(t)
 		h := newGrain(t)
 
 		_, _ = h.g.ForwardMessage(&userpb.ForwardMessageRequest{
@@ -944,7 +943,7 @@ func TestGrain_DoesNotLogMessageText(t *testing.T) {
 // internal/middleware/logging_test.go for those assertions.
 
 func TestGrain_ReceiveDefault_LogsUnhandled(t *testing.T) {
-	buf := captureLogs(t)
+	buf := logcapture.Text(t)
 	h := newGrain(t)
 	h.g.ReceiveDefault(fakeUserCtx("1", graintest.WithMessage(struct{ X int }{X: 1})))
 
@@ -1044,7 +1043,7 @@ func TestGrain_ResolveSelf_SeedsNameAndDegradesGracefully(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			logs := captureLogs(t)
+			logs := logcapture.Text(t)
 
 			g := &user.Grain{}
 			g.SetRoomClient(&fakeRoomClient{})
@@ -1106,15 +1105,6 @@ func pidRegisterReq(pid *actor.PID) *userpb.RegisterConnectionRequest {
 			Id:      pid.GetId(),
 		},
 	}
-}
-
-func captureLogs(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-	return &buf
 }
 
 // assertErrResponse verifies a grain response's failure shape: the
