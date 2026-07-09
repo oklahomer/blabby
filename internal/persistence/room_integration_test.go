@@ -37,7 +37,9 @@ func TestRoomRepoIntegration(t *testing.T) {
 	// A time-based id avoids colliding with the seed rows or a prior run.
 	rawID := time.Now().UnixNano()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM room WHERE id = $1", rawID)
+		if _, err := pool.Exec(context.Background(), "DELETE FROM room WHERE id = $1", rawID); err != nil {
+			t.Errorf("cleanup: delete room row: %v", err)
+		}
 	})
 
 	repo := NewRoomRepo(&stubIDSource{id: rawID})
@@ -78,7 +80,9 @@ func TestRoomRepoIntegration(t *testing.T) {
 	archivedID := rawID + 1
 	archivedCode, _ := id.NewPublicCode()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM room WHERE id = $1", archivedID)
+		if _, err := pool.Exec(context.Background(), "DELETE FROM room WHERE id = $1", archivedID); err != nil {
+			t.Errorf("cleanup: delete archived room row: %v", err)
+		}
 	})
 	if _, err := pool.Exec(ctx,
 		"INSERT INTO room (id, public_code, display_name, created_by, status) VALUES ($1, $2, $3, $4, 'archived')",
@@ -130,7 +134,9 @@ func TestRoomRepoIntegration(t *testing.T) {
 			t.Fatalf("NewPublicCode: %v", err)
 		}
 		t.Cleanup(func() {
-			_, _ = pool.Exec(context.Background(), "DELETE FROM room WHERE id = $1", rid)
+			if _, err := pool.Exec(context.Background(), "DELETE FROM room WHERE id = $1", rid); err != nil {
+				t.Errorf("cleanup: delete room %d: %v", rid, err)
+			}
 		})
 		if _, err := pool.Exec(ctx,
 			"INSERT INTO room (id, public_code, display_name, created_by, status) VALUES ($1, $2, $3, $4, 'active')",

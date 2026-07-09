@@ -36,7 +36,9 @@ func TestJournalIntegration(t *testing.T) {
 	// A time-based id avoids colliding with seed rows or a prior run.
 	rawID := time.Now().UnixNano()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM event WHERE id = $1", rawID)
+		if _, err := pool.Exec(context.Background(), "DELETE FROM event WHERE id = $1", rawID); err != nil {
+			t.Errorf("cleanup: delete event row: %v", err)
+		}
 	})
 
 	j := NewJournal(stubIDSource{id: rawID})
@@ -71,7 +73,9 @@ func TestJournalIntegration(t *testing.T) {
 	// under the key the PGroonga search index covers, with a null client_key.
 	msgID := rawID + 1
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM event WHERE id = $1", msgID)
+		if _, err := pool.Exec(context.Background(), "DELETE FROM event WHERE id = $1", msgID); err != nil {
+			t.Errorf("cleanup: delete message event row: %v", err)
+		}
 	})
 	msgEventID, msgOccurredAt, err := NewJournal(stubIDSource{id: msgID}).AppendMessage(
 		ctx, pool, mustRoomID(t, 4), mustUserID(t, 1), "hello 世界")
@@ -129,8 +133,12 @@ func TestTimelineIntegration(t *testing.T) {
 		t.Fatalf("NewPublicCode: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM event WHERE room_id = $1", base)
-		_, _ = pool.Exec(context.Background(), "DELETE FROM room WHERE id = $1", base)
+		if _, err := pool.Exec(context.Background(), "DELETE FROM event WHERE room_id = $1", base); err != nil {
+			t.Errorf("cleanup: delete room events: %v", err)
+		}
+		if _, err := pool.Exec(context.Background(), "DELETE FROM room WHERE id = $1", base); err != nil {
+			t.Errorf("cleanup: delete room row: %v", err)
+		}
 	})
 	if _, err := pool.Exec(ctx,
 		"INSERT INTO room (id, public_code, display_name, created_by, status) VALUES ($1, $2, 'Timeline Room', 1, 'active')",

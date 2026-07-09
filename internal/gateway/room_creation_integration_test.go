@@ -45,9 +45,15 @@ func TestRoomCreationIntegration(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx := context.Background()
 		// FK order: events and memberships reference the room.
-		_, _ = pool.Exec(cleanupCtx, "DELETE FROM event WHERE room_id > $1 AND room_id <= $2", base, base+100)
-		_, _ = pool.Exec(cleanupCtx, "DELETE FROM room_membership WHERE room_id > $1 AND room_id <= $2", base, base+100)
-		_, _ = pool.Exec(cleanupCtx, "DELETE FROM room WHERE id > $1 AND id <= $2", base, base+100)
+		for _, del := range []struct{ what, sql string }{
+			{"events", "DELETE FROM event WHERE room_id > $1 AND room_id <= $2"},
+			{"memberships", "DELETE FROM room_membership WHERE room_id > $1 AND room_id <= $2"},
+			{"rooms", "DELETE FROM room WHERE id > $1 AND id <= $2"},
+		} {
+			if _, err := pool.Exec(cleanupCtx, del.sql, base, base+100); err != nil {
+				t.Errorf("cleanup: delete %s: %v", del.what, err)
+			}
+		}
 	})
 
 	actor := mustUserID(t, "1") // seed user alice

@@ -43,7 +43,7 @@ func TestNewPoolIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 
 	var one int
 	if err := pool.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
