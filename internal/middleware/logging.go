@@ -1,5 +1,6 @@
-// Package middleware provides protoactor receiver middlewares that emit
-// structured slog entries for grain and actor message dispatch.
+// Package middleware provides protoactor receiver middlewares: structured
+// slog logging for grain and actor message dispatch, and the death-watch
+// translation shim generated grain actors need (see TranslateTerminated).
 //
 // # MIDDLEWARE ORDER
 //
@@ -7,7 +8,8 @@
 // rate-limit (when added) → auth-timeout / heartbeat → logging. Logging is
 // always installed last so it records the message exactly as the grain or
 // actor will receive it, including any synthetic messages produced by
-// upstream middleware (e.g., *AuthTimeoutExpired, *AppPingTick).
+// upstream middleware (e.g., *AuthTimeoutExpired, *AppPingTick,
+// *WatchedTerminated).
 //
 // # MESSAGE TYPE RESOLUTION
 //

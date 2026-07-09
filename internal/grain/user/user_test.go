@@ -21,6 +21,7 @@ import (
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/user"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/middleware"
 	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
 	"github.com/oklahomer/blabby/internal/testutil/logcapture"
 )
@@ -355,7 +356,7 @@ func TestGrain_Terminated_EvictsConnection(t *testing.T) {
 		mustRegister(t, h, pid)
 
 		h.g.ReceiveDefault(fakeUserCtx("1",
-			graintest.WithMessage(&actor.Terminated{Who: pid}),
+			graintest.WithMessage(&middleware.WatchedTerminated{Who: pid}),
 		))
 
 		if got := h.g.Connections(); len(got) != 0 {
@@ -370,7 +371,7 @@ func TestGrain_Terminated_EvictsConnection(t *testing.T) {
 		pidStranger := actor.NewPID("addr", "stranger")
 
 		h.g.ReceiveDefault(fakeUserCtx("1",
-			graintest.WithMessage(&actor.Terminated{Who: pidStranger}),
+			graintest.WithMessage(&middleware.WatchedTerminated{Who: pidStranger}),
 		))
 
 		if got := h.g.Connections(); !reflect.DeepEqual(got, []*actor.PID{pidLive}) {
@@ -386,7 +387,7 @@ func TestGrain_Terminated_EvictsConnection(t *testing.T) {
 		mustRegister(t, h, pidB)
 
 		h.g.ReceiveDefault(fakeUserCtx("1",
-			graintest.WithMessage(&actor.Terminated{Who: pidA}),
+			graintest.WithMessage(&middleware.WatchedTerminated{Who: pidA}),
 		))
 
 		if got := h.g.Connections(); !reflect.DeepEqual(got, []*actor.PID{pidB}) {
