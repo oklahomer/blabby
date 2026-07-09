@@ -9,7 +9,7 @@ import (
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 	graintest "github.com/oklahomer/blabby/internal/testutil/grain"
 
 	roompb "github.com/oklahomer/blabby/gen/room"
@@ -230,7 +230,7 @@ func TestGrain_Leave_FailClosedOnWriteError(t *testing.T) {
 func TestGrain_Leave_OwnerIsRefused(t *testing.T) {
 	store := &fakeMembershipStore{
 		loaded:   []id.UserRef{userRefFor(t, "1", "Alice")},
-		leaveErr: membershiprepo.ErrOwnerCannotLeave,
+		leaveErr: persistence.ErrOwnerCannotLeave,
 	}
 	g, notifier := newStoreGrain(t, store)
 

@@ -1,4 +1,4 @@
-package roomrepo
+package persistence
 
 import (
 	"context"
@@ -19,92 +19,88 @@ import (
 // found, matching the gateway's ROOM_NOT_FOUND contract: an inactive room is not
 // addressable by its public code. FindByID, which loads regardless of status,
 // returns it only when no row carries the id at all.
-var ErrRoomNotFound = errors.New("roomrepo: room not found")
+var ErrRoomNotFound = errors.New("persistence: room not found")
 
-// ErrPublicCodeCollision reports that a minted public_code collided with an
+// ErrRoomPublicCodeCollision reports that a minted public_code collided with an
 // existing row. It is recoverable: the caller retries Create — or, when Create
 // runs inside a transaction, the whole transaction — so a fresh code is minted.
 // Create does not retry in place because a failed INSERT aborts the caller's
 // transaction (a 50-bit random code colliding over a small table is rare enough
 // that a couple of caller retries always suffice).
-var ErrPublicCodeCollision = errors.New("roomrepo: public_code collision")
+var ErrRoomPublicCodeCollision = errors.New("persistence: public_code collision")
 
-// uniqueViolation is the SQLSTATE Postgres raises when an INSERT collides with a
-// UNIQUE constraint. publicCodeConstraint names the specific constraint on
-// room.public_code (declared explicitly in schema.sql), so only a code clash —
-// not, say, a primary-key collision on a duplicate minted RoomID — is classified
-// as a recoverable public_code collision.
-const (
-	uniqueViolation      = "23505"
-	publicCodeConstraint = "room_public_code_key"
-)
+// roomPublicCodeConstraint names the room.public_code UNIQUE constraint (declared
+// explicitly in schema.sql), so a uniqueViolation on it — not, say, a primary-key
+// collision on a duplicate minted RoomID — is classified as a recoverable
+// public_code collision.
+const roomPublicCodeConstraint = "room_public_code_key"
 
 // roomColumns is the fixed projection scanRoom expects, in order. status is cast to
 // text so it scans into a Go string without registering the room_status enum codec
 // on the pool.
 const roomColumns = `id, public_code, display_name, created_by, status::text, created_at, updated_at`
 
-// IDSource mints the next Snowflake id. It is satisfied by the worker-lease
+// RoomIDSource mints the next Snowflake id. It is satisfied by the worker-lease
 // Manager, which mints only while it holds an unexpired lease (fail-closed).
-type IDSource interface {
+type RoomIDSource interface {
 	Next() (int64, error)
 }
 
-// Repo reads and writes the room table. Its methods take a postgres.Querier (a
+// RoomRepo reads and writes the room table. Its methods take a postgres.Querier (a
 // pool or a transaction) per call so a caller can compose a Create with other
 // writes — e.g. seeding the creator's owner membership — in one transaction.
-type Repo struct {
-	ids IDSource
+type RoomRepo struct {
+	ids RoomIDSource
 }
 
-// New returns a Repo that mints room ids from ids.
-func New(ids IDSource) *Repo {
-	return &Repo{ids: ids}
+// NewRoomRepo returns a RoomRepo that mints room ids from ids.
+func NewRoomRepo(ids RoomIDSource) *RoomRepo {
+	return &RoomRepo{ids: ids}
 }
 
-// CreateParams carries the caller-supplied fields of a new room. The RoomID and
+// RoomCreateParams carries the caller-supplied fields of a new room. The RoomID and
 // public_code are minted by Create, not supplied. Name is an already-parsed
 // domain value, so an unvalidated display name cannot reach the insert.
-type CreateParams struct {
+type RoomCreateParams struct {
 	Name      domain.RoomName
 	CreatedBy id.UserID
 }
 
-const insertSQL = `
+const roomInsertSQL = `
 INSERT INTO room (id, public_code, display_name, created_by, status)
 VALUES ($1, $2, $3, $4, 'active')
 RETURNING ` + roomColumns
 
 // Create inserts a new active room, minting its RoomID and a fresh opaque
 // public_code in a single INSERT. It does not retry internally: a public_code
-// collision is reported as [ErrPublicCodeCollision] so the caller can re-run the
+// collision is reported as [ErrRoomPublicCodeCollision] so the caller can re-run the
 // operation (or its enclosing transaction) with a freshly minted code. Retrying
 // in place would be unsafe inside a caller's transaction, where the failed INSERT
 // aborts the transaction until it is rolled back. Any other unique violation —
 // e.g. a duplicate minted RoomID on the primary key — is returned as a hard error.
-func (r *Repo) Create(ctx context.Context, q postgres.Querier, params CreateParams) (Room, error) {
+func (r *RoomRepo) Create(ctx context.Context, q postgres.Querier, params RoomCreateParams) (Room, error) {
 	rawID, err := r.ids.Next()
 	if err != nil {
-		return Room{}, fmt.Errorf("roomrepo: mint id: %w", err)
+		return Room{}, fmt.Errorf("persistence: mint id: %w", err)
 	}
 	roomID, err := id.NewRoomID(rawID)
 	if err != nil {
-		return Room{}, fmt.Errorf("roomrepo: mint id: %w", err)
+		return Room{}, fmt.Errorf("persistence: mint id: %w", err)
 	}
 	code, err := id.NewPublicCode()
 	if err != nil {
-		return Room{}, fmt.Errorf("roomrepo: mint public_code: %w", err)
+		return Room{}, fmt.Errorf("persistence: mint public_code: %w", err)
 	}
 
-	room, err := scanRoom(q.QueryRow(ctx, insertSQL,
+	room, err := scanRoom(q.QueryRow(ctx, roomInsertSQL,
 		roomID.Int64(), code.String(), params.Name.String(), params.CreatedBy.Int64()))
 	switch {
 	case err == nil:
 		return room, nil
 	case isPublicCodeCollision(err):
-		return Room{}, ErrPublicCodeCollision
+		return Room{}, ErrRoomPublicCodeCollision
 	default:
-		return Room{}, fmt.Errorf("roomrepo: create: %w", err)
+		return Room{}, fmt.Errorf("persistence: create: %w", err)
 	}
 }
 
@@ -113,18 +109,18 @@ const findByCodeSQL = `SELECT ` + roomColumns + ` FROM room WHERE public_code = 
 // FindByPublicCode resolves an opaque public_code to its active room (the
 // gateway's R…→RoomID lookup). It returns ErrRoomNotFound when no active room
 // carries the code.
-func (r *Repo) FindByPublicCode(ctx context.Context, q postgres.Querier, code id.PublicCode) (Room, error) {
+func (r *RoomRepo) FindByPublicCode(ctx context.Context, q postgres.Querier, code id.PublicCode) (Room, error) {
 	room, err := scanRoom(q.QueryRow(ctx, findByCodeSQL, code.String()))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Room{}, ErrRoomNotFound
 	}
 	if err != nil {
-		return Room{}, fmt.Errorf("roomrepo: find by public_code: %w", err)
+		return Room{}, fmt.Errorf("persistence: find by public_code: %w", err)
 	}
 	return room, nil
 }
 
-const findByIDSQL = `SELECT ` + roomColumns + ` FROM room WHERE id = $1`
+const roomFindByIDSQL = `SELECT ` + roomColumns + ` FROM room WHERE id = $1`
 
 // FindByID loads a room by its internal RoomID regardless of status, so the Room
 // grain can hydrate its own metadata on activation and see an archived room (to
@@ -132,13 +128,13 @@ const findByIDSQL = `SELECT ` + roomColumns + ` FROM room WHERE id = $1`
 // ErrRoomNotFound only when no row carries the id. This is distinct from
 // FindByPublicCode, which is active-only because an archived room is not
 // addressable by its public code.
-func (r *Repo) FindByID(ctx context.Context, q postgres.Querier, roomID id.RoomID) (Room, error) {
-	room, err := scanRoom(q.QueryRow(ctx, findByIDSQL, roomID.Int64()))
+func (r *RoomRepo) FindByID(ctx context.Context, q postgres.Querier, roomID id.RoomID) (Room, error) {
+	room, err := scanRoom(q.QueryRow(ctx, roomFindByIDSQL, roomID.Int64()))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Room{}, ErrRoomNotFound
 	}
 	if err != nil {
-		return Room{}, fmt.Errorf("roomrepo: find by id: %w", err)
+		return Room{}, fmt.Errorf("persistence: find by id: %w", err)
 	}
 	return room, nil
 }
@@ -149,7 +145,7 @@ const listByIDsSQL = `SELECT ` + roomColumns + ` FROM room WHERE id = ANY($1) AN
 // (the caller re-associates by id). It is the gateway's internal-RoomID → R…
 // descriptor mapping for the joined-rooms response. Unknown or archived ids are
 // simply absent from the result; an empty input yields an empty result.
-func (r *Repo) ListByIDs(ctx context.Context, q postgres.Querier, ids []id.RoomID) ([]Room, error) {
+func (r *RoomRepo) ListByIDs(ctx context.Context, q postgres.Querier, ids []id.RoomID) ([]Room, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -159,17 +155,17 @@ func (r *Repo) ListByIDs(ctx context.Context, q postgres.Querier, ids []id.RoomI
 	}
 	rows, err := q.Query(ctx, listByIDsSQL, raw)
 	if err != nil {
-		return nil, fmt.Errorf("roomrepo: list by ids: %w", err)
+		return nil, fmt.Errorf("persistence: list by ids: %w", err)
 	}
 	return collectRooms(rows)
 }
 
 const listActiveSQL = `SELECT ` + roomColumns + ` FROM room WHERE status = 'active'`
 
-// ListActiveParams filters and paginates ListActive. The zero values of Query
+// RoomListActiveParams filters and paginates ListActive. The zero values of Query
 // and AfterID mean "no name filter" and "first page"; Limit is the page size
 // and must be positive.
-type ListActiveParams struct {
+type RoomListActiveParams struct {
 	Query   domain.RoomNameQuery
 	AfterID id.RoomID
 	Limit   int
@@ -182,7 +178,7 @@ type ListActiveParams struct {
 // with a greater id are returned. The boolean reports whether at least one
 // more room follows the page, determined by fetching Limit+1 rows and
 // trimming the look-ahead row.
-func (r *Repo) ListActive(ctx context.Context, q postgres.Querier, params ListActiveParams) ([]Room, bool, error) {
+func (r *RoomRepo) ListActive(ctx context.Context, q postgres.Querier, params RoomListActiveParams) ([]Room, bool, error) {
 	query := listActiveSQL
 	var args []any
 	if !params.Query.IsZero() {
@@ -198,7 +194,7 @@ func (r *Repo) ListActive(ctx context.Context, q postgres.Querier, params ListAc
 
 	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
-		return nil, false, fmt.Errorf("roomrepo: list active: %w", err)
+		return nil, false, fmt.Errorf("persistence: list active: %w", err)
 	}
 	rooms, err := collectRooms(rows)
 	if err != nil {
@@ -225,12 +221,12 @@ func collectRooms(rows pgx.Rows) ([]Room, error) {
 	for rows.Next() {
 		room, err := scanRoom(rows)
 		if err != nil {
-			return nil, fmt.Errorf("roomrepo: scan: %w", err)
+			return nil, fmt.Errorf("persistence: scan: %w", err)
 		}
 		out = append(out, room)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("roomrepo: rows: %w", err)
+		return nil, fmt.Errorf("persistence: rows: %w", err)
 	}
 	return out, nil
 }
@@ -241,5 +237,5 @@ func collectRooms(rows pgx.Rows) ([]Room, error) {
 // retried as a code collision.
 func isPublicCodeCollision(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == publicCodeConstraint
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == roomPublicCodeConstraint
 }

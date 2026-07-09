@@ -1,15 +1,12 @@
-// Package userrepo persists and reads the service_user table: each account's
-// identity (internal Snowflake UserID plus a separate opaque public_code), its
-// login email, handle, display name, password hash, and lifecycle status. It is
-// the system's authority for resolving a client-facing U… code to an internal
-// UserID and back, so no raw numeric user id ever crosses to the client.
-//
-// Like internal/persistence/roomrepo, the repo issues raw parameterized SQL — its
-// statements are fixed, and a query builder would only obscure them. Rows are
-// parsed into typed value objects at the boundary (parse, don't validate), so the
-// rest of the package handles UserID/PublicCode/UserStatus, never bare ints or
-// strings.
-package userrepo
+// The service_user table holds each account's identity (internal Snowflake UserID
+// plus a separate opaque public_code), login email, handle, display name, password
+// hash, and lifecycle status. It is the system's authority for resolving a
+// client-facing U… code to an internal UserID and back, so no raw numeric user id
+// ever crosses to the client. Rows are parsed into typed value objects at the
+// boundary (parse, don't validate), so callers handle UserID/PublicCode/UserStatus,
+// never bare ints or strings.
+
+package persistence
 
 import (
 	"fmt"
@@ -60,26 +57,26 @@ type userRow struct {
 func (ur userRow) toDomain() (User, error) {
 	userID, err := id.NewUserID(ur.id)
 	if err != nil {
-		return User{}, fmt.Errorf("userrepo: row id: %w", err)
+		return User{}, fmt.Errorf("persistence: row id: %w", err)
 	}
 	code, err := id.ParsePublicCode(ur.publicCode)
 	if err != nil {
-		return User{}, fmt.Errorf("userrepo: row public_code: %w", err)
+		return User{}, fmt.Errorf("persistence: row public_code: %w", err)
 	}
 	status, err := domain.ParseUserStatus(ur.status)
 	if err != nil {
-		return User{}, fmt.Errorf("userrepo: row status: %w", err)
+		return User{}, fmt.Errorf("persistence: row status: %w", err)
 	}
 	mail, err := domain.NewMailAddress(ur.mailAddress)
 	if err != nil {
-		return User{}, fmt.Errorf("userrepo: row mail_address: %w", err)
+		return User{}, fmt.Errorf("persistence: row mail_address: %w", err)
 	}
 	handle, err := domain.NewHandle(ur.handle)
 	if err != nil {
-		return User{}, fmt.Errorf("userrepo: row handle: %w", err)
+		return User{}, fmt.Errorf("persistence: row handle: %w", err)
 	}
 	if ur.handleNorm != handle.Normalized() {
-		return User{}, fmt.Errorf("userrepo: row handle_norm: got %q, want %q", ur.handleNorm, handle.Normalized())
+		return User{}, fmt.Errorf("persistence: row handle_norm: got %q, want %q", ur.handleNorm, handle.Normalized())
 	}
 	return User{
 		ID:           userID,

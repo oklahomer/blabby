@@ -1,4 +1,4 @@
-package membershiprepo
+package persistence
 
 import (
 	"context"
@@ -17,23 +17,23 @@ import (
 // before calling the repo, so reaching here means the cache and the DB diverged;
 // the caller fails closed (rolls back the transaction) rather than act on a state
 // that does not hold.
-var ErrMembershipNotFound = errors.New("membershiprepo: membership not found")
+var ErrMembershipNotFound = errors.New("persistence: membership not found")
 
 // ErrOwnerCannotLeave reports that Remove targeted the room's owner. Ownership
 // must be transferred before the owner can leave, so the row is kept and the
 // caller's transaction rolls back.
-var ErrOwnerCannotLeave = errors.New("membershiprepo: the owner cannot leave the room")
+var ErrOwnerCannotLeave = errors.New("persistence: the owner cannot leave the room")
 
-// Repo reads and writes the room_membership table. Like the sibling repos its
+// MembershipRepo reads and writes the room_membership table. Like the sibling repos its
 // methods take a postgres.Querier (pool or tx) per call, so the Room grain can
 // compose an Add/Remove with a journal append in one transaction.
 //
 // It has no id source: a membership row's identity is the (room_id, user_id)
 // composite key, nothing is minted.
-type Repo struct{}
+type MembershipRepo struct{}
 
-// New returns a Repo.
-func New() *Repo { return &Repo{} }
+// NewMembershipRepo returns a MembershipRepo.
+func NewMembershipRepo() *MembershipRepo { return &MembershipRepo{} }
 
 const listByRoomSQL = `
 SELECT m.user_id, u.public_code, u.display_name, m.role::text, m.joined_at
@@ -45,10 +45,10 @@ ORDER BY m.joined_at, m.user_id`
 // ListByRoom returns the room's members (joined to service_user for the public
 // code and display name), ordered by join time then id for deterministic
 // fan-out. The Room grain calls this on activation to seed its member cache.
-func (r *Repo) ListByRoom(ctx context.Context, q postgres.Querier, roomID id.RoomID) ([]Member, error) {
+func (r *MembershipRepo) ListByRoom(ctx context.Context, q postgres.Querier, roomID id.RoomID) ([]Member, error) {
 	rows, err := q.Query(ctx, listByRoomSQL, roomID.Int64())
 	if err != nil {
-		return nil, fmt.Errorf("membershiprepo: list by room: %w", err)
+		return nil, fmt.Errorf("persistence: list by room: %w", err)
 	}
 	return collectMembers(rows)
 }
@@ -64,11 +64,11 @@ ORDER BY r.id`
 // (joined to room for public_code/name/status), ordered by id. The User grain
 // hydrates its joined-rooms cache from this on activation. Archived rooms are
 // omitted — an inactive room is not a usable joined room (mirrors the active-only
-// reads in roomrepo).
-func (r *Repo) ListByUser(ctx context.Context, q postgres.Querier, userID id.UserID) ([]domain.RoomRef, error) {
+// reads in the room repo).
+func (r *MembershipRepo) ListByUser(ctx context.Context, q postgres.Querier, userID id.UserID) ([]domain.RoomRef, error) {
 	rows, err := q.Query(ctx, listByUserSQL, userID.Int64())
 	if err != nil {
-		return nil, fmt.Errorf("membershiprepo: list by user: %w", err)
+		return nil, fmt.Errorf("persistence: list by user: %w", err)
 	}
 	return collectJoinedRooms(rows)
 }
@@ -78,9 +78,9 @@ const addSQL = `INSERT INTO room_membership (room_id, user_id, role) VALUES ($1,
 // Add inserts a membership row. The Room grain calls this only after confirming
 // from its cache that the user is not already a member, so a duplicate (the
 // composite PK) is a contract violation surfaced as a hard error, not silenced.
-func (r *Repo) Add(ctx context.Context, q postgres.Querier, roomID id.RoomID, ref id.UserRef, role domain.MembershipRole) error {
+func (r *MembershipRepo) Add(ctx context.Context, q postgres.Querier, roomID id.RoomID, ref id.UserRef, role domain.MembershipRole) error {
 	if _, err := q.Exec(ctx, addSQL, roomID.Int64(), ref.ID().Int64(), string(role)); err != nil {
-		return fmt.Errorf("membershiprepo: add: %w", err)
+		return fmt.Errorf("persistence: add: %w", err)
 	}
 	return nil
 }
@@ -108,10 +108,10 @@ SELECT EXISTS(SELECT 1 FROM target), EXISTS(SELECT 1 FROM deleted)`
 // missing row is a cache/DB divergence the caller fails closed on, not a benign
 // no-op. This keeps the membership row and its derived member_left event
 // committing together.
-func (r *Repo) Remove(ctx context.Context, q postgres.Querier, roomID id.RoomID, userID id.UserID) error {
+func (r *MembershipRepo) Remove(ctx context.Context, q postgres.Querier, roomID id.RoomID, userID id.UserID) error {
 	var existed, deleted bool
 	if err := q.QueryRow(ctx, removeSQL, roomID.Int64(), userID.Int64()).Scan(&existed, &deleted); err != nil {
-		return fmt.Errorf("membershiprepo: remove: %w", err)
+		return fmt.Errorf("persistence: remove: %w", err)
 	}
 	switch {
 	case !existed:
@@ -129,18 +129,18 @@ const getRoleSQL = `SELECT role::text FROM room_membership WHERE room_id = $1 AN
 // not a member. Role-mutation callers read the acting and target members' roles
 // with this inside the same transaction as the mutation, so the authorization
 // decision and the write commit together.
-func (r *Repo) GetRole(ctx context.Context, q postgres.Querier, roomID id.RoomID, userID id.UserID) (domain.MembershipRole, error) {
+func (r *MembershipRepo) GetRole(ctx context.Context, q postgres.Querier, roomID id.RoomID, userID id.UserID) (domain.MembershipRole, error) {
 	var raw string
 	err := q.QueryRow(ctx, getRoleSQL, roomID.Int64(), userID.Int64()).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrMembershipNotFound
 	}
 	if err != nil {
-		return "", fmt.Errorf("membershiprepo: get role: %w", err)
+		return "", fmt.Errorf("persistence: get role: %w", err)
 	}
 	role, err := domain.ParseMembershipRole(raw)
 	if err != nil {
-		return "", fmt.Errorf("membershiprepo: get role: %w", err)
+		return "", fmt.Errorf("persistence: get role: %w", err)
 	}
 	return role, nil
 }
@@ -152,10 +152,10 @@ const updateRoleSQL = `UPDATE room_membership SET role = $3::membership_role WHE
 // role; the owner role never moves through here) is enforced by the caller —
 // see domain.CanSetRole — inside the same transaction as a GetRole read.
 // TransferOwnership is the only operation that mutates the owner role.
-func (r *Repo) UpdateRole(ctx context.Context, q postgres.Querier, roomID id.RoomID, userID id.UserID, role domain.MembershipRole) error {
+func (r *MembershipRepo) UpdateRole(ctx context.Context, q postgres.Querier, roomID id.RoomID, userID id.UserID, role domain.MembershipRole) error {
 	tag, err := q.Exec(ctx, updateRoleSQL, roomID.Int64(), userID.Int64(), string(role))
 	if err != nil {
-		return fmt.Errorf("membershiprepo: update role: %w", err)
+		return fmt.Errorf("persistence: update role: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrMembershipNotFound
@@ -193,19 +193,19 @@ SELECT EXISTS(SELECT 1 FROM target), EXISTS(SELECT 1 FROM promoted)`
 // authority (and any policy) beforehand — see the MembershipStore adapter — so a
 // precondition failing here (from does not own the room, to is not a member) is
 // a broken contract surfaced as a hard error, with neither row changed.
-func (r *Repo) TransferOwnership(ctx context.Context, q postgres.Querier, roomID id.RoomID, from, to id.UserID) error {
+func (r *MembershipRepo) TransferOwnership(ctx context.Context, q postgres.Querier, roomID id.RoomID, from, to id.UserID) error {
 	if from == to {
 		return nil
 	}
 	var targetExists, promoted bool
 	if err := q.QueryRow(ctx, transferOwnershipSQL, roomID.Int64(), from.Int64(), to.Int64()).Scan(&targetExists, &promoted); err != nil {
-		return fmt.Errorf("membershiprepo: transfer ownership: %w", err)
+		return fmt.Errorf("persistence: transfer ownership: %w", err)
 	}
 	switch {
 	case !targetExists:
-		return fmt.Errorf("membershiprepo: transfer ownership: user %s is not a member of room %s", to, roomID)
+		return fmt.Errorf("persistence: transfer ownership: user %s is not a member of room %s", to, roomID)
 	case !promoted:
-		return fmt.Errorf("membershiprepo: transfer ownership: user %s does not own room %s", from, roomID)
+		return fmt.Errorf("persistence: transfer ownership: user %s does not own room %s", from, roomID)
 	default:
 		return nil
 	}
@@ -218,7 +218,7 @@ func collectMembers(rows pgx.Rows) ([]Member, error) {
 	for rows.Next() {
 		var mr memberRow
 		if err := rows.Scan(&mr.userID, &mr.publicCode, &mr.displayName, &mr.role, &mr.joinedAt); err != nil {
-			return nil, fmt.Errorf("membershiprepo: scan member: %w", err)
+			return nil, fmt.Errorf("persistence: scan member: %w", err)
 		}
 		member, err := mr.toDomain()
 		if err != nil {
@@ -227,7 +227,7 @@ func collectMembers(rows pgx.Rows) ([]Member, error) {
 		out = append(out, member)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("membershiprepo: rows: %w", err)
+		return nil, fmt.Errorf("persistence: rows: %w", err)
 	}
 	return out, nil
 }
@@ -239,7 +239,7 @@ func collectJoinedRooms(rows pgx.Rows) ([]domain.RoomRef, error) {
 	for rows.Next() {
 		var jr joinedRoomRow
 		if err := rows.Scan(&jr.roomID, &jr.publicCode, &jr.name, &jr.status, &jr.updatedAt); err != nil {
-			return nil, fmt.Errorf("membershiprepo: scan joined room: %w", err)
+			return nil, fmt.Errorf("persistence: scan joined room: %w", err)
 		}
 		ref, err := jr.toDomain()
 		if err != nil {
@@ -248,7 +248,7 @@ func collectJoinedRooms(rows pgx.Rows) ([]domain.RoomRef, error) {
 		out = append(out, ref)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("membershiprepo: rows: %w", err)
+		return nil, fmt.Errorf("persistence: rows: %w", err)
 	}
 	return out, nil
 }

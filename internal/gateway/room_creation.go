@@ -8,10 +8,8 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
 )
 
 // RoomCreator creates a room owned by the acting user. The POST /rooms handler
@@ -25,11 +23,11 @@ type RoomCreator interface {
 // narrow repository surfaces room creation composes. Defined here (where they are
 // consumed) so the service tests fake repository methods, not SQL.
 type creationRooms interface {
-	Create(ctx context.Context, q postgres.Querier, params roomrepo.CreateParams) (roomrepo.Room, error)
+	Create(ctx context.Context, q postgres.Querier, params persistence.RoomCreateParams) (persistence.Room, error)
 }
 
 type creationUsers interface {
-	FindByID(ctx context.Context, q postgres.Querier, userID id.UserID) (userrepo.User, error)
+	FindByID(ctx context.Context, q postgres.Querier, userID id.UserID) (persistence.User, error)
 }
 
 type creationMemberships interface {
@@ -37,7 +35,7 @@ type creationMemberships interface {
 }
 
 type creationJournal interface {
-	AppendMembership(ctx context.Context, q postgres.Querier, roomID id.RoomID, actor id.UserRef, kind journal.MemberEventKind) (id.EventID, time.Time, error)
+	AppendMembership(ctx context.Context, q postgres.Querier, roomID id.RoomID, actor id.UserRef, kind persistence.MemberEventKind) (id.EventID, time.Time, error)
 }
 
 // roomCreateCollisionRetryLimit bounds re-running the creation transaction when a
@@ -89,14 +87,14 @@ func (s *RoomCreationService) CreateRoom(ctx context.Context, actor id.UserID, n
 			return fmt.Errorf("room creation: creator ref: %w", err)
 		}
 
-		room, err := s.rooms.Create(ctx, q, roomrepo.CreateParams{Name: name, CreatedBy: actor})
+		room, err := s.rooms.Create(ctx, q, persistence.RoomCreateParams{Name: name, CreatedBy: actor})
 		if err != nil {
 			return err // ErrPublicCodeCollision drives the retry loop; else hard
 		}
 		if err := s.memberships.Add(ctx, q, room.ID, ownerRef, domain.MembershipRoleOwner); err != nil {
 			return fmt.Errorf("room creation: seed owner membership: %w", err)
 		}
-		if _, _, err := s.journal.AppendMembership(ctx, q, room.ID, ownerRef, journal.MemberJoined); err != nil {
+		if _, _, err := s.journal.AppendMembership(ctx, q, room.ID, ownerRef, persistence.MemberJoined); err != nil {
 			return fmt.Errorf("room creation: founding event: %w", err)
 		}
 
@@ -109,7 +107,7 @@ func (s *RoomCreationService) CreateRoom(ctx context.Context, actor id.UserID, n
 		if err == nil {
 			return result, nil
 		}
-		if !errors.Is(err, roomrepo.ErrPublicCodeCollision) {
+		if !errors.Is(err, persistence.ErrRoomPublicCodeCollision) {
 			return RoomInfo{}, err
 		}
 		if attempt >= roomCreateCollisionRetryLimit {

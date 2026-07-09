@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/oklahomer/blabby/internal/domain"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 )
 
 const (
@@ -114,7 +114,7 @@ func (g *Gateway) handleResendVerification(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := g.verification.Resend(r.Context(), ResendParams{MailAddress: mail}); err != nil {
-		if errors.Is(err, verifyrepo.ErrVerificationRateLimited) {
+		if errors.Is(err, persistence.ErrVerificationRateLimited) {
 			WriteErrorResponse(w, http.StatusTooManyRequests, ErrVerificationRateLimited("too many resend requests; please wait and try again"))
 			return
 		}

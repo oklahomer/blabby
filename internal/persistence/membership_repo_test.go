@@ -1,9 +1,8 @@
-package membershiprepo
+package persistence
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -12,132 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/oklahomer/blabby/internal/domain"
-	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
-
-// fakeQuerier is an in-memory postgres.Querier for exercising the repo's control
-// flow without a database. exec drives Add/UpdateRole/TransferOwnership; query
-// drives the list reads; queryRow drives Remove and GetRole.
-type fakeQuerier struct {
-	exec     func(sql string, args ...any) (pgconn.CommandTag, error)
-	query    func(sql string, args ...any) (pgx.Rows, error)
-	queryRow func(sql string, args ...any) pgx.Row
-}
-
-var _ postgres.Querier = (*fakeQuerier)(nil)
-
-func (f *fakeQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	return f.exec(sql, args...)
-}
-
-func (f *fakeQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
-	return f.query(sql, args...)
-}
-
-func (f *fakeQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
-	if f.queryRow == nil {
-		panic("fakeQuerier: QueryRow not stubbed")
-	}
-	return f.queryRow(sql, args...)
-}
-
-// fakeRow replays one row (column values in scan order) or an error.
-type fakeRow struct {
-	values []any
-	err    error
-}
-
-func (r fakeRow) Scan(dest ...any) error {
-	if r.err != nil {
-		return r.err
-	}
-	return assignAll(dest, r.values)
-}
-
-// fakeRows replays a fixed set of rows (each a slice of column values in scan
-// order) through the pgx.Rows contract the collect helpers depend on.
-type fakeRows struct {
-	rows [][]any
-	idx  int
-	err  error
-}
-
-func (f *fakeRows) Close()                                       {}
-func (f *fakeRows) Err() error                                   { return f.err }
-func (f *fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
-func (f *fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
-func (f *fakeRows) Values() ([]any, error)                       { return nil, nil }
-func (f *fakeRows) RawValues() [][]byte                          { return nil }
-func (f *fakeRows) Conn() *pgx.Conn                              { return nil }
-
-func (f *fakeRows) Next() bool {
-	if f.idx >= len(f.rows) {
-		return false
-	}
-	f.idx++
-	return true
-}
-
-func (f *fakeRows) Scan(dest ...any) error { return assignAll(dest, f.rows[f.idx-1]) }
-
-// assignAll copies column values into the Scan destinations, matching the types
-// the row structs pass (*int64, *string, *time.Time).
-func assignAll(dest []any, values []any) error {
-	if len(dest) != len(values) {
-		return fmt.Errorf("fake scan: %d destinations, %d values", len(dest), len(values))
-	}
-	for i := range dest {
-		switch d := dest[i].(type) {
-		case *int64:
-			*d = values[i].(int64)
-		case *string:
-			*d = values[i].(string)
-		case *bool:
-			*d = values[i].(bool)
-		case *time.Time:
-			*d = values[i].(time.Time)
-		default:
-			return fmt.Errorf("fake scan: unsupported destination %T", dest[i])
-		}
-	}
-	return nil
-}
-
-func mustUserRef(t *testing.T, rawID int64, name string) id.UserRef {
-	t.Helper()
-	uid, err := id.NewUserID(rawID)
-	if err != nil {
-		t.Fatalf("NewUserID(%d): %v", rawID, err)
-	}
-	code, err := id.NewPublicCode()
-	if err != nil {
-		t.Fatalf("NewPublicCode: %v", err)
-	}
-	ref, err := id.NewUserRef(uid, code, name)
-	if err != nil {
-		t.Fatalf("NewUserRef(%d,%q): %v", rawID, name, err)
-	}
-	return ref
-}
-
-func mustRoomID(t *testing.T, v int64) id.RoomID {
-	t.Helper()
-	rid, err := id.NewRoomID(v)
-	if err != nil {
-		t.Fatalf("NewRoomID(%d): %v", v, err)
-	}
-	return rid
-}
-
-func mustUserID(t *testing.T, v int64) id.UserID {
-	t.Helper()
-	uid, err := id.NewUserID(v)
-	if err != nil {
-		t.Fatalf("NewUserID(%d): %v", v, err)
-	}
-	return uid
-}
 
 func TestListByRoom(t *testing.T) {
 	ts := time.Unix(100, 0).UTC()
@@ -151,7 +25,7 @@ func TestListByRoom(t *testing.T) {
 		}}, nil
 	}}
 
-	members, err := New().ListByRoom(context.Background(), fq, mustRoomID(t, 4))
+	members, err := NewMembershipRepo().ListByRoom(context.Background(), fq, mustRoomID(t, 4))
 	if err != nil {
 		t.Fatalf("ListByRoom: %v", err)
 	}
@@ -179,7 +53,7 @@ func TestListByRoom_RowError(t *testing.T) {
 	fq := &fakeQuerier{query: func(string, ...any) (pgx.Rows, error) {
 		return &fakeRows{rows: [][]any{{int64(0), "A000000001", "ghost", "member", time.Unix(0, 0)}}}, nil
 	}}
-	if _, err := New().ListByRoom(context.Background(), fq, mustRoomID(t, 4)); err == nil {
+	if _, err := NewMembershipRepo().ListByRoom(context.Background(), fq, mustRoomID(t, 4)); err == nil {
 		t.Fatal("ListByRoom: want an error for a non-positive user id row")
 	}
 }
@@ -194,7 +68,7 @@ func TestListByUser(t *testing.T) {
 		}}, nil
 	}}
 
-	rooms, err := New().ListByUser(context.Background(), fq, mustUserID(t, 1))
+	rooms, err := NewMembershipRepo().ListByUser(context.Background(), fq, mustUserID(t, 1))
 	if err != nil {
 		t.Fatalf("ListByUser: %v", err)
 	}
@@ -208,7 +82,7 @@ func TestListByUser(t *testing.T) {
 	if r.MetadataVersion != ts.UnixMicro() {
 		t.Errorf("MetadataVersion = %d, want %d (updated_at micros)", r.MetadataVersion, ts.UnixMicro())
 	}
-	// Joined-rooms are active-only, mirroring roomrepo's reads.
+	// Joined-rooms are active-only, mirroring the room repo's reads.
 	if !strings.Contains(gotSQL, "r.status = 'active'") {
 		t.Errorf("ListByUser SQL must filter active rooms: %s", gotSQL)
 	}
@@ -222,7 +96,7 @@ func TestAdd(t *testing.T) {
 		return pgconn.CommandTag{}, nil
 	}}
 
-	err := New().Add(context.Background(), fq, mustRoomID(t, 4), mustUserRef(t, 2, "bob"), domain.MembershipRoleMember)
+	err := NewMembershipRepo().Add(context.Background(), fq, mustRoomID(t, 4), mustUserRef(t, 2, "bob"), domain.MembershipRoleMember)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -240,7 +114,7 @@ func TestAdd_PropagatesError(t *testing.T) {
 	fq := &fakeQuerier{exec: func(string, ...any) (pgconn.CommandTag, error) {
 		return pgconn.CommandTag{}, sentinel
 	}}
-	err := New().Add(context.Background(), fq, mustRoomID(t, 4), mustUserRef(t, 2, "bob"), domain.MembershipRoleMember)
+	err := NewMembershipRepo().Add(context.Background(), fq, mustRoomID(t, 4), mustUserRef(t, 2, "bob"), domain.MembershipRoleMember)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("Add: got %v, want the wrapped db error", err)
 	}
@@ -271,7 +145,7 @@ func TestRemove(t *testing.T) {
 				return fakeRow{values: []any{tc.existed, tc.deleted}}
 			}}
 
-			err := New().Remove(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2))
+			err := NewMembershipRepo().Remove(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2))
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("Remove: got %v, want %v", err, tc.wantErr)
 			}
@@ -292,7 +166,7 @@ func TestGetRole(t *testing.T) {
 			gotArgs = args
 			return fakeRow{values: []any{"admin"}}
 		}}
-		role, err := New().GetRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2))
+		role, err := NewMembershipRepo().GetRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2))
 		if err != nil {
 			t.Fatalf("GetRole: %v", err)
 		}
@@ -307,7 +181,7 @@ func TestGetRole(t *testing.T) {
 		fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
 			return fakeRow{err: pgx.ErrNoRows}
 		}}
-		if _, err := New().GetRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2)); !errors.Is(err, ErrMembershipNotFound) {
+		if _, err := NewMembershipRepo().GetRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2)); !errors.Is(err, ErrMembershipNotFound) {
 			t.Fatalf("GetRole(absent): got %v, want ErrMembershipNotFound", err)
 		}
 	})
@@ -315,7 +189,7 @@ func TestGetRole(t *testing.T) {
 		fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
 			return fakeRow{values: []any{"superuser"}}
 		}}
-		if _, err := New().GetRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2)); err == nil {
+		if _, err := NewMembershipRepo().GetRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2)); err == nil {
 			t.Fatal("GetRole: want an error for an unknown role label")
 		}
 	})
@@ -329,7 +203,7 @@ func TestUpdateRole(t *testing.T) {
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}}
 
-	if err := New().UpdateRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2), domain.MembershipRoleAdmin); err != nil {
+	if err := NewMembershipRepo().UpdateRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2), domain.MembershipRoleAdmin); err != nil {
 		t.Fatalf("UpdateRole: %v", err)
 	}
 	if gotArgs[0].(int64) != 4 || gotArgs[1].(int64) != 2 || gotArgs[2].(string) != "admin" {
@@ -344,7 +218,7 @@ func TestUpdateRole_NotFoundIsStrict(t *testing.T) {
 	fq := &fakeQuerier{exec: func(string, ...any) (pgconn.CommandTag, error) {
 		return pgconn.NewCommandTag("UPDATE 0"), nil
 	}}
-	err := New().UpdateRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2), domain.MembershipRoleMember)
+	err := NewMembershipRepo().UpdateRole(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 2), domain.MembershipRoleMember)
 	if !errors.Is(err, ErrMembershipNotFound) {
 		t.Fatalf("UpdateRole(absent): got %v, want ErrMembershipNotFound", err)
 	}
@@ -361,7 +235,7 @@ func TestTransferOwnership(t *testing.T) {
 		return fakeRow{values: []any{true, true}}
 	}}
 
-	if err := New().TransferOwnership(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 1), mustUserID(t, 2)); err != nil {
+	if err := NewMembershipRepo().TransferOwnership(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 1), mustUserID(t, 2)); err != nil {
 		t.Fatalf("TransferOwnership: %v", err)
 	}
 	if gotArgs[0].(int64) != 4 || gotArgs[1].(int64) != 1 || gotArgs[2].(int64) != 2 {
@@ -375,7 +249,7 @@ func TestTransferOwnership(t *testing.T) {
 }
 
 func TestTransferOwnership_SelfNoop(t *testing.T) {
-	if err := New().TransferOwnership(context.Background(), &fakeQuerier{}, mustRoomID(t, 4), mustUserID(t, 1), mustUserID(t, 1)); err != nil {
+	if err := NewMembershipRepo().TransferOwnership(context.Background(), &fakeQuerier{}, mustRoomID(t, 4), mustUserID(t, 1), mustUserID(t, 1)); err != nil {
 		t.Fatalf("TransferOwnership(self): %v", err)
 	}
 }
@@ -394,7 +268,7 @@ func TestTransferOwnership_BrokenPreconditionsAreHardErrors(t *testing.T) {
 			fq := &fakeQuerier{queryRow: func(string, ...any) pgx.Row {
 				return fakeRow{values: []any{tc.targetExists, tc.promoted}}
 			}}
-			err := New().TransferOwnership(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 1), mustUserID(t, 2))
+			err := NewMembershipRepo().TransferOwnership(context.Background(), fq, mustRoomID(t, 4), mustUserID(t, 1), mustUserID(t, 2))
 			if err == nil {
 				t.Fatal("TransferOwnership: want a hard error on a broken precondition")
 			}

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/internal/errcode"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 )
 
 // fakeVerificationService is a stub VerificationService recording its calls and
@@ -131,7 +131,7 @@ func TestHandleResendVerification(t *testing.T) {
 		{
 			name:          "rate limited returns 429",
 			body:          validBody,
-			svc:           &fakeVerificationService{resendErr: verifyrepo.ErrVerificationRateLimited},
+			svc:           &fakeVerificationService{resendErr: persistence.ErrVerificationRateLimited},
 			wantStatus:    http.StatusTooManyRequests,
 			wantErrorCode: errcode.VerificationRateLimited,
 			wantReached:   true,

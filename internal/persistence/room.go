@@ -1,14 +1,11 @@
-// Package roomrepo persists and reads the room table: each chat room's identity
-// (internal Snowflake RoomID plus a separate opaque public_code), its display
-// name, creator, and lifecycle status. It is the gateway's authority for resolving
-// a client-facing R… code to an internal RoomID and back, so no raw numeric room
-// id ever crosses to the client.
-//
-// Like internal/persistence/workerlease, the repo issues raw parameterized SQL —
-// its statements are fixed, and a query builder would only obscure them. Rows are
-// parsed into typed value objects at the boundary (parse, don't validate), so the
-// rest of the package handles RoomID/PublicCode, never bare ints or strings.
-package roomrepo
+// The room table holds each chat room's identity (internal Snowflake RoomID plus a
+// separate opaque public_code), its display name, creator, and lifecycle status. It
+// is the gateway's authority for resolving a client-facing R… code to an internal
+// RoomID and back, so no raw numeric room id ever crosses to the client. Rows are
+// parsed into typed value objects at the boundary (parse, don't validate), so
+// callers handle RoomID/PublicCode, never bare ints or strings.
+
+package persistence
 
 import (
 	"fmt"
@@ -53,19 +50,19 @@ type roomRow struct {
 func (rr roomRow) toDomain() (Room, error) {
 	roomID, err := id.NewRoomID(rr.id)
 	if err != nil {
-		return Room{}, fmt.Errorf("roomrepo: row id: %w", err)
+		return Room{}, fmt.Errorf("persistence: row id: %w", err)
 	}
 	createdBy, err := id.NewUserID(rr.createdBy)
 	if err != nil {
-		return Room{}, fmt.Errorf("roomrepo: row created_by: %w", err)
+		return Room{}, fmt.Errorf("persistence: row created_by: %w", err)
 	}
 	code, err := id.ParsePublicCode(rr.publicCode)
 	if err != nil {
-		return Room{}, fmt.Errorf("roomrepo: row public_code: %w", err)
+		return Room{}, fmt.Errorf("persistence: row public_code: %w", err)
 	}
 	status, err := domain.ParseRoomStatus(rr.status)
 	if err != nil {
-		return Room{}, fmt.Errorf("roomrepo: row status: %w", err)
+		return Room{}, fmt.Errorf("persistence: row status: %w", err)
 	}
 	return Room{
 		ID:          roomID,
@@ -76,12 +73,6 @@ func (rr roomRow) toDomain() (Room, error) {
 		CreatedAt:   rr.createdAt,
 		UpdatedAt:   rr.updatedAt,
 	}, nil
-}
-
-// scannable is the Scan contract shared by pgx.Row (single-row QueryRow) and
-// pgx.Rows (multi-row iteration), so one scanRoom helper serves both.
-type scannable interface {
-	Scan(dest ...any) error
 }
 
 // scanRoom reads one room row in the fixed column order and parses it into a Room.

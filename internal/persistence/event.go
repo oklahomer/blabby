@@ -1,12 +1,9 @@
-// Package journal persists and reads the event table — the append-only room
-// timeline of messages and membership system events. The Room grain is the single
-// appender per room, so the Snowflake event id is monotonic per room and orders
-// the timeline.
-//
-// Timeline pagination and full-text search arrive with the timeline read API;
-// client_key send idempotency is a separate arc (its schema and unique index are
-// already in place).
-package journal
+// The event table is the append-only room timeline of messages and membership
+// system events. The Room grain is the single appender per room, so the Snowflake
+// event id is monotonic per room and orders the timeline. The Journal type writes
+// this table; the timeline read path (pagination, full-text search) reads it.
+
+package persistence
 
 import "fmt"
 
@@ -30,14 +27,14 @@ func (k MemberEventKind) eventType() (string, error) {
 	case MemberLeft:
 		return "member_left", nil
 	default:
-		return "", fmt.Errorf("journal: unknown member event kind %d", int(k))
+		return "", fmt.Errorf("persistence: unknown member event kind %d", int(k))
 	}
 }
 
 // memberEventPayload is the JSONB payload for a membership event. It carries the
 // actor's display name so a consumer renders the system line ("— alice joined —")
 // without a lookup. The actor's id lives in the event's user_id column, not here.
-// The actor's public code joins this payload once userrepo lands.
+// The actor's public code is not carried in this payload yet.
 type memberEventPayload struct {
 	DisplayName string `json:"display_name"`
 }

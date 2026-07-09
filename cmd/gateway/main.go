@@ -38,12 +38,8 @@ import (
 	"github.com/oklahomer/blabby/internal/clusterboot"
 	"github.com/oklahomer/blabby/internal/gateway"
 	"github.com/oklahomer/blabby/internal/logging"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
-	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/persistence/workerlease"
 	"github.com/oklahomer/blabby/internal/verification"
 )
@@ -269,8 +265,8 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 		return fmt.Errorf("build verification sender: %w", err)
 	}
 	registration := gateway.NewRegistrationService(
-		userrepo.New(leaseManager),
-		verifyrepo.New(),
+		persistence.NewUserRepo(leaseManager),
+		persistence.NewVerificationRepo(),
 		verifySender,
 		postgres.NewTransactor(pool),
 		gateway.DefaultRegistrationPolicy(),
@@ -280,10 +276,10 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	// same lease, writing the room, its owner membership, and the member_joined
 	// timeline event in one transaction.
 	roomCreation := gateway.NewRoomCreationService(
-		roomrepo.New(leaseManager),
-		userrepo.New(leaseManager),
-		membershiprepo.New(),
-		journal.New(leaseManager),
+		persistence.NewRoomRepo(leaseManager),
+		persistence.NewUserRepo(leaseManager),
+		persistence.NewMembershipRepo(),
+		persistence.NewJournal(leaseManager),
 		postgres.NewTransactor(pool),
 	)
 

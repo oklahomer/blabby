@@ -1,13 +1,12 @@
-// Package verifyrepo persists and reads the email_verification table: the
-// per-account email-verification challenge — a bcrypt-hashed PIN, its expiry, the
-// failed-attempt count that locks the challenge, and the resend bookkeeping
-// (last_sent_at / resend_count) that bounds how often a fresh PIN can be issued.
-//
-// Like internal/persistence/userrepo, the repo issues raw parameterized SQL and
-// parses rows into a typed value object at the boundary (parse, don't validate).
-// It is hash-agnostic: callers pass an already-hashed PIN as bytes, so the hashing
-// scheme lives with the verification domain, not here.
-package verifyrepo
+// The email_verification table holds the per-account email-verification challenge —
+// a bcrypt-hashed PIN, its expiry, the failed-attempt count that locks the
+// challenge, and the resend bookkeeping (last_sent_at / resend_count) that bounds
+// how often a fresh PIN can be issued. Rows are parsed into a typed value object at
+// the boundary (parse, don't validate). It is hash-agnostic: callers pass an
+// already-hashed PIN as bytes, so the hashing scheme lives with the verification
+// domain, not here.
+
+package persistence
 
 import (
 	"fmt"
@@ -52,7 +51,7 @@ type verificationRow struct {
 func (vr verificationRow) toDomain() (Verification, error) {
 	userID, err := id.NewUserID(vr.userID)
 	if err != nil {
-		return Verification{}, fmt.Errorf("verifyrepo: row user_id: %w", err)
+		return Verification{}, fmt.Errorf("persistence: row user_id: %w", err)
 	}
 	var lastSentAt time.Time
 	if vr.lastSentAt != nil {
@@ -67,12 +66,6 @@ func (vr verificationRow) toDomain() (Verification, error) {
 		LastSentAt:  lastSentAt,
 		CreatedAt:   vr.createdAt,
 	}, nil
-}
-
-// scannable is the Scan contract shared by pgx.Row (single-row QueryRow) and
-// pgx.Rows (multi-row iteration), so one scanVerification helper serves both.
-type scannable interface {
-	Scan(dest ...any) error
 }
 
 // scanVerification reads one row in the fixed column order and parses it into a

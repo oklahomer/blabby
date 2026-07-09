@@ -1,4 +1,4 @@
-package verifyrepo
+package persistence
 
 import (
 	"context"
@@ -38,10 +38,10 @@ func TestVerifyRepoIntegration(t *testing.T) {
 	// Start from a clean slate in case a prior aborted run left a row.
 	_, _ = pool.Exec(ctx, "DELETE FROM email_verification WHERE user_id = 1")
 
-	repo := New()
+	repo := NewVerificationRepo()
 	expiry := time.Now().Add(10 * time.Minute).Truncate(time.Microsecond)
 	sentAt := time.Now().Truncate(time.Microsecond)
-	if err := repo.Create(ctx, pool, CreateParams{
+	if err := repo.Create(ctx, pool, VerificationCreateParams{
 		UserID: userID, PinHash: []byte("$2a$12$placeholder.pin.hash"), ExpiresAt: expiry, SentAt: sentAt,
 	}); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -72,9 +72,9 @@ func TestVerifyRepoIntegration(t *testing.T) {
 	// Resend installs a fresh PIN, clears the lock, and bumps resend_count.
 	newExpiry := time.Now().Add(20 * time.Minute).Truncate(time.Microsecond)
 	resendAt := time.Now().Truncate(time.Microsecond)
-	if err := repo.Resend(ctx, pool, ResendParams{
+	if err := repo.Resend(ctx, pool, VerificationResendParams{
 		UserID: userID, PinHash: []byte("$2a$12$fresh.pin.hash"), ExpiresAt: newExpiry, SentAt: resendAt,
-	}, ResendPolicy{PreviousSentBefore: sentAt, MaxResendCount: 5}); err != nil {
+	}, VerificationResendPolicy{PreviousSentBefore: sentAt, MaxResendCount: 5}); err != nil {
 		t.Fatalf("Resend: %v", err)
 	}
 	after, err := repo.FindByUser(ctx, pool, userID)
@@ -87,9 +87,9 @@ func TestVerifyRepoIntegration(t *testing.T) {
 	if !after.ExpiresAt.Equal(newExpiry) {
 		t.Fatalf("after resend expiry = %v, want %v", after.ExpiresAt, newExpiry)
 	}
-	if err := repo.Resend(ctx, pool, ResendParams{
+	if err := repo.Resend(ctx, pool, VerificationResendParams{
 		UserID: userID, PinHash: []byte("$2a$12$blocked.pin.hash"), ExpiresAt: newExpiry, SentAt: time.Now().Truncate(time.Microsecond),
-	}, ResendPolicy{PreviousSentBefore: resendAt.Add(-time.Second), MaxResendCount: 5}); !errors.Is(err, ErrVerificationRateLimited) {
+	}, VerificationResendPolicy{PreviousSentBefore: resendAt.Add(-time.Second), MaxResendCount: 5}); !errors.Is(err, ErrVerificationRateLimited) {
 		t.Fatalf("Resend(rate limited) = %v, want ErrVerificationRateLimited", err)
 	}
 

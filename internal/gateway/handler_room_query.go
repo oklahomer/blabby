@@ -12,7 +12,7 @@ import (
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 )
 
 // roomDescriptor is the on-the-wire shape of one room: the opaque public code the
@@ -119,7 +119,7 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 	if params.after != (id.PublicCode{}) {
 		after, err := g.rooms.Resolve(r.Context(), params.after)
 		switch {
-		case errors.Is(err, roomrepo.ErrRoomNotFound):
+		case errors.Is(err, persistence.ErrRoomNotFound):
 			// A stale or bogus continuation, not a missing resource: the client
 			// restarts from the first page.
 			slog.Warn("room handler rejected request",

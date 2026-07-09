@@ -11,11 +11,11 @@ import (
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
-// stubIDSource satisfies journal.IDSource; the role operations under test never
+// stubIDSource satisfies the persistence event id source; the role operations under test never
 // mint an event id, so it only has to exist.
 type stubIDSource struct{ next int64 }
 
@@ -45,11 +45,11 @@ func TestMembershipStore_RoleOps_Integration(t *testing.T) {
 	// (LIFO); a defer would close the pool before any t.Cleanup could use it.
 	t.Cleanup(pool.Close)
 
-	repo := membershiprepo.New()
+	repo := persistence.NewMembershipRepo()
 	store := room.NewMembershipStore(pool, &stubIDSource{})
 
 	// Room 5's seeded owner is user 2; users 1 and 3 are the scratch members.
-	// This test stays off room 4, which the membershiprepo integration test
+	// This test stays off room 4, which the persistence membership integration test
 	// mutates concurrently when test packages run in parallel.
 	roomID, err := id.ParseRoomID("5")
 	if err != nil {

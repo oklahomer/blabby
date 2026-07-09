@@ -9,8 +9,7 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
-	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -51,7 +50,7 @@ type MembershipStore interface {
 	RecordJoin(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error)
 	// RecordLeave durably removes actor and appends a member_left event in one
 	// transaction, returning the event identity for fan-out. It returns
-	// membershiprepo.ErrOwnerCannotLeave (wrapped) when actor owns the room.
+	// persistence.ErrOwnerCannotLeave (wrapped) when actor owns the room.
 	RecordLeave(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error)
 	// RecordRoleChange durably sets target's role after checking, in the same
 	// transaction, that actor's role permits it (domain.CanSetRole). It returns
@@ -74,8 +73,8 @@ const membershipOpTimeout = 3 * time.Second
 // repository, the journal, and a transactor over the backend's pool, so a
 // room_membership write and its derived event commit (or roll back) together.
 type membershipStore struct {
-	repo    *membershiprepo.Repo
-	journal *journal.Journal
+	repo    *persistence.MembershipRepo
+	journal *persistence.Journal
 	tx      *postgres.Transactor
 	pool    postgres.Querier
 }
@@ -83,10 +82,10 @@ type membershipStore struct {
 // NewMembershipStore builds the production MembershipStore over pool, minting
 // event ids from ids (the worker-lease manager). Reads run against the pool
 // directly; writes run inside a transaction.
-func NewMembershipStore(pool *pgxpool.Pool, ids journal.IDSource) MembershipStore {
+func NewMembershipStore(pool *pgxpool.Pool, ids persistence.EventIDSource) MembershipStore {
 	return &membershipStore{
-		repo:    membershiprepo.New(),
-		journal: journal.New(ids),
+		repo:    persistence.NewMembershipRepo(),
+		journal: persistence.NewJournal(ids),
 		tx:      postgres.NewTransactor(pool),
 		pool:    pool,
 	}
@@ -110,13 +109,13 @@ func (s *membershipStore) LoadMembers(ctx context.Context, roomID id.RoomID) ([]
 func (s *membershipStore) RecordJoin(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error) {
 	// Grain-initiated joins are ordinary members; owner seeding is the gateway's
 	// room-creation path, and role mutation belongs to a later phase.
-	return s.record(ctx, roomID, actor, journal.MemberJoined, func(ctx context.Context, q postgres.Querier) error {
+	return s.record(ctx, roomID, actor, persistence.MemberJoined, func(ctx context.Context, q postgres.Querier) error {
 		return s.repo.Add(ctx, q, roomID, actor, domain.MembershipRoleMember)
 	})
 }
 
 func (s *membershipStore) RecordLeave(ctx context.Context, roomID id.RoomID, actor id.UserRef) (MembershipEvent, error) {
-	return s.record(ctx, roomID, actor, journal.MemberLeft, func(ctx context.Context, q postgres.Querier) error {
+	return s.record(ctx, roomID, actor, persistence.MemberLeft, func(ctx context.Context, q postgres.Querier) error {
 		return s.repo.Remove(ctx, q, roomID, actor.ID())
 	})
 }
@@ -131,7 +130,7 @@ func (s *membershipStore) record(
 	ctx context.Context,
 	roomID id.RoomID,
 	actor id.UserRef,
-	kind journal.MemberEventKind,
+	kind persistence.MemberEventKind,
 	mutate func(context.Context, postgres.Querier) error,
 ) (MembershipEvent, error) {
 	ctx, cancel := context.WithTimeout(ctx, membershipOpTimeout)

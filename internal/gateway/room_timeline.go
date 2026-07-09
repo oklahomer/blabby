@@ -6,8 +6,7 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
-	"github.com/oklahomer/blabby/internal/persistence/membershiprepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 )
 
@@ -26,7 +25,7 @@ type TimelineQuery struct {
 // whether at least one older event follows the last entry, so the handler can
 // emit a continuation cursor.
 type TimelinePage struct {
-	Events  []journal.Entry
+	Events  []persistence.TimelineEntry
 	HasMore bool
 }
 
@@ -42,27 +41,27 @@ type RoomTimeline interface {
 	Events(ctx context.Context, query TimelineQuery) (TimelinePage, error)
 }
 
-// roomTimelineReader is the production RoomTimeline: membershiprepo and the
+// roomTimelineReader is the production RoomTimeline: the persistence membership repo and the
 // journal over the gateway's read pool. The journal's id source is nil because
 // the gateway only reads events, never mints them.
 type roomTimelineReader struct {
-	members *membershiprepo.Repo
-	journal *journal.Journal
+	members *persistence.MembershipRepo
+	journal *persistence.Journal
 	pool    postgres.Querier
 }
 
 // NewRoomTimelineReader builds a read-only RoomTimeline over pool.
 func NewRoomTimelineReader(pool postgres.Querier) RoomTimeline {
 	return roomTimelineReader{
-		members: membershiprepo.New(),
-		journal: journal.New(nil),
+		members: persistence.NewMembershipRepo(),
+		journal: persistence.NewJournal(nil),
 		pool:    pool,
 	}
 }
 
 func (r roomTimelineReader) IsMember(ctx context.Context, roomID id.RoomID, userID id.UserID) (bool, error) {
 	_, err := r.members.GetRole(ctx, r.pool, roomID, userID)
-	if errors.Is(err, membershiprepo.ErrMembershipNotFound) {
+	if errors.Is(err, persistence.ErrMembershipNotFound) {
 		return false, nil
 	}
 	if err != nil {
@@ -72,7 +71,7 @@ func (r roomTimelineReader) IsMember(ctx context.Context, roomID id.RoomID, user
 }
 
 func (r roomTimelineReader) Events(ctx context.Context, query TimelineQuery) (TimelinePage, error) {
-	entries, hasMore, err := r.journal.Timeline(ctx, r.pool, query.RoomID, journal.TimelineParams{
+	entries, hasMore, err := r.journal.Timeline(ctx, r.pool, query.RoomID, persistence.TimelineParams{
 		Query:  query.Query,
 		Before: query.Before,
 		Limit:  query.Limit,

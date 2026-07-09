@@ -10,9 +10,8 @@ import (
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/verification"
 )
 
@@ -46,15 +45,15 @@ type transactor interface {
 }
 
 type registrationUsers interface {
-	FindByEmail(ctx context.Context, q postgres.Querier, mail domain.MailAddress) (userrepo.User, error)
-	Create(ctx context.Context, q postgres.Querier, params userrepo.CreateParams) (userrepo.User, error)
+	FindByEmail(ctx context.Context, q postgres.Querier, mail domain.MailAddress) (persistence.User, error)
+	Create(ctx context.Context, q postgres.Querier, params persistence.UserCreateParams) (persistence.User, error)
 	SetStatus(ctx context.Context, q postgres.Querier, userID id.UserID, status domain.UserStatus) error
 }
 
 type registrationVerifications interface {
-	Create(ctx context.Context, q postgres.Querier, params verifyrepo.CreateParams) error
-	Resend(ctx context.Context, q postgres.Querier, params verifyrepo.ResendParams, policy verifyrepo.ResendPolicy) error
-	FindByUser(ctx context.Context, q postgres.Querier, userID id.UserID) (verifyrepo.Verification, error)
+	Create(ctx context.Context, q postgres.Querier, params persistence.VerificationCreateParams) error
+	Resend(ctx context.Context, q postgres.Querier, params persistence.VerificationResendParams, policy persistence.VerificationResendPolicy) error
+	FindByUser(ctx context.Context, q postgres.Querier, userID id.UserID) (persistence.Verification, error)
 	IncrementAttempts(ctx context.Context, q postgres.Querier, userID id.UserID) (int, error)
 	Delete(ctx context.Context, q postgres.Querier, userID id.UserID) error
 }
@@ -102,7 +101,7 @@ type RegistrationService struct {
 // NewRegistrationService builds a RegistrationService. users must mint ids (its
 // IDSource is the gateway's worker-lease manager), since registration creates new
 // accounts.
-func NewRegistrationService(users *userrepo.Repo, verify *verifyrepo.Repo, sender verification.Sender, tx transactor, policy RegistrationPolicy) *RegistrationService {
+func NewRegistrationService(users *persistence.UserRepo, verify *persistence.VerificationRepo, sender verification.Sender, tx transactor, policy RegistrationPolicy) *RegistrationService {
 	return &RegistrationService{
 		users:  users,
 		verify: verify,
@@ -124,7 +123,7 @@ type pendingSend struct {
 // is already pending — resends a fresh PIN (rate-limited), ignoring the new handle
 // and password so a re-registration cannot mutate the pending record. An address
 // owned by an active or disabled account is rejected with
-// userrepo.ErrMailAddressTaken. PIN delivery after commit is best-effort: a send
+// persistence.ErrMailAddressTaken. PIN delivery after commit is best-effort: a send
 // failure is logged, not surfaced, since the account exists and the user can resend.
 func (s *RegistrationService) Register(ctx context.Context, params RegisterParams) (RegisterResult, error) {
 	var result RegisterResult
@@ -137,7 +136,7 @@ func (s *RegistrationService) Register(ctx context.Context, params RegisterParam
 		switch {
 		case err == nil:
 			if existing.Status != domain.UserStatusPending {
-				return userrepo.ErrMailAddressTaken
+				return persistence.ErrMailAddressTaken
 			}
 			pin, err := s.resendPending(ctx, q, existing.ID)
 			if err != nil {
@@ -147,7 +146,7 @@ func (s *RegistrationService) Register(ctx context.Context, params RegisterParam
 			toSend = pendingSend{to: params.MailAddress, pin: pin}
 			shouldSend = true
 			return nil
-		case errors.Is(err, userrepo.ErrUserNotFound):
+		case errors.Is(err, persistence.ErrUserNotFound):
 			passwordHash, err := auth.HashPassword(params.Password)
 			if err != nil {
 				return fmt.Errorf("registration: hash password: %w", err)
@@ -178,12 +177,12 @@ func (s *RegistrationService) Register(ctx context.Context, params RegisterParam
 
 // createPending mints the account (status pending) and stores its hashed PIN in
 // one transaction step. It returns the new user and the plaintext PIN to deliver.
-func (s *RegistrationService) createPending(ctx context.Context, q postgres.Querier, params RegisterParams, passwordHash []byte) (userrepo.User, verification.PIN, error) {
+func (s *RegistrationService) createPending(ctx context.Context, q postgres.Querier, params RegisterParams, passwordHash []byte) (persistence.User, verification.PIN, error) {
 	pin, pinHash, err := newHashedPIN()
 	if err != nil {
-		return userrepo.User{}, verification.PIN{}, err
+		return persistence.User{}, verification.PIN{}, err
 	}
-	user, err := s.users.Create(ctx, q, userrepo.CreateParams{
+	user, err := s.users.Create(ctx, q, persistence.UserCreateParams{
 		MailAddress:  params.MailAddress,
 		Handle:       params.Handle,
 		DisplayName:  params.Handle.Display(),
@@ -191,25 +190,25 @@ func (s *RegistrationService) createPending(ctx context.Context, q postgres.Quer
 		Status:       domain.UserStatusPending,
 	})
 	if err != nil {
-		if errors.Is(err, userrepo.ErrMailAddressTaken) {
-			return userrepo.User{}, verification.PIN{}, fmt.Errorf("%w: %w", errMailAddressInsertRace, err)
+		if errors.Is(err, persistence.ErrMailAddressTaken) {
+			return persistence.User{}, verification.PIN{}, fmt.Errorf("%w: %w", errMailAddressInsertRace, err)
 		}
-		return userrepo.User{}, verification.PIN{}, err
+		return persistence.User{}, verification.PIN{}, err
 	}
 	now := s.now()
-	if err := s.verify.Create(ctx, q, verifyrepo.CreateParams{
+	if err := s.verify.Create(ctx, q, persistence.VerificationCreateParams{
 		UserID:    user.ID,
 		PinHash:   pinHash,
 		ExpiresAt: now.Add(s.policy.PinTTL),
 		SentAt:    now,
 	}); err != nil {
-		return userrepo.User{}, verification.PIN{}, fmt.Errorf("registration: store verification: %w", err)
+		return persistence.User{}, verification.PIN{}, fmt.Errorf("registration: store verification: %w", err)
 	}
 	return user, pin, nil
 }
 
 // resendPending issues a fresh PIN for an already-pending account, enforcing the
-// resend budget. It returns verifyrepo.ErrVerificationRateLimited when the budget
+// resend budget. It returns persistence.ErrVerificationRateLimited when the budget
 // or minimum interval is exhausted.
 func (s *RegistrationService) resendPending(ctx context.Context, q postgres.Querier, userID id.UserID) (verification.PIN, error) {
 	pin, pinHash, err := newHashedPIN()
@@ -217,12 +216,12 @@ func (s *RegistrationService) resendPending(ctx context.Context, q postgres.Quer
 		return verification.PIN{}, err
 	}
 	now := s.now()
-	err = s.verify.Resend(ctx, q, verifyrepo.ResendParams{
+	err = s.verify.Resend(ctx, q, persistence.VerificationResendParams{
 		UserID:    userID,
 		PinHash:   pinHash,
 		ExpiresAt: now.Add(s.policy.PinTTL),
 		SentAt:    now,
-	}, verifyrepo.ResendPolicy{
+	}, persistence.VerificationResendPolicy{
 		PreviousSentBefore: now.Add(-s.policy.ResendMinInterval),
 		MaxResendCount:     s.policy.MaxResendCount,
 	})
@@ -248,7 +247,7 @@ func (s *RegistrationService) runWithRegistrationRetry(ctx context.Context, op f
 		case errors.Is(err, errMailAddressInsertRace) && !retriedEmailRace:
 			retriedEmailRace = true
 			continue
-		case errors.Is(err, userrepo.ErrPublicCodeCollision):
+		case errors.Is(err, persistence.ErrUserPublicCodeCollision):
 			if publicCodeCollisions >= s.policy.CollisionRetries {
 				return fmt.Errorf("registration: public_code collisions exhausted after %d retries: %w", publicCodeCollisions, err)
 			}

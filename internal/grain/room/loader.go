@@ -8,8 +8,8 @@ import (
 
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/roomrepo"
 )
 
 // ErrRoomNotFound is the loader's contract for "no room carries this id". The
@@ -40,19 +40,20 @@ type RoomLoader interface {
 const loadTimeout = 3 * time.Second
 
 // roomRepoLoader is the production RoomLoader: a read-only view of the room table
-// via roomrepo over the backend's pool. The backend reads a room to hydrate the
-// grain but never mints one here, so roomrepo's id source is unused — mirroring
+// via the persistence room repo over the backend's pool. The backend reads a room
+// to hydrate the grain but never mints one here, so the room repo's id source is
+// unused — mirroring
 // the gateway's read-only RoomDirectory.
 type roomRepoLoader struct {
-	repo *roomrepo.Repo
+	repo *persistence.RoomRepo
 	pool postgres.Querier
 }
 
-// NewRoomRepoLoader builds a RoomLoader over pool. It owns the roomrepo.Repo
+// NewRoomRepoLoader builds a RoomLoader over pool. It owns the persistence.RoomRepo
 // internally with a nil id source, because activation reads rooms but never mints
 // them — so callers never see the unused id source.
 func NewRoomRepoLoader(pool postgres.Querier) RoomLoader {
-	return roomRepoLoader{repo: roomrepo.New(nil), pool: pool}
+	return roomRepoLoader{repo: persistence.NewRoomRepo(nil), pool: pool}
 }
 
 func (l roomRepoLoader) LoadRoom(ctx context.Context, roomID id.RoomID) (domain.RoomRef, error) {
@@ -60,7 +61,7 @@ func (l roomRepoLoader) LoadRoom(ctx context.Context, roomID id.RoomID) (domain.
 	defer cancel()
 
 	room, err := l.repo.FindByID(ctx, l.pool, roomID)
-	if errors.Is(err, roomrepo.ErrRoomNotFound) {
+	if errors.Is(err, persistence.ErrRoomNotFound) {
 		return domain.RoomRef{}, ErrRoomNotFound
 	}
 	if err != nil {

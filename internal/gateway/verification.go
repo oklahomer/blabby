@@ -7,9 +7,8 @@ import (
 	"log/slog"
 
 	"github.com/oklahomer/blabby/internal/domain"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 	"github.com/oklahomer/blabby/internal/verification"
 )
 
@@ -56,7 +55,7 @@ func (s *RegistrationService) Verify(ctx context.Context, params VerifyParams) e
 	txErr := s.tx.WithinTx(ctx, func(q postgres.Querier) error {
 		user, err := s.users.FindByEmail(ctx, q, params.MailAddress)
 		if err != nil {
-			if errors.Is(err, userrepo.ErrUserNotFound) {
+			if errors.Is(err, persistence.ErrUserNotFound) {
 				return invalid()
 			}
 			return fmt.Errorf("verify: find user: %w", err)
@@ -66,7 +65,7 @@ func (s *RegistrationService) Verify(ctx context.Context, params VerifyParams) e
 		}
 		challenge, err := s.verify.FindByUser(ctx, q, user.ID)
 		if err != nil {
-			if errors.Is(err, verifyrepo.ErrVerificationNotFound) {
+			if errors.Is(err, persistence.ErrVerificationNotFound) {
 				return invalid()
 			}
 			return fmt.Errorf("verify: find challenge: %w", err)
@@ -101,7 +100,7 @@ func (s *RegistrationService) Verify(ctx context.Context, params VerifyParams) e
 // Resend issues a fresh PIN to a pending account, enforcing the resend budget. To
 // avoid revealing whether an address is registered (or already active), it returns
 // nil for an unknown or non-pending address — a silent no-op. A pending account at
-// its resend budget returns verifyrepo.ErrVerificationRateLimited. Delivery after
+// its resend budget returns persistence.ErrVerificationRateLimited. Delivery after
 // commit is best-effort, like registration.
 func (s *RegistrationService) Resend(ctx context.Context, params ResendParams) error {
 	var toSend pendingSend
@@ -111,7 +110,7 @@ func (s *RegistrationService) Resend(ctx context.Context, params ResendParams) e
 		shouldSend = false
 		user, err := s.users.FindByEmail(ctx, q, params.MailAddress)
 		if err != nil {
-			if errors.Is(err, userrepo.ErrUserNotFound) {
+			if errors.Is(err, persistence.ErrUserNotFound) {
 				return nil
 			}
 			return fmt.Errorf("resend: find user: %w", err)

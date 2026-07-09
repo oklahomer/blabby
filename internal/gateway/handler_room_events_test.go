@@ -10,7 +10,7 @@ import (
 
 	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/persistence/journal"
+	"github.com/oklahomer/blabby/internal/persistence"
 )
 
 // serveEvents dispatches GET /rooms/{id}/events through a one-route mux so
@@ -26,9 +26,9 @@ func serveEvents(t *testing.T, g *Gateway, path, userID string) *httptest.Respon
 	return rec
 }
 
-// timelineEntry builds one journal.Entry fixture with a fixed timestamp so
+// timelineEntry builds one persistence.TimelineEntry fixture with a fixed timestamp so
 // exact-body assertions are deterministic.
-func timelineEntry(t *testing.T, eid int64, kind journal.EntryKind, code, name, text string) journal.Entry {
+func timelineEntry(t *testing.T, eid int64, kind persistence.TimelineEntryKind, code, name, text string) persistence.TimelineEntry {
 	t.Helper()
 	eventID, err := id.NewEventID(eid)
 	if err != nil {
@@ -38,10 +38,10 @@ func timelineEntry(t *testing.T, eid int64, kind journal.EntryKind, code, name, 
 	if err != nil {
 		t.Fatalf("ParsePublicCode(%q): %v", code, err)
 	}
-	return journal.Entry{
+	return persistence.TimelineEntry{
 		ID:         eventID,
 		Kind:       kind,
-		User:       journal.User{Code: parsed, Name: name},
+		User:       persistence.TimelineUser{Code: parsed, Name: name},
 		Text:       text,
 		OccurredAt: time.UnixMilli(1_700_000_000_000),
 	}
@@ -49,7 +49,7 @@ func timelineEntry(t *testing.T, eid int64, kind journal.EntryKind, code, name, 
 
 // eventsGateway builds a gateway whose timeline stub holds the given room-4
 // history (newest-first) with user 1 as the sole member.
-func eventsGateway(entries ...journal.Entry) (*Gateway, *stubRoomTimeline) {
+func eventsGateway(entries ...persistence.TimelineEntry) (*Gateway, *stubRoomTimeline) {
 	g := gatewayWithFake(&fakeUserGrainCaller{})
 	stub := newStubRoomTimeline()
 	stub.entries[4] = entries
@@ -59,8 +59,8 @@ func eventsGateway(entries ...journal.Entry) (*Gateway, *stubRoomTimeline) {
 
 func TestHandleRoomEvents_ReturnsInterleavedPageAsCodes(t *testing.T) {
 	g, _ := eventsGateway(
-		timelineEntry(t, 102, journal.EntryMessage, "A000000001", "alice", "hello 世界"),
-		timelineEntry(t, 101, journal.EntryMemberJoined, "B000000002", "bob", ""),
+		timelineEntry(t, 102, persistence.EntryMessage, "A000000001", "alice", "hello 世界"),
+		timelineEntry(t, 101, persistence.EntryMemberJoined, "B000000002", "bob", ""),
 	)
 	rec := serveEvents(t, g, "/rooms/RG000000004/events", "1")
 
@@ -92,9 +92,9 @@ func TestHandleRoomEvents_EmptyPageMarshalsAsArrayNotNull(t *testing.T) {
 
 func TestHandleRoomEvents_PagesWithLimitAndBefore(t *testing.T) {
 	g, _ := eventsGateway(
-		timelineEntry(t, 103, journal.EntryMessage, "A000000001", "alice", "three"),
-		timelineEntry(t, 102, journal.EntryMessage, "A000000001", "alice", "two"),
-		timelineEntry(t, 101, journal.EntryMessage, "A000000001", "alice", "one"),
+		timelineEntry(t, 103, persistence.EntryMessage, "A000000001", "alice", "three"),
+		timelineEntry(t, 102, persistence.EntryMessage, "A000000001", "alice", "two"),
+		timelineEntry(t, 101, persistence.EntryMessage, "A000000001", "alice", "one"),
 	)
 
 	rec := serveEvents(t, g, "/rooms/RG000000004/events?limit=2", "1")
@@ -118,9 +118,9 @@ func TestHandleRoomEvents_PagesWithLimitAndBefore(t *testing.T) {
 
 func TestHandleRoomEvents_FiltersMessagesByQuery(t *testing.T) {
 	g, _ := eventsGateway(
-		timelineEntry(t, 103, journal.EntryMemberJoined, "B000000002", "bob", ""),
-		timelineEntry(t, 102, journal.EntryMessage, "A000000001", "alice", "standup notes"),
-		timelineEntry(t, 101, journal.EntryMessage, "A000000001", "alice", "random chat"),
+		timelineEntry(t, 103, persistence.EntryMemberJoined, "B000000002", "bob", ""),
+		timelineEntry(t, 102, persistence.EntryMessage, "A000000001", "alice", "standup notes"),
+		timelineEntry(t, 101, persistence.EntryMessage, "A000000001", "alice", "random chat"),
 	)
 	rec := serveEvents(t, g, "/rooms/RG000000004/events?q=standup", "1")
 	if rec.Code != http.StatusOK {
@@ -180,7 +180,7 @@ func TestHandleRoomEvents_UnknownEntryKindReturns500(t *testing.T) {
 	// The journal is contracted to return known entry kinds; an unknown one
 	// means a kind was added without its wire mapping, so the handler fails
 	// closed rather than emit an untyped event.
-	g, _ := eventsGateway(timelineEntry(t, 101, journal.EntryKind(99), "A000000001", "alice", ""))
+	g, _ := eventsGateway(timelineEntry(t, 101, persistence.TimelineEntryKind(99), "A000000001", "alice", ""))
 	rec := serveEvents(t, g, "/rooms/RG000000004/events", "1")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 (body=%s)", rec.Code, rec.Body.String())

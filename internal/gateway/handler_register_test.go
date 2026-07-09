@@ -10,8 +10,7 @@ import (
 	"testing"
 
 	"github.com/oklahomer/blabby/internal/errcode"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
+	"github.com/oklahomer/blabby/internal/persistence"
 )
 
 // fakeRegistrar is a stub Registrar: it records the params it received and returns
@@ -70,7 +69,7 @@ func TestHandleRegister(t *testing.T) {
 		{
 			name:          "duplicate email returns 409",
 			body:          validBody,
-			registrar:     &fakeRegistrar{err: userrepo.ErrMailAddressTaken},
+			registrar:     &fakeRegistrar{err: persistence.ErrMailAddressTaken},
 			wantStatus:    http.StatusConflict,
 			wantErrorCode: errcode.EmailAlreadyRegistered,
 			wantReached:   true,
@@ -78,7 +77,7 @@ func TestHandleRegister(t *testing.T) {
 		{
 			name:          "duplicate handle returns 409",
 			body:          validBody,
-			registrar:     &fakeRegistrar{err: userrepo.ErrHandleTaken},
+			registrar:     &fakeRegistrar{err: persistence.ErrHandleTaken},
 			wantStatus:    http.StatusConflict,
 			wantErrorCode: errcode.HandleAlreadyTaken,
 			wantReached:   true,
@@ -86,7 +85,7 @@ func TestHandleRegister(t *testing.T) {
 		{
 			name:          "resend rate limited returns 429",
 			body:          validBody,
-			registrar:     &fakeRegistrar{err: verifyrepo.ErrVerificationRateLimited},
+			registrar:     &fakeRegistrar{err: persistence.ErrVerificationRateLimited},
 			wantStatus:    http.StatusTooManyRequests,
 			wantErrorCode: errcode.VerificationRateLimited,
 			wantReached:   true,

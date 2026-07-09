@@ -1,4 +1,4 @@
-package journal
+package persistence
 
 import (
 	"context"
@@ -39,7 +39,7 @@ func TestTimeline_FirstPageInterleavesKinds(t *testing.T) {
 		}}, nil
 	}}
 
-	entries, hasMore, err := New(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{Limit: 2})
+	entries, hasMore, err := NewJournal(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{Limit: 2})
 	if err != nil {
 		t.Fatalf("Timeline: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestTimeline_LookAheadRowSetsHasMore(t *testing.T) {
 		}}, nil
 	}}
 
-	entries, hasMore, err := New(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{Limit: 2})
+	entries, hasMore, err := NewJournal(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{Limit: 2})
 	if err != nil {
 		t.Fatalf("Timeline: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestTimeline_CursorAndSearchClauses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseEventID: %v", err)
 	}
-	_, _, err = New(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{
+	_, _, err = NewJournal(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{
 		Query:  mustMessageQuery(t, `cats OR "dogs\`),
 		Before: before,
 		Limit:  5,
@@ -137,7 +137,7 @@ func TestTimeline_UnknownKindFails(t *testing.T) {
 	fq := &fakeQuerier{query: func(sql string, args ...any) (pgx.Rows, error) {
 		return &fakeRows{rows: [][]any{timelineRow(101, "bogus", "", "A000000001", "alice")}}, nil
 	}}
-	if _, _, err := New(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{Limit: 5}); err == nil {
+	if _, _, err := NewJournal(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{Limit: 5}); err == nil {
 		t.Fatal("Timeline: want an error for an unknown event type")
 	}
 }
@@ -146,7 +146,7 @@ func TestTimeline_MalformedUserCodeFails(t *testing.T) {
 	fq := &fakeQuerier{query: func(sql string, args ...any) (pgx.Rows, error) {
 		return &fakeRows{rows: [][]any{timelineRow(101, "message_posted", "hi", "not-a-code", "alice")}}, nil
 	}}
-	if _, _, err := New(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{Limit: 5}); err == nil {
+	if _, _, err := NewJournal(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{Limit: 5}); err == nil {
 		t.Fatal("Timeline: want an error for a malformed user public_code")
 	}
 }
@@ -154,7 +154,7 @@ func TestTimeline_MalformedUserCodeFails(t *testing.T) {
 func TestTimeline_PropagatesQueryError(t *testing.T) {
 	boom := errors.New("connection reset")
 	fq := &fakeQuerier{query: func(string, ...any) (pgx.Rows, error) { return nil, boom }}
-	if _, _, err := New(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{Limit: 5}); !errors.Is(err, boom) {
+	if _, _, err := NewJournal(nil).Timeline(context.Background(), fq, mustRoomID(t, 4), TimelineParams{Limit: 5}); !errors.Is(err, boom) {
 		t.Fatalf("Timeline err = %v, want wrapped %v", err, boom)
 	}
 }

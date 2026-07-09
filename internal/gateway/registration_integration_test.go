@@ -10,9 +10,8 @@ import (
 	"time"
 
 	"github.com/oklahomer/blabby/internal/domain"
+	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
-	"github.com/oklahomer/blabby/internal/persistence/userrepo"
-	"github.com/oklahomer/blabby/internal/persistence/verifyrepo"
 )
 
 // incrementingIDSource hands out unique, monotonically increasing ids seeded from a
@@ -51,8 +50,8 @@ func TestRegistrationIntegration(t *testing.T) {
 
 	sender := &recordingVerificationSender{}
 	svc := NewRegistrationService(
-		userrepo.New(&incrementingIDSource{next: base}),
-		verifyrepo.New(),
+		persistence.NewUserRepo(&incrementingIDSource{next: base}),
+		persistence.NewVerificationRepo(),
 		sender,
 		postgres.NewTransactor(pool),
 		RegistrationPolicy{PinTTL: 10 * time.Minute, ResendMinInterval: time.Minute, MaxResendCount: 5, MaxVerifyAttempts: 5, CollisionRetries: 3},
@@ -75,7 +74,7 @@ func TestRegistrationIntegration(t *testing.T) {
 		t.Fatalf("sender got %d calls to %q, want 1 to %q", sender.calls, sender.to.String(), mail.String())
 	}
 
-	users := userrepo.New(nil)
+	users := persistence.NewUserRepo(nil)
 	created, err := users.FindByEmail(ctx, pool, mail)
 	if err != nil {
 		t.Fatalf("FindByEmail after register: %v", err)
@@ -83,7 +82,7 @@ func TestRegistrationIntegration(t *testing.T) {
 	if created.Status != domain.UserStatusPending {
 		t.Fatalf("status = %q, want pending", created.Status)
 	}
-	verify := verifyrepo.New()
+	verify := persistence.NewVerificationRepo()
 	challenge, err := verify.FindByUser(ctx, pool, created.ID)
 	if err != nil {
 		t.Fatalf("FindByUser (verification): %v", err)
@@ -118,13 +117,13 @@ func TestRegistrationIntegration(t *testing.T) {
 	if activated.Status != domain.UserStatusActive {
 		t.Fatalf("status = %q, want active", activated.Status)
 	}
-	if _, err := verify.FindByUser(ctx, pool, created.ID); !errors.Is(err, verifyrepo.ErrVerificationNotFound) {
+	if _, err := verify.FindByUser(ctx, pool, created.ID); !errors.Is(err, persistence.ErrVerificationNotFound) {
 		t.Fatalf("FindByUser after verify = %v, want challenge cleared", err)
 	}
 
 	// A different email reusing the same handle is rejected.
 	otherMail := mustIntegrationMail(t, "itest2-"+suffix+"@example.com")
-	if _, err := svc.Register(ctx, RegisterParams{MailAddress: otherMail, Handle: handle, Password: "supersecret12"}); !errors.Is(err, userrepo.ErrHandleTaken) {
+	if _, err := svc.Register(ctx, RegisterParams{MailAddress: otherMail, Handle: handle, Password: "supersecret12"}); !errors.Is(err, persistence.ErrHandleTaken) {
 		t.Fatalf("Register(duplicate handle) = %v, want ErrHandleTaken", err)
 	}
 }
