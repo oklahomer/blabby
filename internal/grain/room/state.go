@@ -34,9 +34,9 @@ type roomState struct {
 	// room; until it does, the grain is invalid and every command is rejected.
 	ref       domain.RoomRef
 	refLoaded bool
-	// members caches each member's denormalized UserRef (id + display name),
-	// keyed by id. The Room owns this cache so fan-out can label events
-	// locally — never a synchronous lookup back to the User grain.
+	// members caches each member's denormalized UserRef (id + public code +
+	// display name), keyed by id. The Room owns this cache so fan-out can label
+	// events locally — never a synchronous lookup back to the User grain.
 	members           map[id.UserID]domain.UserRef
 	recentMessages    []chatMessage
 	maxRecentMessages int

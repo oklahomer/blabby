@@ -12,8 +12,8 @@ import (
 
 // buildJoinedEvent shapes the NotifyRoomEvent payload sent to every current
 // member when a user joins. room carries the room's reference metadata (the
-// connection renders its public code); joiner carries the subject's id and
-// display name; evt carries the durable event's id and timestamp.
+// connection renders its public code); joiner carries the subject's id, public
+// code, and display name; evt carries the durable event's id and timestamp.
 func buildJoinedEvent(room domain.RoomRef, joiner domain.UserRef, evt MembershipEvent) *userpb.NotifyRoomEventRequest {
 	req := &userpb.NotifyRoomEventRequest{
 		Room:      protoRoomRef(room),
@@ -50,7 +50,7 @@ func applyMembershipEvent(req *userpb.NotifyRoomEventRequest, evt MembershipEven
 // buildForwardMessage shapes the ForwardMessage payload sent to every
 // current member (including the sender — multi-device echo, FR3) for a
 // posted chat message. room carries the room's reference metadata; sender
-// carries the author's id and display name; eventID is the durable
+// carries the author's id, public code, and display name; eventID is the durable
 // message_posted event id ("" when the grain runs storeless in unit tests),
 // so a client can order and dedup the live frame against timeline history.
 func buildForwardMessage(room domain.RoomRef, sender domain.UserRef, text string, timestamp time.Time, eventID string) *userpb.ForwardMessageRequest {

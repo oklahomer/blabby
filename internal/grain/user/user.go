@@ -567,8 +567,8 @@ func parseRoomError(ctx cluster.GrainContext, operation string, roomID id.RoomID
 
 // parseRoomRef parses the proto RoomRef carried on a Join response into a typed
 // domain.RoomRef at the grain boundary (parse, don't validate). A nil ref, an
-// invalid id or public code, or an unknown status is rejected so the caller can
-// fail closed rather than cache a degraded entry.
+// invalid id or public code, an unknown status, or a blank/over-long name is
+// rejected so the caller can fail closed rather than cache a degraded entry.
 func parseRoomRef(p *commonpb.RoomRef) (domain.RoomRef, error) {
 	roomID, err := id.ParseRoomID(p.GetRoomId())
 	if err != nil {
