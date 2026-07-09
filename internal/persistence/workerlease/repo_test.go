@@ -161,7 +161,9 @@ func TestWorkerLeaseRepoIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	defer pool.Close()
+	// Registered before the truncate cleanup below so it runs after it (LIFO);
+	// a defer would close the pool before any t.Cleanup could use it.
+	t.Cleanup(pool.Close)
 
 	mustExec := func(sql string) {
 		t.Helper()
@@ -170,7 +172,11 @@ func TestWorkerLeaseRepoIntegration(t *testing.T) {
 		}
 	}
 	mustExec("TRUNCATE worker_lease")
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "TRUNCATE worker_lease") })
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "TRUNCATE worker_lease"); err != nil {
+			t.Errorf("cleanup: truncate worker_lease: %v", err)
+		}
+	})
 
 	repo := NewRepo(pool)
 

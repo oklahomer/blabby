@@ -30,13 +30,17 @@ func TestUserRepoIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	defer pool.Close()
+	// Registered before the row cleanup below so it runs after it (LIFO); a
+	// defer would close the pool before any t.Cleanup could use it.
+	t.Cleanup(pool.Close)
 
 	// A time-based id and unique email/handle avoid colliding with the seed rows
 	// or a prior run.
 	rawID := time.Now().UnixNano()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM service_user WHERE id = $1", rawID)
+		if _, err := pool.Exec(context.Background(), "DELETE FROM service_user WHERE id = $1", rawID); err != nil {
+			t.Errorf("cleanup: delete user row: %v", err)
+		}
 	})
 	mail := mustMailAddress(t, fmt.Sprintf("itest-%d@example.com", rawID))
 	handle := mustHandle(t, fmt.Sprintf("itest_%d", rawID))

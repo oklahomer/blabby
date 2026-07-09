@@ -26,14 +26,18 @@ func TestWithinTxIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	defer pool.Close()
+	// Registered before the table cleanup below so it runs after it (LIFO); a
+	// defer would close the pool before any t.Cleanup could use it.
+	t.Cleanup(pool.Close)
 
 	const table = "_tx_within_test"
 	if _, err := pool.Exec(ctx, "CREATE TABLE IF NOT EXISTS "+table+" (n int)"); err != nil {
 		t.Fatalf("create scratch table: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DROP TABLE IF EXISTS "+table)
+		if _, err := pool.Exec(context.Background(), "DROP TABLE IF EXISTS "+table); err != nil {
+			t.Errorf("cleanup: drop scratch table: %v", err)
+		}
 	})
 	if _, err := pool.Exec(ctx, "TRUNCATE "+table); err != nil {
 		t.Fatalf("truncate scratch table: %v", err)

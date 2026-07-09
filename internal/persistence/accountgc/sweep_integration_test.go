@@ -28,12 +28,18 @@ func TestSweepIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	defer pool.Close()
+	// Registered before the row cleanup below so it runs after it (LIFO); a
+	// defer would close the pool before any t.Cleanup could use it — leaking
+	// this test's rows, whose expiring challenges then inflate the next run's
+	// global deleted count.
+	t.Cleanup(pool.Close)
 
 	base := time.Now().UnixNano()
 	now := time.Now()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM service_user WHERE id > $1 AND id <= $2", base, base+10)
+		if _, err := pool.Exec(context.Background(), "DELETE FROM service_user WHERE id > $1 AND id <= $2", base, base+10); err != nil {
+			t.Errorf("cleanup: delete seeded accounts: %v", err)
+		}
 	})
 
 	const (

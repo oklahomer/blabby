@@ -29,14 +29,20 @@ func TestVerifyRepoIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	defer pool.Close()
+	// Registered before the row cleanup below so it runs after it (LIFO); a
+	// defer would close the pool before any t.Cleanup could use it.
+	t.Cleanup(pool.Close)
 
 	userID := mustUserID(t, 1) // seed user alice, used only as a satisfied FK
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM email_verification WHERE user_id = 1")
+		if _, err := pool.Exec(context.Background(), "DELETE FROM email_verification WHERE user_id = 1"); err != nil {
+			t.Errorf("cleanup: delete verification row: %v", err)
+		}
 	})
 	// Start from a clean slate in case a prior aborted run left a row.
-	_, _ = pool.Exec(ctx, "DELETE FROM email_verification WHERE user_id = 1")
+	if _, err := pool.Exec(ctx, "DELETE FROM email_verification WHERE user_id = 1"); err != nil {
+		t.Fatalf("pre-clean verification row: %v", err)
+	}
 
 	repo := NewVerificationRepo()
 	expiry := time.Now().Add(10 * time.Minute).Truncate(time.Microsecond)
