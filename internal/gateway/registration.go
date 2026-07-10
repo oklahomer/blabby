@@ -169,7 +169,7 @@ func (s *RegistrationService) Register(ctx context.Context, params RegisterParam
 	}
 	if shouldSend {
 		if err := s.sender.Send(ctx, toSend.to, toSend.pin, s.policy.PinTTL); err != nil {
-			slog.Error("registration: pin delivery failed", "public_code", result.PublicCode, "error", err)
+			slog.Error("gateway.registration.pin_delivery_failed", "public_code", result.PublicCode, "error", err)
 		}
 	}
 	return result, nil

@@ -81,7 +81,7 @@ func (g *Gateway) writeVerifyError(w http.ResponseWriter, err error) {
 		WriteErrorResponse(w, http.StatusBadRequest, ErrVerificationInvalid("verification failed"))
 		return
 	}
-	slog.Error("verification failed", "error", err.Error())
+	slog.Error("gateway.verification.failed", "error", err.Error())
 	WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("verification unavailable"))
 }
 
@@ -118,7 +118,7 @@ func (g *Gateway) handleResendVerification(w http.ResponseWriter, r *http.Reques
 			WriteErrorResponse(w, http.StatusTooManyRequests, ErrVerificationRateLimited("too many resend requests; please wait and try again"))
 			return
 		}
-		slog.Error("verification resend failed", "error", err.Error())
+		slog.Error("gateway.verification.resend_failed", "error", err.Error())
 		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("verification unavailable"))
 		return
 	}

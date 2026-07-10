@@ -69,7 +69,7 @@ func WriteErrorResponse(w http.ResponseWriter, httpStatus int, detail ErrorDetai
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
 	if err := json.NewEncoder(w).Encode(ErrorResponse{Error: detail}); err != nil {
-		slog.Error("failed to write error response", "error", err, "code", detail.Code, "status", detail.Status)
+		slog.Error("gateway.error.write_failed", "error", err, "code", detail.Code, "status", detail.Status)
 	}
 }
 

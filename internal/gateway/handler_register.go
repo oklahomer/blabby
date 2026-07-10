@@ -84,7 +84,7 @@ func (g *Gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(RegisterResponse(result)); err != nil {
-		slog.Error("failed to write registration response", "error", err)
+		slog.Error("gateway.registration.write_failed", "error", err)
 	}
 }
 
@@ -100,7 +100,7 @@ func (g *Gateway) writeRegisterError(w http.ResponseWriter, err error) {
 	case errors.Is(err, persistence.ErrVerificationRateLimited):
 		WriteErrorResponse(w, http.StatusTooManyRequests, ErrVerificationRateLimited("too many verification attempts; please wait and try again"))
 	default:
-		slog.Error("registration failed", "error", err.Error())
+		slog.Error("gateway.registration.failed", "error", err.Error())
 		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("registration unavailable"))
 	}
 }

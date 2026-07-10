@@ -136,7 +136,7 @@ func (g *Gateway) handleRoomOwnerPut(w http.ResponseWriter, r *http.Request) {
 func (g *Gateway) requireTargetUserID(w http.ResponseWriter, r *http.Request, endpoint string, actorID id.UserID, raw string) (id.UserID, bool) {
 	code, err := id.ParseUserCode(raw)
 	if err != nil {
-		slog.Warn("room handler rejected request",
+		slog.Warn("gateway.room.rejected",
 			"endpoint", endpoint, "method", r.Method,
 			"user_id", actorID, "reason", "invalid_user_code")
 		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("user id is invalid"))
@@ -145,7 +145,7 @@ func (g *Gateway) requireTargetUserID(w http.ResponseWriter, r *http.Request, en
 	targetID, err := g.users.ResolveUserID(r.Context(), code)
 	switch {
 	case errors.Is(err, auth.ErrPublicCodeUnknown):
-		slog.Warn("room handler rejected request",
+		slog.Warn("gateway.room.rejected",
 			"endpoint", endpoint, "method", r.Method,
 			"user_id", actorID, "reason", "unknown_user_code")
 		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("unknown user"))

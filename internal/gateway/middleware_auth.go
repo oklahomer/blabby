@@ -30,7 +30,7 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := extractBearerToken(r.Header.Get("Authorization"))
 		if !ok {
-			slog.Warn("auth middleware rejected request",
+			slog.Warn("gateway.auth.rejected",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"reason", "missing_or_malformed_header",
@@ -45,7 +45,7 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 		if err != nil {
 			switch {
 			case errors.Is(err, auth.ErrTokenExpired):
-				slog.Warn("auth middleware rejected request",
+				slog.Warn("gateway.auth.rejected",
 					"method", r.Method,
 					"path", r.URL.Path,
 					"reason", "expired",
@@ -57,7 +57,7 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 				// The token is well-formed but its identity could not be resolved
 				// because the account backend is unavailable. Answer 503 (retry) so
 				// a transient outage does not force clients to discard valid tokens.
-				slog.Error("auth middleware: identity backend unavailable",
+				slog.Error("gateway.auth.backend_unavailable",
 					"method", r.Method,
 					"path", r.URL.Path,
 					"reason", "identity_unavailable",
@@ -66,7 +66,7 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 				WriteErrorResponse(w, http.StatusServiceUnavailable,
 					ErrServiceUnavailable("authentication temporarily unavailable"))
 			default:
-				slog.Warn("auth middleware rejected request",
+				slog.Warn("gateway.auth.rejected",
 					"method", r.Method,
 					"path", r.URL.Path,
 					"reason", "invalid",
@@ -83,7 +83,7 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 		// client-facing response as a malformed token so attackers cannot
 		// distinguish the cases; operators get the slog.Error signal.
 		if claims == nil {
-			slog.Error("auth middleware rejected request: authenticator contract violation",
+			slog.Error("gateway.auth.contract_violation",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"reason", "authenticator_contract_violation",

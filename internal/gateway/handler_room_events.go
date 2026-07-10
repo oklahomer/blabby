@@ -119,7 +119,7 @@ func (g *Gateway) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	params, perr := parseRoomEventsQuery(r)
 	if perr != nil {
-		slog.Warn("room handler rejected request",
+		slog.Warn("gateway.room.rejected",
 			"endpoint", endpointRoomEvents, "method", r.Method,
 			"user_id", userID, "room_id", roomID, "reason", perr.reason)
 		WriteErrorResponse(w, httpStatus(perr.detail.Code), perr.detail)
@@ -134,7 +134,7 @@ func (g *Gateway) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !member {
-		slog.Warn("room handler rejected request",
+		slog.Warn("gateway.room.rejected",
 			"endpoint", endpointRoomEvents, "method", r.Method,
 			"user_id", userID, "room_id", roomID, "reason", "not_member")
 		WriteErrorResponse(w, http.StatusForbidden, ErrRoomNotMember("not a member of this room"))
@@ -157,7 +157,7 @@ func (g *Gateway) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// An unmapped entry kind is a server-side bug (see toRoomEvents), so
 		// fail closed rather than serve a page with an untyped event.
-		slog.Error("room handler internal error",
+		slog.Error("gateway.room.internal_error",
 			"endpoint", endpointRoomEvents, "method", r.Method,
 			"user_id", userID, "room_id", roomID, "error", err)
 		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("failed to render events"))

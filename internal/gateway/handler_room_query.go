@@ -107,7 +107,7 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 	}
 	params, perr := parseRoomListQuery(r)
 	if perr != nil {
-		slog.Warn("room handler rejected request",
+		slog.Warn("gateway.room.rejected",
 			"endpoint", endpointRoomList, "method", r.Method,
 			"user_id", userID, "reason", perr.reason)
 		WriteErrorResponse(w, httpStatus(perr.detail.Code), perr.detail)
@@ -122,7 +122,7 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, persistence.ErrRoomNotFound):
 			// A stale or bogus continuation, not a missing resource: the client
 			// restarts from the first page.
-			slog.Warn("room handler rejected request",
+			slog.Warn("gateway.room.rejected",
 				"endpoint", endpointRoomList, "method", r.Method,
 				"user_id", userID, "reason", "unknown_after")
 			WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("after references an unknown room"))
@@ -137,7 +137,7 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 
 	page, err := g.rooms.ListActive(r.Context(), query)
 	if err != nil {
-		slog.Warn("room handler transport error",
+		slog.Warn("gateway.room.transport_error",
 			"endpoint", endpointRoomList, "method", r.Method,
 			"user_id", userID, "outcome", outcomeTransportError)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to list rooms"))
@@ -167,7 +167,7 @@ func (g *Gateway) handleRoomJoined(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := g.userGrainFor(userID).GetJoinedRooms(&userpb.GetJoinedRoomsRequest{})
 	if err != nil {
-		slog.Warn("room handler transport error",
+		slog.Warn("gateway.room.transport_error",
 			"endpoint", endpointRoomJoined, "method", r.Method,
 			"user_id", userID, "outcome", outcomeTransportError)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
@@ -179,7 +179,7 @@ func (g *Gateway) handleRoomJoined(w http.ResponseWriter, r *http.Request) {
 		// The User grain is contracted to return well-formed room refs; an
 		// unparseable public code is a server-side bug, so fail closed rather than
 		// let a room silently vanish from the user's list.
-		slog.Error("room handler internal error",
+		slog.Error("gateway.room.internal_error",
 			"endpoint", endpointRoomJoined, "method", r.Method,
 			"user_id", userID, "error", err)
 		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("failed to read joined rooms"))
