@@ -98,7 +98,7 @@ type UserConnection struct {
 // the middleware non-fatal in that case.
 func currentUserID(ctx actor.ReceiverContext) string {
 	uc, ok := ctx.Actor().(*UserConnection)
-	if !ok {
+	if !ok || uc.userID.IsZero() {
 		return ""
 	}
 	return uc.userID.String()
@@ -242,12 +242,7 @@ func (uc *UserConnection) Receive(ctx actor.Context) {
 		uc.stop(ctx)
 	case *WritePumpClosed:
 		if msg.CloseFrameErr != "" {
-			slog.Warn(eventConnectionCloseFrameError,
-				"actor_type", actorType,
-				"pid", ctx.Self().String(),
-				"user_id", uc.userID.String(),
-				"reason", msg.CloseFrameErr,
-			)
+			slog.Warn(eventConnectionCloseFrameError, uc.logAttrs(ctx, "reason", msg.CloseFrameErr)...)
 		}
 		uc.stop(ctx)
 
@@ -368,6 +363,22 @@ func (uc *UserConnection) postAuthBehavior(ctx actor.Context) {
 func (uc *UserConnection) newClosingBehavior(ctx actor.Context, cc *CloseConnection) actor.ReceiveFunc {
 	uc.sendOutboundBestEffort(ctx, cc)
 	return func(ctx actor.Context) {}
+}
+
+// logAttrs assembles the attribute prefix shared by this actor's log lines —
+// actor_type and pid, plus user_id once authentication has bound an identity —
+// followed by extra. Log sites that can fire pre-auth build their attributes
+// here so the zero id's "0" rendering never appears as a user_id; post-auth-only
+// sites log a real id by construction and keep their inline attribute lists.
+func (uc *UserConnection) logAttrs(ctx actor.Context, extra ...any) []any {
+	attrs := []any{
+		"actor_type", actorType,
+		"pid", ctx.Self().String(),
+	}
+	if !uc.userID.IsZero() {
+		attrs = append(attrs, "user_id", uc.userID.String())
+	}
+	return append(attrs, extra...)
 }
 
 // authRejectionError carries the AuthFailed payload produced by handleAuth on a
@@ -610,11 +621,7 @@ func (uc *UserConnection) sendOutbound(ctx actor.Context, msg any) {
 	select {
 	case uc.outbound <- msg:
 	default:
-		slog.Warn(eventConnectionWriteBackpressure,
-			"actor_type", actorType,
-			"pid", ctx.Self().String(),
-			"user_id", uc.userID.String(),
-		)
+		slog.Warn(eventConnectionWriteBackpressure, uc.logAttrs(ctx)...)
 		panic(&outboundBackpressureError{})
 	}
 }
@@ -626,12 +633,7 @@ func (uc *UserConnection) sendOutboundBestEffort(ctx actor.Context, msg any) {
 	select {
 	case uc.outbound <- msg:
 	default:
-		slog.Warn(eventConnectionWriteBackpressure,
-			"actor_type", actorType,
-			"pid", ctx.Self().String(),
-			"user_id", uc.userID.String(),
-			"dropped_kind", typeName(msg),
-		)
+		slog.Warn(eventConnectionWriteBackpressure, uc.logAttrs(ctx, "dropped_kind", typeName(msg))...)
 	}
 }
 
@@ -643,42 +645,23 @@ func (uc *UserConnection) stop(ctx actor.Context) {
 }
 
 func (uc *UserConnection) logDecodeFailure(ctx actor.Context, msg *DecodeFailed) {
-	slog.Warn(eventConnectionDecodeFailed,
-		"actor_type", actorType,
-		"pid", ctx.Self().String(),
-		"user_id", uc.userID.String(),
-		"reason", msg.Reason,
-	)
+	slog.Warn(eventConnectionDecodeFailed, uc.logAttrs(ctx, "reason", msg.Reason)...)
 }
 
 func (uc *UserConnection) logReadPumpPanic(ctx actor.Context, _ *ReadPumpPanicked) {
-	slog.Error(eventConnectionReadPumpPanic,
-		"actor_type", actorType,
-		"pid", ctx.Self().String(),
-		"user_id", uc.userID.String(),
-		"reason", "read_pump_panicked",
-	)
+	slog.Error(eventConnectionReadPumpPanic, uc.logAttrs(ctx, "reason", "read_pump_panicked")...)
 }
 
 func (uc *UserConnection) logClosed(ctx actor.Context, msg *ConnectionClosed) {
-	args := []any{
-		"actor_type", actorType,
-		"pid", ctx.Self().String(),
+	slog.Info(eventConnectionClosed, uc.logAttrs(ctx,
 		"msg_type", typeName(msg),
 		"reason", msg.Reason,
-	}
-	if uid := uc.userID.String(); uid != "" {
-		args = append(args, "user_id", uid)
-	}
-	slog.Info(eventConnectionClosed, args...)
+	)...)
 }
 
 func (uc *UserConnection) logWriteError(ctx actor.Context, eventKind string) {
-	slog.Warn(eventConnectionWriteError,
-		"actor_type", actorType,
-		"pid", ctx.Self().String(),
-		"user_id", uc.userID.String(),
+	slog.Warn(eventConnectionWriteError, uc.logAttrs(ctx,
 		"reason", "write_error",
 		"event_kind", eventKind,
-	)
+	)...)
 }
