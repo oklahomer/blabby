@@ -49,6 +49,19 @@ func TestNewUserID(t *testing.T) {
 	})
 }
 
+func TestUserID_IsZero(t *testing.T) {
+	if !(UserID{}).IsZero() {
+		t.Error("IsZero() = false for the zero value, want true")
+	}
+	uid, err := NewUserID(42)
+	if err != nil {
+		t.Fatalf("NewUserID: %v", err)
+	}
+	if uid.IsZero() {
+		t.Error("IsZero() = true for a constructed id, want false")
+	}
+}
+
 func TestParseUserID(t *testing.T) {
 	t.Run("decimal string parses to the same value", func(t *testing.T) {
 		uid, err := ParseUserID("123")

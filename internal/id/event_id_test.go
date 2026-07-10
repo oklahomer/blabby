@@ -24,6 +24,19 @@ func TestNewEventID(t *testing.T) {
 	}
 }
 
+func TestEventID_IsZero(t *testing.T) {
+	if !(EventID{}).IsZero() {
+		t.Error("IsZero() = false for the zero value, want true")
+	}
+	eid, err := NewEventID(7)
+	if err != nil {
+		t.Fatalf("NewEventID: %v", err)
+	}
+	if eid.IsZero() {
+		t.Error("IsZero() = true for a constructed id, want false")
+	}
+}
+
 func TestParseEventID(t *testing.T) {
 	e, err := ParseEventID("9007199254740993")
 	if err != nil {

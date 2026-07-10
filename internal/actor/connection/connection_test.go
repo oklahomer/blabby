@@ -22,6 +22,7 @@ import (
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/id"
+	"github.com/oklahomer/blabby/internal/testutil/logcapture"
 )
 
 // stubAuthenticator implements auth.Authenticator with caller-supplied
@@ -684,6 +685,85 @@ func (s *syncBuffer) Snapshot() []byte {
 	out := make([]byte, s.buf.Len())
 	copy(out, s.buf.Bytes())
 	return out
+}
+
+// decodeLogLines parses a captured JSON log stream into one map per line.
+func decodeLogLines(t *testing.T, raw string) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		if len(line) == 0 {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("malformed json log line %q: %v", line, err)
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// TestLogs_PreAuthLinesOmitUserID pins the pre-auth logging contract: before
+// authentication binds an identity, no log line may carry a user_id key —
+// the zero id would render as "0" and pollute log-pipeline joins on user_id.
+// Once auth completes, dispatch lines must carry the real id.
+func TestLogs_PreAuthLinesOmitUserID(t *testing.T) {
+	buf := logcapture.JSON(t, slog.LevelDebug)
+
+	authStub := &stubAuthenticator{validateFn: func(_ context.Context, _ string) (*auth.Claims, error) {
+		return aliceClaims(), nil
+	}}
+	sess := startSession(t, authStub, &recordingGrainCaller{})
+
+	// A malformed frame pre-auth produces a DecodeFailed dispatch line plus a
+	// connection.decode.failed handler line — both while userID is unset.
+	if err := sess.client.WriteMessage(websocket.TextMessage, []byte(`not-json`)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	writeAuthFrame(t, sess.client, "tok")
+	if got := readJSON(t, sess.client); got["type"] != "auth_ok" {
+		t.Fatalf("expected auth_ok, got %v", got)
+	}
+
+	// A post-auth business message; its dispatch line must carry user_id.
+	sess.system.Root.Send(sess.pid, &userpb.ForwardMessageRequest{
+		Room:      fanoutRoom(),
+		Sender:    &commonpb.UserRef{Id: "2", Name: "Bob Builder", PublicCode: "B000000002"},
+		Text:      "hello",
+		Timestamp: timestamppb.New(time.UnixMilli(1)),
+	})
+	_ = readJSON(t, sess.client)
+
+	// Stop the actor so every log line from its mailbox has landed.
+	_ = sess.system.Root.PoisonFuture(sess.pid).Wait()
+
+	var sawDecodeDispatch, sawDecodeFailed, sawPostAuthDispatch bool
+	for _, line := range decodeLogLines(t, buf.String()) {
+		msg, msgType := line["msg"], line["msg_type"]
+		_, hasUserID := line["user_id"]
+		switch {
+		case msg == "connection.msg" && msgType == "connection.DecodeFailed":
+			sawDecodeDispatch = true
+			if hasUserID {
+				t.Errorf("pre-auth connection.msg line carries user_id: %v", line)
+			}
+		case msg == "connection.decode.failed":
+			sawDecodeFailed = true
+			if hasUserID {
+				t.Errorf("pre-auth connection.decode.failed line carries user_id: %v", line)
+			}
+		case msg == "connection.msg" && msgType == "userpb.ForwardMessageRequest":
+			sawPostAuthDispatch = true
+			if line["user_id"] != "1" {
+				t.Errorf("post-auth connection.msg user_id = %v, want %q", line["user_id"], "1")
+			}
+		}
+	}
+	if !sawDecodeDispatch || !sawDecodeFailed || !sawPostAuthDispatch {
+		t.Fatalf("missing expected log lines: decode dispatch=%v decode.failed=%v post-auth dispatch=%v\nlog stream:\n%s",
+			sawDecodeDispatch, sawDecodeFailed, sawPostAuthDispatch, buf.String())
+	}
 }
 
 func TestLogs_TokenIsNeverLogged(t *testing.T) {

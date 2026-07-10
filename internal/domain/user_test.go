@@ -65,6 +65,19 @@ func TestNewUserRef(t *testing.T) {
 	}
 }
 
+func TestUserRef_IsZero(t *testing.T) {
+	if !(domain.UserRef{}).IsZero() {
+		t.Error("IsZero() = false for the zero value, want true")
+	}
+	ref, err := domain.NewUserRef(mustUserID(t, 1), mustPublicCode(t, "A000000001"), "Alice")
+	if err != nil {
+		t.Fatalf("NewUserRef: %v", err)
+	}
+	if ref.IsZero() {
+		t.Error("IsZero() = true for a constructed ref, want false")
+	}
+}
+
 func TestUserRefPublicID(t *testing.T) {
 	ref, err := domain.NewUserRef(mustUserID(t, 1), mustPublicCode(t, "A000000001"), "Alice")
 	if err != nil {

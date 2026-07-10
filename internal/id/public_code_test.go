@@ -51,6 +51,19 @@ func TestNewPublicCodeIsValidAndCanonical(t *testing.T) {
 	}
 }
 
+func TestPublicCode_IsZero(t *testing.T) {
+	if !(PublicCode{}).IsZero() {
+		t.Error("IsZero() = false for the zero value, want true")
+	}
+	code, err := NewPublicCode()
+	if err != nil {
+		t.Fatalf("NewPublicCode: %v", err)
+	}
+	if code.IsZero() {
+		t.Error("IsZero() = true for a constructed code, want false")
+	}
+}
+
 func TestParsePublicCode(t *testing.T) {
 	tests := []struct {
 		name    string

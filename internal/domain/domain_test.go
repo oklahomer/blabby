@@ -124,6 +124,24 @@ func TestNewRoomRef(t *testing.T) {
 	}
 }
 
+func TestRoomRef_IsZero(t *testing.T) {
+	if !(domain.RoomRef{}).IsZero() {
+		t.Error("IsZero() = false for the zero value, want true")
+	}
+	ref, err := domain.NewRoomRef(domain.RoomRefParams{
+		ID:         mustRoomID(t, 1),
+		PublicCode: mustPublicCode(t, "G000000004"),
+		Name:       "General",
+		Status:     domain.RoomStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("NewRoomRef: %v", err)
+	}
+	if ref.IsZero() {
+		t.Error("IsZero() = true for a constructed ref, want false")
+	}
+}
+
 func TestRefPublicIDs(t *testing.T) {
 	code := mustPublicCode(t, "G000000004")
 	roomRef, err := domain.NewRoomRef(domain.RoomRefParams{
