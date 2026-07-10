@@ -132,11 +132,6 @@ func splitMethodPath(pattern string) (method, path string) {
 	return "", pattern
 }
 
-// ListenAndServe starts the HTTP server on the given listen address.
-func (g *Gateway) ListenAndServe(addr string) error {
-	return http.ListenAndServe(addr, g.RegisterRoutes())
-}
-
 // userGrainFor returns the userGrainCaller that handlers should use to
 // dispatch User-grain RPCs for the given user. In tests, the userGrain
 // field on Gateway is set to inject a fake. In production it is nil and
