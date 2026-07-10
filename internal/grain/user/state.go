@@ -1,7 +1,8 @@
 package user
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/asynkron/protoactor-go/actor"
 
@@ -66,7 +67,7 @@ func (s *userState) connectionPIDs() []*actor.PID {
 	for k := range s.connections {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	out := make([]*actor.PID, len(keys))
 	for i, k := range keys {
 		out[i] = s.connections[k]
@@ -91,7 +92,7 @@ func (s *userState) joinedRoomIDs() []id.RoomID {
 	for roomID := range s.joinedRooms {
 		out = append(out, roomID)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Int64() < out[j].Int64() })
+	slices.SortFunc(out, func(a, b id.RoomID) int { return cmp.Compare(a.Int64(), b.Int64()) })
 	return out
 }
 
@@ -102,6 +103,6 @@ func (s *userState) joinedRoomRefs() []domain.RoomRef {
 	for _, ref := range s.joinedRooms {
 		out = append(out, ref)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID().Int64() < out[j].ID().Int64() })
+	slices.SortFunc(out, func(a, b domain.RoomRef) int { return cmp.Compare(a.ID().Int64(), b.ID().Int64()) })
 	return out
 }

@@ -126,8 +126,8 @@ func (g *Gateway) RegisterInternalRoutes() http.Handler {
 // without a leading method return an empty method and the original
 // string as the path.
 func splitMethodPath(pattern string) (method, path string) {
-	if i := strings.IndexByte(pattern, ' '); i >= 0 {
-		return pattern[:i], pattern[i+1:]
+	if m, p, ok := strings.Cut(pattern, " "); ok {
+		return m, p
 	}
 	return "", pattern
 }

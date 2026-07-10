@@ -84,7 +84,7 @@ func WithTimeouts(futureTimeout, dbTimeout time.Duration) Option {
 // such idle workers would accumulate. Stopping it instead lets the request future
 // time out and clear running. (protoactor resolves a child's supervisor from its
 // parent's props.)
-var stopWorkerSupervisor = actor.NewOneForOneStrategy(0, 0, func(interface{}) actor.Directive {
+var stopWorkerSupervisor = actor.NewOneForOneStrategy(0, 0, func(any) actor.Directive {
 	return actor.StopDirective
 })
 
@@ -151,7 +151,7 @@ func (g *Grain) SweepPendingAccounts(_ *maintenancepb.SweepPendingAccountsReques
 		return newSweepWorker(g.sweeper, g.now, g.dbTimeout)
 	}))
 	future := ctx.RequestFuture(worker, runSweep{}, g.futureTimeout)
-	ctx.ReenterAfter(future, func(res interface{}, err error) {
+	ctx.ReenterAfter(future, func(res any, err error) {
 		g.running = false
 		g.logOutcome(ctx, res, err)
 	})
@@ -160,7 +160,7 @@ func (g *Grain) SweepPendingAccounts(_ *maintenancepb.SweepPendingAccountsReques
 
 // logOutcome reports a finished sweep. err is set when the future failed (the worker
 // hung past the timeout or crashed); otherwise res carries the worker's reply.
-func (g *Grain) logOutcome(ctx cluster.GrainContext, res interface{}, err error) {
+func (g *Grain) logOutcome(ctx cluster.GrainContext, res any, err error) {
 	switch {
 	case err != nil:
 		slog.Error("maintenance.pending_account_gc.unfinished",
