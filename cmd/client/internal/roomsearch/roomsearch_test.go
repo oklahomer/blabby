@@ -59,6 +59,7 @@ func keyMsg(s string) tea.KeyMsg {
 }
 
 func TestRoomsLoadedTransitionsToIdle(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 
@@ -82,6 +83,7 @@ func TestRoomsLoadedTransitionsToIdle(t *testing.T) {
 }
 
 func TestRoomsLoadFailedShowsHeadline(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 
@@ -98,6 +100,7 @@ func TestRoomsLoadFailedShowsHeadline(t *testing.T) {
 }
 
 func TestRoomsLoadFailedTransportErrorMentionsServer(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 
@@ -112,6 +115,7 @@ func TestRoomsLoadFailedTransportErrorMentionsServer(t *testing.T) {
 }
 
 func TestEnterSubmitsForCurrentCursorRow(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: []api.Room{
@@ -143,6 +147,7 @@ func TestEnterSubmitsForCurrentCursorRow(t *testing.T) {
 }
 
 func TestEnterOnEmptyListIsNoOp(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: nil})
@@ -157,6 +162,7 @@ func TestEnterOnEmptyListIsNoOp(t *testing.T) {
 }
 
 func TestFilterTypingNarrowsListAndClampsCursor(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: []api.Room{
@@ -183,6 +189,7 @@ func TestFilterTypingNarrowsListAndClampsCursor(t *testing.T) {
 }
 
 func TestEscDismissesModal(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	next, cmd := m.Update(keyMsg("esc"))
@@ -195,6 +202,7 @@ func TestEscDismissesModal(t *testing.T) {
 }
 
 func TestKeysSuppressedWhileJoining(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: []api.Room{
@@ -217,6 +225,7 @@ func TestKeysSuppressedWhileJoining(t *testing.T) {
 }
 
 func TestRoomJoinFailedRestoresIdleAndShowsHeadline(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: []api.Room{
@@ -241,6 +250,7 @@ func TestRoomJoinFailedRestoresIdleAndShowsHeadline(t *testing.T) {
 }
 
 func TestRoomJoinedDismissesModal(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	next, _ := m.Update(api.RoomJoined{RoomID: "general", RoomName: "General"})
@@ -254,6 +264,7 @@ func TestRoomJoinedDismissesModal(t *testing.T) {
 // NOT navigate the cursor. Cursor stepping is reserved for the arrow
 // keys so the filter remains the focused field.
 func TestVimKeysForwardedToFilter(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		key  string
@@ -285,6 +296,7 @@ func TestVimKeysForwardedToFilter(t *testing.T) {
 }
 
 func TestInitDispatchesLoad(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	cmd := m.Init()
@@ -298,6 +310,7 @@ func TestInitDispatchesLoad(t *testing.T) {
 }
 
 func TestViewIncludesTitleAndFooter(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	out := m.View(80, 24)
@@ -310,6 +323,7 @@ func TestViewIncludesTitleAndFooter(t *testing.T) {
 }
 
 func TestViewRendersJoiningFooter(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: []api.Room{
@@ -324,6 +338,7 @@ func TestViewRendersJoiningFooter(t *testing.T) {
 }
 
 func TestViewLoadingPhaseShowsHint(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	out := m.View(80, 24)
@@ -333,6 +348,7 @@ func TestViewLoadingPhaseShowsHint(t *testing.T) {
 }
 
 func TestViewEmptyFilterShowsNoRoomsAvailable(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: nil})
@@ -343,6 +359,7 @@ func TestViewEmptyFilterShowsNoRoomsAvailable(t *testing.T) {
 }
 
 func TestViewNonMatchingFilterShowsNoMatches(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: []api.Room{
@@ -367,6 +384,7 @@ func updateAs(t *testing.T, m Model, msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func TestTypingArmsDebounceAndFiresServerQuery(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: []api.Room{{ID: "general", Name: "General"}}})
@@ -395,6 +413,7 @@ func TestTypingArmsDebounceAndFiresServerQuery(t *testing.T) {
 }
 
 func TestStaleDebounceTickIsDropped(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: nil})
@@ -409,6 +428,7 @@ func TestStaleDebounceTickIsDropped(t *testing.T) {
 }
 
 func TestStaleRoomsLoadedIsDropped(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: []api.Room{{ID: "general", Name: "General"}}})
@@ -426,6 +446,7 @@ func TestStaleRoomsLoadedIsDropped(t *testing.T) {
 }
 
 func TestStaleRoomsLoadFailedIsDropped(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: []api.Room{{ID: "general", Name: "General"}}})
@@ -448,6 +469,7 @@ func TestStaleRoomsLoadFailedIsDropped(t *testing.T) {
 }
 
 func TestMoreRowFetchesAndAppendsNextPage(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{
@@ -489,6 +511,7 @@ func TestMoreRowFetchesAndAppendsNextPage(t *testing.T) {
 }
 
 func TestMoreRowFailureSettlesLoadingAndShowsError(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{
@@ -516,6 +539,7 @@ func TestMoreRowFailureSettlesLoadingAndShowsError(t *testing.T) {
 }
 
 func TestCtrlNEmitsCreateRoomRequested(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{Rooms: nil})
@@ -533,6 +557,7 @@ func TestCtrlNEmitsCreateRoomRequested(t *testing.T) {
 }
 
 func TestPageAndEdgeNavigation(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	rooms := make([]api.Room, 25)
 	for i := range rooms {
@@ -564,6 +589,7 @@ func TestPageAndEdgeNavigation(t *testing.T) {
 }
 
 func TestAppendRacingReplaceIsDropped(t *testing.T) {
+	t.Parallel()
 	// The user pages the more row, then a debounced same-query replace lands
 	// with different content before the append arrives. The append no longer
 	// continues the listing on screen and must be dropped whole.
@@ -602,6 +628,7 @@ func TestAppendRacingReplaceIsDropped(t *testing.T) {
 }
 
 func TestAppendFailureRacingReplaceIsDropped(t *testing.T) {
+	t.Parallel()
 	r := &recorder{}
 	m := New(r.submit, r.load, "http://localhost:8080")
 	m, _ = updateAs(t, m, api.RoomsLoaded{
@@ -637,6 +664,7 @@ func TestAppendFailureRacingReplaceIsDropped(t *testing.T) {
 }
 
 func TestMoreRowIgnoredWhileFilterOutrunsListing(t *testing.T) {
+	t.Parallel()
 	// The user typed past the loaded fragment; a debounced replace is on its
 	// way, so paging the outgoing listing is refused.
 	r := &recorder{}

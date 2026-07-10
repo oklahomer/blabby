@@ -8,6 +8,7 @@ import (
 )
 
 func TestVisibleEmptyQueryReturnsAll(t *testing.T) {
+	t.Parallel()
 	rooms := []api.Room{
 		{ID: "general", Name: "General"},
 		{ID: "random", Name: "Random"},
@@ -19,6 +20,7 @@ func TestVisibleEmptyQueryReturnsAll(t *testing.T) {
 }
 
 func TestVisibleCaseInsensitiveSubstringName(t *testing.T) {
+	t.Parallel()
 	rooms := []api.Room{
 		{ID: "general", Name: "General"},
 		{ID: "random", Name: "Random"},
@@ -30,6 +32,7 @@ func TestVisibleCaseInsensitiveSubstringName(t *testing.T) {
 }
 
 func TestVisibleCaseInsensitiveSubstringID(t *testing.T) {
+	t.Parallel()
 	rooms := []api.Room{
 		{ID: "general", Name: "General"},
 		{ID: "random", Name: "Random"},
@@ -41,6 +44,7 @@ func TestVisibleCaseInsensitiveSubstringID(t *testing.T) {
 }
 
 func TestVisibleNoMatchReturnsEmpty(t *testing.T) {
+	t.Parallel()
 	rooms := []api.Room{
 		{ID: "general", Name: "General"},
 	}
@@ -51,6 +55,7 @@ func TestVisibleNoMatchReturnsEmpty(t *testing.T) {
 }
 
 func TestVisiblePreservesServerOrder(t *testing.T) {
+	t.Parallel()
 	rooms := []api.Room{
 		{ID: "zulu", Name: "Zulu"},
 		{ID: "alpha", Name: "Alpha"},

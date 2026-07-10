@@ -19,6 +19,7 @@ func mintToken(t *testing.T, payload []byte) string {
 }
 
 func TestDecodeSub(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		token   string

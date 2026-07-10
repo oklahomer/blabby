@@ -6,6 +6,7 @@ import (
 )
 
 func TestViewEmptyShowsPlaceholderAndHint(t *testing.T) {
+	t.Parallel()
 	out := View(State{}, false, 20, 20)
 	if !strings.Contains(out, "Rooms") {
 		t.Errorf("missing Rooms title:\n%s", out)
@@ -19,6 +20,7 @@ func TestViewEmptyShowsPlaceholderAndHint(t *testing.T) {
 }
 
 func TestViewLoadingHidesEmptyPlaceholder(t *testing.T) {
+	t.Parallel()
 	out := View(State{Loading: true}, false, 20, 20)
 	if !strings.Contains(out, "(loading…)") {
 		t.Errorf("expected loading hint:\n%s", out)
@@ -29,6 +31,7 @@ func TestViewLoadingHidesEmptyPlaceholder(t *testing.T) {
 }
 
 func TestViewLoadErrorShowsRetryHint(t *testing.T) {
+	t.Parallel()
 	out := View(State{LoadError: "Server unavailable — please try again"}, true, 20, 20)
 	if !strings.Contains(out, "(failed to load rooms)") {
 		t.Errorf("expected failure line:\n%s", out)
@@ -39,6 +42,7 @@ func TestViewLoadErrorShowsRetryHint(t *testing.T) {
 }
 
 func TestViewPopulatedRendersRows(t *testing.T) {
+	t.Parallel()
 	state := State{
 		JoinedIDs: []string{"general", "random"},
 		Cursor:    1,
@@ -54,6 +58,7 @@ func TestViewPopulatedRendersRows(t *testing.T) {
 }
 
 func TestHandleKeyCursorNavigation(t *testing.T) {
+	t.Parallel()
 	base := State{JoinedIDs: []string{"a", "b", "c"}}
 
 	tests := []struct {
@@ -84,6 +89,7 @@ func TestHandleKeyCursorNavigation(t *testing.T) {
 }
 
 func TestHandleKeyOnEmptyListIgnoresMovementAndEnter(t *testing.T) {
+	t.Parallel()
 	_, outcome := HandleKey(State{}, "enter")
 	if outcome != OutcomeNone {
 		t.Fatalf("enter on empty list should not produce an outcome, got %v", outcome)
@@ -95,6 +101,7 @@ func TestHandleKeyOnEmptyListIgnoresMovementAndEnter(t *testing.T) {
 }
 
 func TestHandleKeyEnterReturnsSwitchActiveOutcome(t *testing.T) {
+	t.Parallel()
 	_, outcome := HandleKey(State{JoinedIDs: []string{"a", "b"}, Cursor: 0}, "enter")
 	if outcome != OutcomeSwitchActiveRoom {
 		t.Fatalf("expected OutcomeSwitchActiveRoom, got %v", outcome)
@@ -102,6 +109,7 @@ func TestHandleKeyEnterReturnsSwitchActiveOutcome(t *testing.T) {
 }
 
 func TestHandleKeyRetryOnlyWhenLoadError(t *testing.T) {
+	t.Parallel()
 	t.Run("with error returns retry", func(t *testing.T) {
 		_, outcome := HandleKey(State{LoadError: "boom"}, "r")
 		if outcome != OutcomeRetryLoad {
@@ -117,6 +125,7 @@ func TestHandleKeyRetryOnlyWhenLoadError(t *testing.T) {
 }
 
 func TestHandleKeyUnknownKeyIsPassThrough(t *testing.T) {
+	t.Parallel()
 	state := State{JoinedIDs: []string{"a"}, Cursor: 0}
 	next, outcome := HandleKey(state, "x")
 	if outcome != OutcomeNone {
@@ -128,6 +137,7 @@ func TestHandleKeyUnknownKeyIsPassThrough(t *testing.T) {
 }
 
 func TestActiveIDReturnsCursorOrEmpty(t *testing.T) {
+	t.Parallel()
 	if got := (State{JoinedIDs: []string{"a", "b"}, Cursor: 1}).ActiveID(); got != "b" {
 		t.Errorf("got %q, want b", got)
 	}
@@ -137,6 +147,7 @@ func TestActiveIDReturnsCursorOrEmpty(t *testing.T) {
 }
 
 func TestClampCursor(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		in   State
@@ -157,6 +168,7 @@ func TestClampCursor(t *testing.T) {
 }
 
 func TestResolveNameFallsBackToID(t *testing.T) {
+	t.Parallel()
 	state := State{NameForID: map[string]string{"general": "General"}}
 	if got := state.ResolveName("general"); got != "General" {
 		t.Errorf("got %q, want General", got)
@@ -167,6 +179,7 @@ func TestResolveNameFallsBackToID(t *testing.T) {
 }
 
 func TestLeaveGestureTwoPressConfirm(t *testing.T) {
+	t.Parallel()
 	s := State{JoinedIDs: []string{"general", "random"}, Cursor: 1}
 
 	// First x arms the confirmation for the room under the cursor.
@@ -188,6 +201,7 @@ func TestLeaveGestureTwoPressConfirm(t *testing.T) {
 }
 
 func TestLeaveGestureDisarmedByOtherKeys(t *testing.T) {
+	t.Parallel()
 	s := State{JoinedIDs: []string{"general", "random"}, Cursor: 0}
 	s, _ = HandleKey(s, "x")
 	if s.PendingLeaveID != "general" {
@@ -206,6 +220,7 @@ func TestLeaveGestureDisarmedByOtherKeys(t *testing.T) {
 }
 
 func TestLeaveOnEmptyListIsNoOp(t *testing.T) {
+	t.Parallel()
 	s, outcome := HandleKey(State{}, "x")
 	if outcome != OutcomeNone || s.PendingLeaveID != "" {
 		t.Fatalf("x on empty list: outcome=%v pending=%q", outcome, s.PendingLeaveID)
@@ -213,6 +228,7 @@ func TestLeaveOnEmptyListIsNoOp(t *testing.T) {
 }
 
 func TestKeyClearsActionError(t *testing.T) {
+	t.Parallel()
 	s := State{JoinedIDs: []string{"general"}, ActionError: "Transfer ownership before leaving this room"}
 	s, _ = HandleKey(s, "down")
 	if s.ActionError != "" {
@@ -221,6 +237,7 @@ func TestKeyClearsActionError(t *testing.T) {
 }
 
 func TestPageAndEdgeNavigation(t *testing.T) {
+	t.Parallel()
 	ids := make([]string, 25)
 	for i := range ids {
 		ids[i] = string(rune('a' + i))
@@ -246,6 +263,7 @@ func TestPageAndEdgeNavigation(t *testing.T) {
 }
 
 func TestViewRendersLeaveConfirmAndActionError(t *testing.T) {
+	t.Parallel()
 	s := State{
 		JoinedIDs:      []string{"general"},
 		NameForID:      map[string]string{"general": "General"},

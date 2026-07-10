@@ -39,6 +39,7 @@ var taxonomyCases = []struct {
 // It is the regression guard for the single source of truth: a change to a code
 // or its status here is deliberate and visible, and every consumer inherits it.
 func TestCodeTaxonomy(t *testing.T) {
+	t.Parallel()
 	for _, c := range taxonomyCases {
 		if got := c.code.Int32(); got != c.value {
 			t.Errorf("%s: Int32() = %d, want %d", c.status, got, c.value)
@@ -50,12 +51,14 @@ func TestCodeTaxonomy(t *testing.T) {
 }
 
 func TestUnknownCodeStatus(t *testing.T) {
+	t.Parallel()
 	if got := errcode.Code(9999).Status(); got != "UNKNOWN_ERROR" {
 		t.Errorf("Code(9999).Status() = %q, want UNKNOWN_ERROR", got)
 	}
 }
 
 func TestParse(t *testing.T) {
+	t.Parallel()
 	for _, tc := range taxonomyCases {
 		t.Run(tc.status, func(t *testing.T) {
 			got, err := errcode.Parse(tc.value, tc.status)

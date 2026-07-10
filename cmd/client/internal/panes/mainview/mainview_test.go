@@ -12,6 +12,7 @@ import (
 )
 
 func TestViewDefaultLabel(t *testing.T) {
+	t.Parallel()
 	out := View(State{}, false, 50, 20)
 	if !strings.Contains(out, "(no room selected)") {
 		t.Errorf("missing default room label:\n%s", out)
@@ -25,6 +26,7 @@ func TestViewDefaultLabel(t *testing.T) {
 }
 
 func TestViewRoomLabel(t *testing.T) {
+	t.Parallel()
 	out := View(State{RoomLabel: "general"}, false, 50, 20)
 	if !strings.Contains(out, "general") {
 		t.Errorf("missing room label:\n%s", out)
@@ -32,6 +34,7 @@ func TestViewRoomLabel(t *testing.T) {
 }
 
 func TestViewRendersMessagesInGivenOrder(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 5, 30, 9, 8, 7, 0, time.Local)
 	out := View(State{
 		RoomLabel: "general",
@@ -55,6 +58,7 @@ func TestViewRendersMessagesInGivenOrder(t *testing.T) {
 }
 
 func TestViewZeroTimestampRendersPlaceholder(t *testing.T) {
+	t.Parallel()
 	out := View(State{
 		RoomLabel: "general",
 		Messages:  []Message{{Sender: "alice", Text: "hi"}},
@@ -65,6 +69,7 @@ func TestViewZeroTimestampRendersPlaceholder(t *testing.T) {
 }
 
 func TestViewOverflowKeepsNewestTail(t *testing.T) {
+	t.Parallel()
 	msgs := make([]Message, 0, 40)
 	at := time.Date(2026, 5, 30, 0, 0, 0, 0, time.Local)
 	for i := 0; i < 40; i++ {
@@ -88,6 +93,7 @@ func TestViewOverflowKeepsNewestTail(t *testing.T) {
 }
 
 func TestVisibleLinesOffsetWindowsOlder(t *testing.T) {
+	t.Parallel()
 	base := time.Date(2026, 5, 30, 9, 0, 0, 0, time.Local)
 	lines := make([]Line, 0, 10)
 	for i := 0; i < 10; i++ {
@@ -111,6 +117,7 @@ func TestVisibleLinesOffsetWindowsOlder(t *testing.T) {
 }
 
 func TestViewOverflowErrorRowReservesScrollbackLine(t *testing.T) {
+	t.Parallel()
 	msgs := make([]Message, 0, 30)
 	at := time.Date(2026, 5, 30, 0, 0, 0, 0, time.Local)
 	for i := 0; i < 30; i++ {
@@ -145,6 +152,10 @@ func forceColor(t *testing.T) {
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 }
 
+// Deliberately NOT parallel: forceColor mutates lipgloss's process-global
+// color profile, so this test must not overlap other tests in the package.
+// Serial tests complete before any t.Parallel bodies start, which is what
+// makes the global mutation safe.
 func TestSelfMessageSenderIsMuted(t *testing.T) {
 	forceColor(t)
 	at := time.Date(2026, 5, 30, 9, 8, 7, 0, time.Local)
@@ -164,6 +175,7 @@ func TestSelfMessageSenderIsMuted(t *testing.T) {
 	}
 }
 
+// Deliberately NOT parallel — see TestSelfMessageSenderIsMuted.
 func TestSelfMessageRespectsWidth(t *testing.T) {
 	forceColor(t) // emit real ANSI so the styled-name vs width-clip interaction is exercised
 	at := time.Date(2026, 5, 30, 9, 8, 7, 0, time.Local)
@@ -182,6 +194,7 @@ func TestSelfMessageRespectsWidth(t *testing.T) {
 }
 
 func TestViewDisabledInputWhenCannotType(t *testing.T) {
+	t.Parallel()
 	out := View(State{RoomLabel: "general", Composer: "TYPED-COMPOSER", CanType: false}, false, 60, 20)
 	if !strings.Contains(out, "(select a room to start typing)") {
 		t.Errorf("expected disabled placeholder when CanType is false:\n%s", out)
@@ -192,6 +205,7 @@ func TestViewDisabledInputWhenCannotType(t *testing.T) {
 }
 
 func TestViewEnabledInputRendersComposer(t *testing.T) {
+	t.Parallel()
 	out := View(State{RoomLabel: "general", Composer: "TYPED-COMPOSER", CanType: true}, false, 60, 20)
 	if !strings.Contains(out, "TYPED-COMPOSER") {
 		t.Errorf("expected composer to render when CanType is true:\n%s", out)
@@ -202,6 +216,7 @@ func TestViewEnabledInputRendersComposer(t *testing.T) {
 }
 
 func TestViewConnectionStatusIndicator(t *testing.T) {
+	t.Parallel()
 	live := View(State{RoomLabel: "general", Connected: true}, false, 60, 20)
 	if !strings.Contains(live, "● live") {
 		t.Errorf("expected ● live indicator when connected:\n%s", live)
@@ -213,6 +228,7 @@ func TestViewConnectionStatusIndicator(t *testing.T) {
 }
 
 func TestViewStatusLineShowsLoadingHint(t *testing.T) {
+	t.Parallel()
 	loading := View(State{RoomLabel: "general", Connected: true, FetchingOlder: true}, false, 60, 20)
 	if !strings.Contains(loading, "loading history") {
 		t.Errorf("expected the loading-history hint while fetching:\n%s", loading)
@@ -224,6 +240,7 @@ func TestViewStatusLineShowsLoadingHint(t *testing.T) {
 }
 
 func TestViewRendersInlineError(t *testing.T) {
+	t.Parallel()
 	out := View(State{RoomLabel: "general", ErrorLine: "Not a member of this room"}, false, 60, 20)
 	if !strings.Contains(out, "Not a member of this room") {
 		t.Errorf("expected inline error line to render:\n%s", out)
@@ -231,6 +248,7 @@ func TestViewRendersInlineError(t *testing.T) {
 }
 
 func TestViewRendersJoinedSystemLine(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 5, 30, 14, 22, 30, 0, time.Local)
 	out := View(State{
 		RoomLabel: "general",
@@ -245,6 +263,7 @@ func TestViewRendersJoinedSystemLine(t *testing.T) {
 }
 
 func TestViewRendersLeftSystemLine(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 5, 30, 14, 22, 30, 0, time.Local)
 	out := View(State{
 		RoomLabel: "general",
@@ -256,6 +275,7 @@ func TestViewRendersLeftSystemLine(t *testing.T) {
 }
 
 func TestLinesInsertsSeparatorOnDateChange(t *testing.T) {
+	t.Parallel()
 	day1 := time.Date(2026, 5, 30, 9, 0, 0, 0, time.Local)
 	day2 := time.Date(2026, 5, 31, 9, 0, 0, 0, time.Local)
 	lines := Lines([]Message{
@@ -279,6 +299,7 @@ func TestLinesInsertsSeparatorOnDateChange(t *testing.T) {
 }
 
 func TestLinesNoSeparatorWithinOneDay(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 5, 30, 9, 0, 0, 0, time.Local)
 	lines := Lines([]Message{{ID: 1, At: at}, {ID: 2, At: at.Add(time.Hour)}})
 	for _, ln := range lines {
@@ -289,6 +310,7 @@ func TestLinesNoSeparatorWithinOneDay(t *testing.T) {
 }
 
 func TestLinesZeroTimestampNeitherStartsNorBreaksARun(t *testing.T) {
+	t.Parallel()
 	day1 := time.Date(2026, 5, 30, 9, 0, 0, 0, time.Local)
 	day2 := time.Date(2026, 5, 31, 9, 0, 0, 0, time.Local)
 	// A zero-At entry sits between two dated entries of different days: it
@@ -314,6 +336,7 @@ func TestLinesZeroTimestampNeitherStartsNorBreaksARun(t *testing.T) {
 }
 
 func TestFormatMessageLineSanitizesControlRuns(t *testing.T) {
+	t.Parallel()
 	line := formatMessageLine(Message{Sender: "a\tb", Text: "one\ntwo\rthree", Kind: KindChat}, 0)
 	if strings.ContainsAny(line, "\n\r\t") {
 		t.Fatalf("control runs not sanitized to spaces: %q", line)

@@ -257,8 +257,8 @@ func TestMaintenanceGrain_PanickingWorkerTimeoutClearsRunning(t *testing.T) {
 
 func eventuallyAccepted(t *testing.T, client *maintenancepb.MaintenanceGrainGrainClient, within time.Duration) bool {
 	t.Helper()
-	deadline := within / (20 * time.Millisecond)
-	for i := 0; i < int(deadline); i++ {
+	attempts := int(within / (20 * time.Millisecond))
+	for i := 0; i < attempts; i++ {
 		resp, err := client.SweepPendingAccounts(&maintenancepb.SweepPendingAccountsRequest{})
 		if err != nil {
 			t.Fatalf("poll trigger: %v", err)

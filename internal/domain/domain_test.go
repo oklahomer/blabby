@@ -27,6 +27,7 @@ func mustPublicCode(t *testing.T, raw string) id.PublicCode {
 }
 
 func TestParseRoomStatus(t *testing.T) {
+	t.Parallel()
 	for _, want := range []domain.RoomStatus{domain.RoomStatusActive, domain.RoomStatusArchived} {
 		got, err := domain.ParseRoomStatus(string(want))
 		if err != nil || got != want {
@@ -39,6 +40,7 @@ func TestParseRoomStatus(t *testing.T) {
 }
 
 func TestParseUserStatus(t *testing.T) {
+	t.Parallel()
 	for _, want := range []domain.UserStatus{domain.UserStatusPending, domain.UserStatusActive, domain.UserStatusDisabled} {
 		got, err := domain.ParseUserStatus(string(want))
 		if err != nil || got != want {
@@ -51,6 +53,7 @@ func TestParseUserStatus(t *testing.T) {
 }
 
 func TestParseMembershipRole(t *testing.T) {
+	t.Parallel()
 	for _, want := range []domain.MembershipRole{domain.MembershipRoleOwner, domain.MembershipRoleAdmin, domain.MembershipRoleMember} {
 		got, err := domain.ParseMembershipRole(string(want))
 		if err != nil || got != want {
@@ -63,6 +66,7 @@ func TestParseMembershipRole(t *testing.T) {
 }
 
 func TestNewRoomRef(t *testing.T) {
+	t.Parallel()
 	valid := domain.RoomRefParams{
 		ID:              mustRoomID(t, 1),
 		PublicCode:      mustPublicCode(t, "G000000004"),
@@ -125,6 +129,7 @@ func TestNewRoomRef(t *testing.T) {
 }
 
 func TestRoomRef_IsZero(t *testing.T) {
+	t.Parallel()
 	if !(domain.RoomRef{}).IsZero() {
 		t.Error("IsZero() = false for the zero value, want true")
 	}
@@ -143,6 +148,7 @@ func TestRoomRef_IsZero(t *testing.T) {
 }
 
 func TestRefPublicIDs(t *testing.T) {
+	t.Parallel()
 	code := mustPublicCode(t, "G000000004")
 	roomRef, err := domain.NewRoomRef(domain.RoomRefParams{
 		ID:         mustRoomID(t, 1),

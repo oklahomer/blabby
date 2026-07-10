@@ -9,6 +9,7 @@ import (
 )
 
 func TestNewMessageQuery(t *testing.T) {
+	t.Parallel()
 	t.Run("accepts and trims", func(t *testing.T) {
 		tests := []struct {
 			name string

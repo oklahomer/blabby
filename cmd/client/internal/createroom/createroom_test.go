@@ -45,6 +45,7 @@ func typeIn(t *testing.T, m Model, s string) Model {
 }
 
 func TestEnterSubmitsTrimmedName(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, "srv")
 	m = typeIn(t, m, " Team Standup ")
@@ -63,6 +64,7 @@ func TestEnterSubmitsTrimmedName(t *testing.T) {
 }
 
 func TestValidateNameRejections(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		name     string
 		headline string
@@ -90,6 +92,7 @@ func TestValidateNameRejections(t *testing.T) {
 }
 
 func TestCJKNameWithIdeographicSpaceIsValid(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, "srv")
 	m.name.SetValue("雑談　部屋")
@@ -104,6 +107,7 @@ func TestCJKNameWithIdeographicSpaceIsValid(t *testing.T) {
 }
 
 func TestEscEmitsCancelled(t *testing.T) {
+	t.Parallel()
 	m := New((&recorder{}).submit, "srv")
 	next, cmd := m.Update(keyMsg("esc"))
 	if _, ok := next.(Model); !ok {
@@ -118,6 +122,7 @@ func TestEscEmitsCancelled(t *testing.T) {
 }
 
 func TestKeysSuppressedWhileCreating(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, "srv")
 	m = typeIn(t, m, "Team Standup")
@@ -130,6 +135,7 @@ func TestKeysSuppressedWhileCreating(t *testing.T) {
 }
 
 func TestCreateFailedRendersAndKeepsName(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, "srv")
 	m = typeIn(t, m, "Team Standup")
@@ -151,6 +157,7 @@ func TestCreateFailedRendersAndKeepsName(t *testing.T) {
 }
 
 func TestTransportFailureShowsServer(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, "http://localhost:8080")
 	m = typeIn(t, m, "Team Standup")
@@ -168,6 +175,7 @@ func TestTransportFailureShowsServer(t *testing.T) {
 }
 
 func TestViewShowsHelpAndInFlightCopy(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, "srv")
 	if view := m.View(80, 24); !strings.Contains(view, "enter: create") {

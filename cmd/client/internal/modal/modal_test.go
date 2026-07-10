@@ -6,6 +6,7 @@ import (
 )
 
 func TestOverlayPreservesModalContent(t *testing.T) {
+	t.Parallel()
 	background := "(unused for sizing)"
 	out := Overlay(background, "MODAL_BODY", 80, 24)
 	if !strings.Contains(out, "MODAL_BODY") {
@@ -14,6 +15,7 @@ func TestOverlayPreservesModalContent(t *testing.T) {
 }
 
 func TestOverlayMatchesRequestedDimensions(t *testing.T) {
+	t.Parallel()
 	out := Overlay("", "x", 40, 10)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 10 {
@@ -22,6 +24,7 @@ func TestOverlayMatchesRequestedDimensions(t *testing.T) {
 }
 
 func TestOverlayCompositesModalOntoBackground(t *testing.T) {
+	t.Parallel()
 	// 5x5 background of dots so we can see what survives around the modal.
 	var bgRows []string
 	for i := 0; i < 5; i++ {
@@ -50,6 +53,7 @@ func TestOverlayCompositesModalOntoBackground(t *testing.T) {
 }
 
 func TestOverlayFallsBackWhenModalLargerThanScreen(t *testing.T) {
+	t.Parallel()
 	bg := "ignored"
 	out := Overlay(bg, "HUGE_MODAL_CONTENT", 5, 3)
 	// Should not panic; should render the modal somehow.
@@ -59,6 +63,7 @@ func TestOverlayFallsBackWhenModalLargerThanScreen(t *testing.T) {
 }
 
 func TestOverlayHandlesEmptyBackground(t *testing.T) {
+	t.Parallel()
 	out := Overlay("", "MODAL", 20, 5)
 	if !strings.Contains(out, "MODAL") {
 		t.Fatal("modal missing from empty-background render")

@@ -50,6 +50,7 @@ func sendMessageClient(body string) *http.Client {
 }
 
 func TestSendMessageCmdSuccess(t *testing.T) {
+	t.Parallel()
 	const wantTS int64 = 1_700_000_000_000
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/rooms/general/messages" {
@@ -95,6 +96,7 @@ func TestSendMessageCmdSuccess(t *testing.T) {
 }
 
 func TestSendMessageCmdSuccessZeroTimestamp(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(SendMessageResponse{Success: true, Timestamp: 0})
@@ -112,6 +114,7 @@ func TestSendMessageCmdSuccessZeroTimestamp(t *testing.T) {
 }
 
 func TestSendMessageCmdOKWithSuccessTrueSucceeds(t *testing.T) {
+	t.Parallel()
 	msg := SendMessageCmd(testSendMessageRequest(
 		sendMessageClient(`{"success":true,"timestamp":1}`),
 		"http://example.test",
@@ -129,6 +132,7 @@ func TestSendMessageCmdOKWithSuccessTrueSucceeds(t *testing.T) {
 }
 
 func TestSendMessageCmdOKWithFalseSuccessFails(t *testing.T) {
+	t.Parallel()
 	msg := SendMessageCmd(testSendMessageRequest(
 		sendMessageClient(`{"success":false,"timestamp":1}`),
 		"http://example.test",
@@ -149,6 +153,7 @@ func TestSendMessageCmdOKWithFalseSuccessFails(t *testing.T) {
 }
 
 func TestSendMessageCmdOKWithMissingSuccessFails(t *testing.T) {
+	t.Parallel()
 	msg := SendMessageCmd(testSendMessageRequest(
 		sendMessageClient(`{"timestamp":1}`),
 		"http://example.test",
@@ -169,6 +174,7 @@ func TestSendMessageCmdOKWithMissingSuccessFails(t *testing.T) {
 }
 
 func TestSendMessageCmdNotMember(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -201,6 +207,7 @@ func TestSendMessageCmdNotMember(t *testing.T) {
 }
 
 func TestSendMessageCmdEmptyTextRejected(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -221,6 +228,7 @@ func TestSendMessageCmdEmptyTextRejected(t *testing.T) {
 }
 
 func TestSendMessageCmdUnauthorized(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -244,6 +252,7 @@ func TestSendMessageCmdUnauthorized(t *testing.T) {
 }
 
 func TestSendMessageCmdTransportError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	addr := srv.URL
 	srv.Close()
@@ -265,6 +274,7 @@ func TestSendMessageCmdTransportError(t *testing.T) {
 }
 
 func TestDecodeChatMessageValid(t *testing.T) {
+	t.Parallel()
 	const ms int64 = 1_700_000_000_000
 	raw := []byte(`{"type":"message","room_id":"general","event_id":"112233445566778899","sender":{"id":"alice","name":"Alice Liddell"},"text":"hello","timestamp":1700000000000}`)
 	got, ok := DecodeChatMessage(raw)
@@ -283,6 +293,7 @@ func TestDecodeChatMessageValid(t *testing.T) {
 }
 
 func TestDecodeChatMessageZeroTimestamp(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"type":"message","room_id":"general","event_id":"42","sender":{"id":"alice"},"text":"hi","timestamp":0}`)
 	got, ok := DecodeChatMessage(raw)
 	if !ok {
@@ -297,18 +308,21 @@ func TestDecodeChatMessageZeroTimestamp(t *testing.T) {
 }
 
 func TestDecodeChatMessageWrongType(t *testing.T) {
+	t.Parallel()
 	if _, ok := DecodeChatMessage([]byte(`{"type":"joined","room_id":"general","event_id":"1","user":{"id":"alice"}}`)); ok {
 		t.Fatal("expected ok=false for a non-message frame")
 	}
 }
 
 func TestDecodeChatMessageMalformed(t *testing.T) {
+	t.Parallel()
 	if _, ok := DecodeChatMessage([]byte(`{not json`)); ok {
 		t.Fatal("expected ok=false for malformed JSON")
 	}
 }
 
 func TestDecodeChatMessageBadEventID(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"missing":     `{"type":"message","room_id":"general","sender":{"id":"a"},"text":"hi","timestamp":1}`,
 		"empty":       `{"type":"message","room_id":"general","event_id":"","sender":{"id":"a"},"text":"hi","timestamp":1}`,
@@ -326,6 +340,7 @@ func TestDecodeChatMessageBadEventID(t *testing.T) {
 }
 
 func TestDecodeMemberEventJoined(t *testing.T) {
+	t.Parallel()
 	const ms int64 = 1_700_000_000_000
 	raw := []byte(`{"type":"joined","room_id":"general","event_id":"55","user":{"id":"U000000042","name":"Bob"},"timestamp":1700000000000}`)
 	got, ok := DecodeMemberEvent(raw)
@@ -347,6 +362,7 @@ func TestDecodeMemberEventJoined(t *testing.T) {
 }
 
 func TestDecodeMemberEventLeft(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"type":"left","room_id":"general","event_id":"56","user":{"id":"U000000042","name":"Bob"},"timestamp":0}`)
 	got, ok := DecodeMemberEvent(raw)
 	if !ok {
@@ -361,6 +377,7 @@ func TestDecodeMemberEventLeft(t *testing.T) {
 }
 
 func TestDecodeMemberEventRejects(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"wrong-type":   `{"type":"message","room_id":"general","event_id":"1","sender":{"id":"a"},"text":"hi","timestamp":1}`,
 		"malformed":    `}{`,
@@ -378,6 +395,7 @@ func TestDecodeMemberEventRejects(t *testing.T) {
 }
 
 func TestDecodeErrorFrameValid(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"type":"error","code":2001,"status":"ROOM_NOT_MEMBER","message":"not a member"}`)
 	got, ok := DecodeErrorFrame(raw)
 	if !ok {
@@ -389,12 +407,14 @@ func TestDecodeErrorFrameValid(t *testing.T) {
 }
 
 func TestDecodeErrorFrameWrongType(t *testing.T) {
+	t.Parallel()
 	if _, ok := DecodeErrorFrame([]byte(`{"type":"message","text":"hi"}`)); ok {
 		t.Fatal("expected ok=false for a non-error frame")
 	}
 }
 
 func TestDecodeErrorFrameMalformed(t *testing.T) {
+	t.Parallel()
 	if _, ok := DecodeErrorFrame([]byte(`}{`)); ok {
 		t.Fatal("expected ok=false for malformed JSON")
 	}

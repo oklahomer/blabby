@@ -66,6 +66,7 @@ func typeIn(t *testing.T, m Model, s string) Model {
 }
 
 func TestEnterSubmitsWithBothFieldsPopulated(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, "http://localhost:8080")
 	m = typeIn(t, m, "rina@example.com")
@@ -89,6 +90,7 @@ func TestEnterSubmitsWithBothFieldsPopulated(t *testing.T) {
 }
 
 func TestEnterWithEmptyFieldShowsInlineError(t *testing.T) {
+	t.Parallel()
 	m := New((&recorder{}).submit, "http://localhost:8080")
 	m = typeIn(t, m, "rina@example.com")
 	next, cmd := m.Update(keyMsg("enter")) // password still empty
@@ -109,6 +111,7 @@ func TestEnterWithEmptyFieldShowsInlineError(t *testing.T) {
 }
 
 func TestEscQuitsWhenNotInFlight(t *testing.T) {
+	t.Parallel()
 	m := New((&recorder{}).submit, "http://localhost:8080")
 	next, cmd := m.Update(keyMsg("esc"))
 	if next != nil {
@@ -120,6 +123,7 @@ func TestEscQuitsWhenNotInFlight(t *testing.T) {
 }
 
 func TestKeysSuppressedWhileInFlight(t *testing.T) {
+	t.Parallel()
 	m := New((&recorder{}).submit, "http://localhost:8080")
 	m.phase = phaseSigningIn
 
@@ -139,6 +143,7 @@ func TestKeysSuppressedWhileInFlight(t *testing.T) {
 }
 
 func TestRejectionClearsPasswordAndShowsHeadline(t *testing.T) {
+	t.Parallel()
 	m := New((&recorder{}).submit, "http://localhost:8080")
 	m = typeIn(t, m, "rina@example.com")
 	m = stepTab(t, m)
@@ -166,6 +171,7 @@ func TestRejectionClearsPasswordAndShowsHeadline(t *testing.T) {
 }
 
 func TestTransportErrorIncludesUnderlyingReason(t *testing.T) {
+	t.Parallel()
 	m := New((&recorder{}).submit, "http://localhost:8080")
 	m.phase = phaseSigningIn
 
@@ -183,6 +189,7 @@ func TestTransportErrorIncludesUnderlyingReason(t *testing.T) {
 }
 
 func TestWSDialFailedHeadlineMentionsHandshake(t *testing.T) {
+	t.Parallel()
 	m := New((&recorder{}).submit, "http://localhost:8080")
 	m.phase = phaseSigningIn
 
@@ -200,6 +207,7 @@ func TestWSDialFailedHeadlineMentionsHandshake(t *testing.T) {
 }
 
 func TestSetConnectingFlipsInFlightCopy(t *testing.T) {
+	t.Parallel()
 	m := New((&recorder{}).submit, "http://localhost:8080").SetConnecting()
 	if !m.inFlight() {
 		t.Fatal("SetConnecting must set inFlight")
@@ -214,6 +222,7 @@ func TestSetConnectingFlipsInFlightCopy(t *testing.T) {
 }
 
 func TestFocusCyclesViaTab(t *testing.T) {
+	t.Parallel()
 	m := New((&recorder{}).submit, "http://localhost:8080")
 	if m.focused != emailSlot {
 		t.Fatalf("initial focus = %d, want email", m.focused)

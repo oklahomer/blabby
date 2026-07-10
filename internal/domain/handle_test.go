@@ -9,6 +9,7 @@ import (
 )
 
 func TestNewHandle_AcceptsAndNormalizes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		raw         string
@@ -39,6 +40,7 @@ func TestNewHandle_AcceptsAndNormalizes(t *testing.T) {
 }
 
 func TestNewHandle_Rejects(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"empty":        "",
 		"too short":    "ab",

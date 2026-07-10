@@ -17,6 +17,7 @@ import (
 )
 
 func TestWSURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		in      string
@@ -54,6 +55,7 @@ func TestWSURL(t *testing.T) {
 }
 
 func TestLoginCmdSuccess(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/login" {
 			http.Error(w, "wrong route", http.StatusNotFound)
@@ -88,6 +90,7 @@ func TestLoginCmdSuccess(t *testing.T) {
 }
 
 func TestLoginCmdRejected(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -111,6 +114,7 @@ func TestLoginCmdRejected(t *testing.T) {
 }
 
 func TestLoginCmdTransportError(t *testing.T) {
+	t.Parallel()
 	// Unreachable server (closed immediately).
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	addr := srv.URL
@@ -123,6 +127,7 @@ func TestLoginCmdTransportError(t *testing.T) {
 }
 
 func TestLoginCmdMalformedSuccessResponse(t *testing.T) {
+	t.Parallel()
 	// The server responded, so this is a protocol violation, not a transport
 	// failure — the modal must not render "Cannot reach server".
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -138,6 +143,7 @@ func TestLoginCmdMalformedSuccessResponse(t *testing.T) {
 }
 
 func TestLoginCmdOversizeResponseIsProtocolError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// One byte past the cap so the bounded reader trips.
@@ -158,6 +164,7 @@ func validJWT(t *testing.T, sub string) string {
 }
 
 func TestDialAndAuthCmdSuccess(t *testing.T) {
+	t.Parallel()
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/ws" {
@@ -213,6 +220,7 @@ func TestDialAndAuthCmdSuccess(t *testing.T) {
 }
 
 func TestDialAndAuthCmdRejected(t *testing.T) {
+	t.Parallel()
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -249,6 +257,7 @@ func TestDialAndAuthCmdRejected(t *testing.T) {
 }
 
 func TestDialAndAuthCmdDialFails(t *testing.T) {
+	t.Parallel()
 	// Stand up and immediately close so the dial fails fast.
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	addr := srv.Listener.Addr().String()
@@ -271,6 +280,7 @@ func TestDialAndAuthCmdDialFails(t *testing.T) {
 }
 
 func TestDialAndAuthCmdTimedOut(t *testing.T) {
+	t.Parallel()
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	hold := make(chan struct{})
 	t.Cleanup(func() { close(hold) })
@@ -337,6 +347,7 @@ func (c *captureSender) snapshot() []tea.Msg {
 }
 
 func TestReadLoopCmdDispatchesFramesAndDisconnect(t *testing.T) {
+	t.Parallel()
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -394,6 +405,7 @@ func TestReadLoopCmdDispatchesFramesAndDisconnect(t *testing.T) {
 }
 
 func TestLoginCmdTokenNeverLeaksToErrorPath(t *testing.T) {
+	t.Parallel()
 	const secretToken = "super.secret.jwt"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

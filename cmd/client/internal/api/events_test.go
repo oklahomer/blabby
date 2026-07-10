@@ -13,6 +13,7 @@ func userRef(id, name string) *UserRef { return &UserRef{ID: id, Name: name} }
 func strPtr(s string) *string { return &s }
 
 func TestLoadEventsCmdSuccess(t *testing.T) {
+	t.Parallel()
 	const ms int64 = 1_700_000_000_000
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/rooms/general/events" {
@@ -70,6 +71,7 @@ func TestLoadEventsCmdSuccess(t *testing.T) {
 }
 
 func TestLoadEventsCmdBeforeCursorEchoedAndSent(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("before"); got != "500" {
 			t.Errorf("before param = %q, want 500", got)
@@ -96,6 +98,7 @@ func TestLoadEventsCmdBeforeCursorEchoedAndSent(t *testing.T) {
 }
 
 func TestLoadEventsCmdUnknownKindSkipped(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"events":[` +
@@ -116,6 +119,7 @@ func TestLoadEventsCmdUnknownKindSkipped(t *testing.T) {
 }
 
 func TestLoadEventsCmdMalformedIDFailsPage(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"events":[{"id":"nope","type":"message","sender":{"id":"U1"},"text":"hi","timestamp":1}],"next":null}`))
@@ -133,6 +137,7 @@ func TestLoadEventsCmdMalformedIDFailsPage(t *testing.T) {
 }
 
 func TestLoadEventsCmdMissingPersonFailsPage(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"events":[{"id":"5","type":"member_joined","timestamp":1}],"next":null}`))
@@ -146,6 +151,7 @@ func TestLoadEventsCmdMissingPersonFailsPage(t *testing.T) {
 }
 
 func TestLoadEventsCmdNotMember(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -172,6 +178,7 @@ func TestLoadEventsCmdNotMember(t *testing.T) {
 }
 
 func TestLoadEventsCmdUnauthorized(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -195,6 +202,7 @@ func TestLoadEventsCmdUnauthorized(t *testing.T) {
 }
 
 func TestLoadEventsCmdTransportError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	addr := srv.URL
 	srv.Close()

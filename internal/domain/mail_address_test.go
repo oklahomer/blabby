@@ -9,6 +9,7 @@ import (
 )
 
 func TestNewMailAddress_NormalizesAndAccepts(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  string
@@ -33,6 +34,7 @@ func TestNewMailAddress_NormalizesAndAccepts(t *testing.T) {
 }
 
 func TestNewMailAddress_Rejects(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"empty":             "",
 		"whitespace only":   "   ",
@@ -52,6 +54,7 @@ func TestNewMailAddress_Rejects(t *testing.T) {
 }
 
 func TestNewMailAddress_RejectsOverLength(t *testing.T) {
+	t.Parallel()
 	// A local part long enough to push the whole address past the 254-byte cap.
 	raw := strings.Repeat("a", domain.MaxMailAddressBytes-len("@example.com")+1) + "@example.com"
 	if _, err := domain.NewMailAddress(raw); !errors.Is(err, domain.ErrInvalidMailAddress) {

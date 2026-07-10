@@ -13,6 +13,7 @@ import (
 // values are decimal strings, not the empty objects encoding/json would produce
 // for a struct with an unexported field.
 func TestLogValuer_JSONHandler(t *testing.T) {
+	t.Parallel()
 	uid, err := NewUserID(1)
 	if err != nil {
 		t.Fatalf("NewUserID: %v", err)
@@ -43,6 +44,7 @@ func TestLogValuer_JSONHandler(t *testing.T) {
 // handler change that special-cases KindString still picks up the identifier
 // value.
 func TestLogValue_ReturnsStringValue(t *testing.T) {
+	t.Parallel()
 	uid, _ := NewUserID(1)
 	rid, _ := NewRoomID(4)
 

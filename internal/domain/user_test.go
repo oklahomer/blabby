@@ -18,6 +18,7 @@ func mustUserID(t *testing.T, raw int64) id.UserID {
 }
 
 func TestNewUserRef(t *testing.T) {
+	t.Parallel()
 	valid := mustUserID(t, 1)
 	code := mustPublicCode(t, "A000000001")
 
@@ -66,6 +67,7 @@ func TestNewUserRef(t *testing.T) {
 }
 
 func TestUserRef_IsZero(t *testing.T) {
+	t.Parallel()
 	if !(domain.UserRef{}).IsZero() {
 		t.Error("IsZero() = false for the zero value, want true")
 	}
@@ -79,6 +81,7 @@ func TestUserRef_IsZero(t *testing.T) {
 }
 
 func TestUserRefPublicID(t *testing.T) {
+	t.Parallel()
 	ref, err := domain.NewUserRef(mustUserID(t, 1), mustPublicCode(t, "A000000001"), "Alice")
 	if err != nil {
 		t.Fatalf("NewUserRef: %v", err)
