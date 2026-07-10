@@ -141,7 +141,11 @@ func NewKind(dir Directory, opts ...Option) *cluster.Kind {
 			return &Grain{directory: cfg.dir, joinedLoader: cfg.joinedLoader}
 		},
 		passivationTimeout,
-		actor.WithReceiverMiddleware(middleware.GrainLogging("UserGrain")),
+		// TranslateTerminated re-wraps death-watch notifications so the
+		// generated dispatch routes them to ReceiveDefault (its SystemMessage
+		// arm would otherwise discard them and connection eviction would
+		// never run). Logging stays last per the middleware-order rule.
+		actor.WithReceiverMiddleware(middleware.TranslateTerminated(), middleware.GrainLogging("UserGrain")),
 	)
 }
 
@@ -228,12 +232,15 @@ func (g *Grain) resolveSelf(ctx cluster.GrainContext) *commonpb.UserRef {
 func (g *Grain) Terminate(_ cluster.GrainContext) {}
 
 // ReceiveDefault handles non-RPC messages routed to the grain's mailbox.
-// The protoactor death-watch delivers *actor.Terminated here when a watched
-// UserConnection PID stops; we evict the matching entry so subsequent
-// fan-outs never target a dead actor. Anything else is logged and dropped.
+// When a watched UserConnection PID stops, the death-watch notification
+// arrives here as *middleware.WatchedTerminated (the kind's
+// TranslateTerminated middleware re-wraps *actor.Terminated, which the
+// generated dispatch would otherwise discard as a SystemMessage); we evict
+// the matching entry so subsequent fan-outs never target a dead actor.
+// Anything else is logged and dropped.
 func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
 	switch msg := ctx.Message().(type) {
-	case *actor.Terminated:
+	case *middleware.WatchedTerminated:
 		g.state.removeConnection(msg.Who)
 		slog.Info(middleware.EventGrainConnectionTerminated,
 			"grain_type", ctx.Kind(),
@@ -260,8 +267,9 @@ func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
 //
 // After storing the PID the grain calls ctx.Watch(pid). When the
 // UserConnection actor stops (client disconnect, panic, node loss), the
-// resulting Terminated message arrives at ReceiveDefault and the entry is
-// evicted. There is no Deregister RPC — see ADR-012.
+// resulting death-watch notification arrives at ReceiveDefault (as
+// middleware.WatchedTerminated) and the entry is evicted. There is no
+// Deregister RPC — see ADR-012.
 func (g *Grain) RegisterConnection(req *userpb.RegisterConnectionRequest, ctx cluster.GrainContext) (*userpb.RegisterConnectionResponse, error) {
 	requesterPid := req.GetRequesterPid()
 	if requesterPid == nil {

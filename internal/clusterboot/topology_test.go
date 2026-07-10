@@ -1,7 +1,6 @@
 package clusterboot
 
 import (
-	"bytes"
 	"encoding/json"
 	"log/slog"
 	"slices"
@@ -10,6 +9,8 @@ import (
 
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
+
+	"github.com/oklahomer/blabby/internal/testutil/logcapture"
 )
 
 // allowedMembershipKeys is the complete set of fields a cluster-membership log
@@ -113,10 +114,7 @@ func TestTopologyLogHandlerThroughEventStream(t *testing.T) {
 func captureJSONLogs(t *testing.T, fn func()) []map[string]any {
 	t.Helper()
 
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	buf := logcapture.JSON(t, slog.LevelInfo)
 
 	fn()
 

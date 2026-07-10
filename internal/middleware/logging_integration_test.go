@@ -1,12 +1,10 @@
 package middleware_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +16,7 @@ import (
 	"github.com/oklahomer/blabby/internal/grain/user"
 	"github.com/oklahomer/blabby/internal/id"
 	clustertest "github.com/oklahomer/blabby/internal/testutil/cluster"
+	"github.com/oklahomer/blabby/internal/testutil/logcapture"
 )
 
 // activeRoomLoader reports every id as an active room so the Room grain can
@@ -52,27 +51,6 @@ func (stubDirectory) Resolve(_ context.Context, uid id.UserID) (domain.UserRef, 
 	return domain.NewUserRef(uid, code, "user-"+uid.String())
 }
 
-// syncBuffer is a goroutine-safe *bytes.Buffer wrapper. The slog handler
-// is called from any actor mailbox goroutine, and the integration test
-// asserts on the buffer from the test goroutine — bytes.Buffer is not
-// safe for that combination.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (s *syncBuffer) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.buf.Write(p)
-}
-
-func (s *syncBuffer) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.buf.String()
-}
-
 // TestLoggingMiddleware_Integration_EndToEndTrace drives JoinRoom and
 // SendMessage through the User grain client on a real cluster — the same
 // route production commands take — then asserts that the captured JSON log
@@ -87,10 +65,7 @@ func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 	// Cross-grain fan-out can activate several fresh identities, so use a longer
 	// request timeout than the single-grain test default.
 	c := clustertest.StartWithTimeout(t, 10*time.Second, room.NewKind(activeRoomLoader{}), user.NewKind(stubDirectory{}))
-	captureBuf := &syncBuffer{}
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(captureBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	captureBuf := logcapture.JSON(t, slog.LevelDebug)
 
 	const alice = "1"
 	const general = "4"
@@ -178,7 +153,7 @@ func TestLoggingMiddleware_Integration_EndToEndTrace(t *testing.T) {
 // fan-out line to appear in the buffer, indicating the Room→User
 // round-trip from PostMessage has completed. Best-effort; if the line
 // never appears the subsequent expect[] check surfaces the gap.
-func settleFanOut(t *testing.T, buf *syncBuffer) {
+func settleFanOut(t *testing.T, buf *logcapture.Buffer) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

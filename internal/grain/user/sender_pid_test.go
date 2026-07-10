@@ -2,6 +2,7 @@ package user_test
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -115,6 +116,53 @@ func spawnReceiver(t *testing.T, c *cluster.Cluster) (*receivingActor, *actor.PI
 	return r, pid
 }
 
+// countDeadLettersTo counts dead letters addressed to pid via the actor
+// system's EventStream, unsubscribing when the test ends. A fan-out attempt
+// at a stopped connection dead-letters, so the returned load func lets the
+// eviction tests assert the grain actually stopped targeting a PID — not
+// merely that a surviving connection still receives.
+//
+// EventStream.Publish runs subscribers synchronously on the sending
+// goroutine and the grain responds to an RPC only after its handler's sends
+// completed, so a count read after a ForwardMessage call returns is final
+// for that round.
+func countDeadLettersTo(t *testing.T, c *cluster.Cluster, pid *actor.PID) func() int64 {
+	t.Helper()
+	var n atomic.Int64
+	sub := c.ActorSystem.EventStream.Subscribe(func(evt any) {
+		if dl, ok := evt.(*actor.DeadLetterEvent); ok && dl.PID != nil && dl.PID.Equal(pid) {
+			n.Add(1)
+		}
+	})
+	t.Cleanup(func() { c.ActorSystem.EventStream.Unsubscribe(sub) })
+	return n.Load
+}
+
+// forwardUntilEvicted keeps issuing ForwardMessage rounds until one full
+// round produces no new dead letter at deadPID (the eviction has taken
+// effect), failing the test if that never happens within the deadline. Each
+// round's delivery is confirmed at the live receiver so a slow round is not
+// mistaken for eviction.
+func forwardUntilEvicted(t *testing.T, c *cluster.Cluster, userID string, req *userpb.ForwardMessageRequest, deadPID *actor.PID, rLive *receivingActor, alreadyReceived int) {
+	t.Helper()
+	deadLetters := countDeadLettersTo(t, c, deadPID)
+	uc := userpb.GetUserGrainGrainClient(c, userID)
+	deadline := time.Now().Add(2 * time.Second)
+	for round := 1; time.Now().Before(deadline); round++ {
+		before := deadLetters()
+		if _, err := uc.ForwardMessage(req); err != nil {
+			t.Fatalf("ForwardMessage via cluster: %v", err)
+		}
+		after := deadLetters()
+		waitForReceived(t, rLive, alreadyReceived+round)
+		if after == before {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Errorf("grain kept fanning out to the dead PID %s until the deadline (no eviction)", deadPID.GetId())
+}
+
 // waitForReceived polls until the actor has received at least `want`
 // messages, or fails the test on timeout. Failing here turns "delivery
 // timed out" into a self-explanatory test failure rather than leaving the
@@ -208,42 +256,62 @@ func TestUserGrain_SenderPID(t *testing.T) {
 		registerSelfWithPID(t, c, pidA, rA, userID)
 		registerSelfWithPID(t, c, pidB, rB, userID)
 
-		uc := userpb.GetUserGrainGrainClient(c, userID)
-
 		// Poison A and wait for it to actually stop. The grain's Watch
-		// turns this into a Terminated message that ReceiveDefault
-		// processes; we then poll fan-outs until B observes the
-		// follow-up message rather than sleeping for a fixed window.
+		// turns this into a death-watch notification that ReceiveDefault
+		// processes; we then poll fan-out rounds rather than sleeping for
+		// a fixed window.
 		if err := c.ActorSystem.Root.PoisonFuture(pidA).Wait(); err != nil {
 			t.Fatalf("PoisonFuture for A: %v", err)
 		}
 
 		// Each ForwardMessage call goes through the grain's mailbox;
-		// Terminated{pidA} is queued ahead of follow-up RPCs once
-		// Poison has been applied, so within a small number of
-		// attempts the grain stops trying to send to A.
+		// the death-watch notification for A is queued ahead of follow-up
+		// RPCs once Poison has been applied, so within a small number of
+		// rounds the grain must stop trying to send to A — proven by a full
+		// round producing no dead letter at A while B still receives.
 		fwdReq := &userpb.ForwardMessageRequest{
 			Room: &commonpb.RoomRef{RoomId: "4", PublicCode: "G000000004"}, Sender: &commonpb.UserRef{Id: userID, Name: "Alice Watch"}, Text: "after-evict", Timestamp: timestamppb.New(time.UnixMilli(99)),
 		}
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
-			if _, err := uc.ForwardMessage(fwdReq); err != nil {
-				t.Fatalf("ForwardMessage via cluster: %v", err)
-			}
-			if len(rB.Received()) >= 1 {
-				break
-			}
-			time.Sleep(20 * time.Millisecond)
+		forwardUntilEvicted(t, c, userID, fwdReq, pidA, rB, 0)
+	})
+
+	t.Run("WatchOnDeadPID — registering an already-stopped PID evicts, not retains", func(t *testing.T) {
+		const userID = "15"
+
+		// Stop the connection actor BEFORE its PID is registered. Watching a
+		// dead PID makes protoactor reply Terminated immediately, so this
+		// probes the register-then-instant-Terminated path rather than a
+		// connection dying later (covered by WatchEvictsOnTermination).
+		_, deadPID := spawnReceiver(t, c)
+		if err := c.ActorSystem.Root.PoisonFuture(deadPID).Wait(); err != nil {
+			t.Fatalf("PoisonFuture for dead receiver: %v", err)
 		}
 
-		// A was already dead, but the assertion that matters is that the
-		// grain's connection set no longer holds A's PID — observed
-		// indirectly by B receiving the follow-up fan-out and no
-		// fan-out being attempted to the dead PID. The dead-letter log
-		// noise that would result from a missing eviction is the
-		// failure mode this test guards against.
-		if got := len(rB.Received()); got < 1 {
-			t.Errorf("B received %d messages, want at least 1", got)
+		// The dead actor cannot register itself, so carry its PID from the
+		// test. Registration itself reports success — the grain cannot know
+		// liveness synchronously; the Watch reply is what settles it.
+		uc := userpb.GetUserGrainGrainClient(c, userID)
+		resp, err := uc.RegisterConnection(&userpb.RegisterConnectionRequest{
+			RequesterPid: &userpb.PID{Address: deadPID.GetAddress(), Id: deadPID.GetId()},
+		})
+		if err != nil {
+			t.Fatalf("RegisterConnection with dead PID: %v", err)
 		}
+		if ed := resp.GetError(); ed != nil {
+			t.Fatalf("RegisterConnection with dead PID failed: code=%d status=%q msg=%q",
+				ed.GetCode(), ed.GetStatus(), ed.GetMessage())
+		}
+
+		// A live connection registered afterwards must be unaffected.
+		rLive, livePID := spawnReceiver(t, c)
+		registerSelfWithPID(t, c, livePID, rLive, userID)
+
+		// The Terminated reply is queued through the grain's mailbox, so an
+		// early fan-out may still attempt the dead PID once; within a few
+		// rounds the entry must be gone.
+		fwdReq := &userpb.ForwardMessageRequest{
+			Room: &commonpb.RoomRef{RoomId: "4", PublicCode: "G000000004"}, Sender: &commonpb.UserRef{Id: userID, Name: "Alice DeadWatch"}, Text: "after-dead-register", Timestamp: timestamppb.New(time.UnixMilli(7)),
+		}
+		forwardUntilEvicted(t, c, userID, fwdReq, deadPID, rLive, 0)
 	})
 }
