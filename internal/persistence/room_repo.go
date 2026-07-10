@@ -185,7 +185,7 @@ func (r *RoomRepo) ListActive(ctx context.Context, q postgres.Querier, params Ro
 		args = append(args, likeSubstringPattern(params.Query))
 		query += fmt.Sprintf(" AND display_name ILIKE $%d", len(args))
 	}
-	if params.AfterID != (id.RoomID{}) {
+	if !params.AfterID.IsZero() {
 		args = append(args, params.AfterID.Int64())
 		query += fmt.Sprintf(" AND id > $%d", len(args))
 	}

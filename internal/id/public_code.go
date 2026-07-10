@@ -74,6 +74,11 @@ func ParsePublicCode(raw string) (PublicCode, error) {
 // String returns the bare canonical code (no type letter).
 func (p PublicCode) String() string { return p.value }
 
+// IsZero reports whether p is the zero value — the invalid placeholder no
+// constructor emits. Callers use it to detect an unset optional code, e.g. a
+// room-list query with no pagination cursor.
+func (p PublicCode) IsZero() bool { return p.value == "" }
+
 // FormatUser renders the edge form U<code>, and FormatRoom renders R<code>. There
 // is no separator, so the token is one contiguous alphanumeric word for clean
 // double-click selection.

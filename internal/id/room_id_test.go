@@ -41,6 +41,19 @@ func TestNewRoomID(t *testing.T) {
 	})
 }
 
+func TestRoomID_IsZero(t *testing.T) {
+	if !(RoomID{}).IsZero() {
+		t.Error("IsZero() = false for the zero value, want true")
+	}
+	rid, err := NewRoomID(4)
+	if err != nil {
+		t.Fatalf("NewRoomID: %v", err)
+	}
+	if rid.IsZero() {
+		t.Error("IsZero() = true for a constructed id, want false")
+	}
+}
+
 func TestParseRoomID(t *testing.T) {
 	t.Run("decimal string parses to the same value", func(t *testing.T) {
 		rid, err := ParseRoomID("5")

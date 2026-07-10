@@ -42,6 +42,11 @@ func ParseEventID(s string) (EventID, error) {
 // Int64 returns the underlying Snowflake, e.g. for binding to a BIGINT column.
 func (e EventID) Int64() int64 { return e.value }
 
+// IsZero reports whether e is the zero value — the invalid placeholder no
+// constructor emits. Callers use it to detect an unset optional id, e.g. a
+// timeline query with no Before cursor.
+func (e EventID) IsZero() bool { return e.value == 0 }
+
 // String renders the id as a decimal string — its on-the-wire form.
 func (e EventID) String() string { return strconv.FormatInt(e.value, 10) }
 

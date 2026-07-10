@@ -116,7 +116,7 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 	logRoomEntry(endpointRoomList, r.Method, userID, id.RoomID{})
 
 	query := ListActiveQuery{Query: params.query, Limit: params.limit}
-	if params.after != (id.PublicCode{}) {
+	if !params.after.IsZero() {
 		after, err := g.rooms.Resolve(r.Context(), params.after)
 		switch {
 		case errors.Is(err, persistence.ErrRoomNotFound):

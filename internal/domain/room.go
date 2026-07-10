@@ -63,10 +63,10 @@ type RoomRefParams struct {
 // a known status, and a non-blank name within [MaxRoomNameBytes]. The metadata
 // version is opaque and accepted as-is.
 func NewRoomRef(p RoomRefParams) (RoomRef, error) {
-	if p.ID == (id.RoomID{}) {
+	if p.ID.IsZero() {
 		return RoomRef{}, fmt.Errorf("domain: room ref: id must not be zero")
 	}
-	if p.PublicCode == (id.PublicCode{}) {
+	if p.PublicCode.IsZero() {
 		return RoomRef{}, fmt.Errorf("domain: room ref: public code must not be zero")
 	}
 	if _, err := ParseRoomStatus(string(p.Status)); err != nil {
@@ -90,6 +90,10 @@ func NewRoomRef(p RoomRefParams) (RoomRef, error) {
 
 // ID returns the room's internal identity.
 func (r RoomRef) ID() id.RoomID { return r.id }
+
+// IsZero reports whether r is the zero value, which [NewRoomRef] never
+// returns.
+func (r RoomRef) IsZero() bool { return r == RoomRef{} }
 
 // PublicCode returns the room's opaque public code (bare, no type letter).
 func (r RoomRef) PublicCode() id.PublicCode { return r.publicCode }

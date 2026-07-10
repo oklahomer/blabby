@@ -53,6 +53,12 @@ func ParseRoomID(s string) (RoomID, error) {
 // Int64 returns the underlying Snowflake, e.g. for binding to a BIGINT column.
 func (r RoomID) Int64() int64 { return r.value }
 
+// IsZero reports whether r is the zero value — the invalid placeholder no
+// constructor emits. Following the [time.Time.IsZero] precedent, it lets a
+// caller ask "has an id been assigned yet?" without comparing against a
+// struct literal.
+func (r RoomID) IsZero() bool { return r.value == 0 }
+
 // String renders the id as a decimal string — its on-the-wire form. The zero
 // value renders as "0", which no valid id equals.
 func (r RoomID) String() string { return strconv.FormatInt(r.value, 10) }

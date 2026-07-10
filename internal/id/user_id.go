@@ -53,6 +53,12 @@ func ParseUserID(s string) (UserID, error) {
 // Int64 returns the underlying Snowflake, e.g. for binding to a BIGINT column.
 func (u UserID) Int64() int64 { return u.value }
 
+// IsZero reports whether u is the zero value — the invalid placeholder no
+// constructor emits. Following the [time.Time.IsZero] precedent, it lets a
+// caller ask "has an id been assigned yet?" without comparing against a
+// struct literal.
+func (u UserID) IsZero() bool { return u.value == 0 }
+
 // String renders the id as a decimal string — its on-the-wire form. The zero
 // value renders as "0", which no valid id equals.
 func (u UserID) String() string { return strconv.FormatInt(u.value, 10) }

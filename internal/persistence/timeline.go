@@ -88,7 +88,7 @@ WHERE e.room_id = $1`
 func (j *Journal) Timeline(ctx context.Context, q postgres.Querier, roomID id.RoomID, params TimelineParams) ([]TimelineEntry, bool, error) {
 	query := timelineSQL
 	args := []any{roomID.Int64()}
-	if params.Before != (id.EventID{}) {
+	if !params.Before.IsZero() {
 		args = append(args, params.Before.Int64())
 		query += fmt.Sprintf(" AND e.id < $%d", len(args))
 	}

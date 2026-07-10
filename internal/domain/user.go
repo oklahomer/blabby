@@ -59,10 +59,10 @@ type UserRef struct {
 // at its own boundary). Requiring the public code keeps the internal id from
 // ever having to stand in for it on the client wire.
 func NewUserRef(userID id.UserID, publicCode id.PublicCode, name string) (UserRef, error) {
-	if userID == (id.UserID{}) {
+	if userID.IsZero() {
 		return UserRef{}, fmt.Errorf("domain: user ref: id must not be zero")
 	}
-	if publicCode == (id.PublicCode{}) {
+	if publicCode.IsZero() {
 		return UserRef{}, fmt.Errorf("domain: user ref: public code must not be zero")
 	}
 	trimmed := strings.TrimSpace(name)
@@ -77,6 +77,10 @@ func NewUserRef(userID id.UserID, publicCode id.PublicCode, name string) (UserRe
 
 // ID returns the user's internal identity.
 func (u UserRef) ID() id.UserID { return u.id }
+
+// IsZero reports whether u is the zero value, which [NewUserRef] never
+// returns.
+func (u UserRef) IsZero() bool { return u == UserRef{} }
 
 // PublicCode returns the user's opaque public code (bare, no type letter).
 func (u UserRef) PublicCode() id.PublicCode { return u.publicCode }
