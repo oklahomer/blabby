@@ -83,8 +83,9 @@ type UserConnection struct {
 
 	userID id.UserID
 
-	outbound chan any
-	shutdown func()
+	outbound  chan any
+	shutdown  func()
+	heartbeat *heartbeatTimers
 }
 
 // currentUserID returns the authenticated user id from a *UserConnection
@@ -122,8 +123,9 @@ func WithUserGrainCaller(uc UserGrainCaller) Option {
 }
 
 // WithAppHeartbeat enables application-level ping/pong timing for the
-// connection. The actor decides what ping and timeout mean; this option only
-// configures timer ownership in middleware.
+// connection. This option only sets the cadence; the actor owns the timers
+// themselves — one [heartbeatTimers] per spawn, driven from Receive — and
+// decides what ping and timeout mean.
 func WithAppHeartbeat(pingInterval, pongTimeout time.Duration) Option {
 	return func(c *userConnectionConfig) {
 		c.heartbeat = heartbeatConfig{
@@ -148,14 +150,13 @@ func NewProps(conn *websocket.Conn, a auth.Authenticator, c *cluster.Cluster, op
 		cfg.userClient = newClusterUserGrainCaller(c)
 	}
 
-	middlewares := []actor.ReceiverMiddleware{authTimeoutMiddleware(cfg.authTimeout)}
-	if cfg.heartbeat.enabled() {
-		middlewares = append(middlewares, appHeartbeatMiddleware(cfg.heartbeat))
+	middlewares := []actor.ReceiverMiddleware{
+		authTimeoutMiddleware(cfg.authTimeout),
+		middleware.ActorLogging(
+			actorType,
+			middleware.WithUserIDProvider(currentUserID),
+		),
 	}
-	middlewares = append(middlewares, middleware.ActorLogging(
-		actorType,
-		middleware.WithUserIDProvider(currentUserID),
-	))
 
 	return actor.PropsFromProducer(
 		func() actor.Actor {
@@ -164,6 +165,7 @@ func NewProps(conn *websocket.Conn, a auth.Authenticator, c *cluster.Cluster, op
 				auth:       cfg.auth,
 				userClient: cfg.userClient,
 				outbound:   make(chan any, outboundBufferSize),
+				heartbeat:  newHeartbeatTimers(cfg.heartbeat),
 			}
 			uc.behavior = actor.NewBehavior()
 			return uc
@@ -220,7 +222,9 @@ func (uc *UserConnection) Receive(ctx actor.Context) {
 		}
 		go runReadPump(pumpCtx, uc.conn, notify)
 		go runWritePump(pumpCtx, uc.conn, uc.outbound, notify)
+		uc.heartbeat.start(ctx)
 	case *actor.Stopping:
+		uc.heartbeat.stop()
 		uc.shutdown()
 	case *actor.Stopped:
 
@@ -245,6 +249,20 @@ func (uc *UserConnection) Receive(ctx actor.Context) {
 			slog.Warn(eventConnectionCloseFrameError, uc.logAttrs(ctx, "reason", msg.CloseFrameErr)...)
 		}
 		uc.stop(ctx)
+
+	// Application heartbeat bookkeeping. The timers are actor-owned,
+	// phase-independent state, so Receive maintains them for every phase
+	// and then lets the active behavior decide what the message means
+	// (emit a ping frame, begin closing on timeout, ignore while closing).
+	case *AppPingTick:
+		uc.behavior.Receive(ctx)
+		uc.heartbeat.ensureWatchdog(ctx)
+	case *AppPongReceived:
+		uc.behavior.Receive(ctx)
+		uc.heartbeat.resetWatchdog(ctx)
+	case *PongTimeoutExpired:
+		uc.heartbeat.cancelWatchdog()
+		uc.behavior.Receive(ctx)
 
 	// Phase-specific messages — auth frames, room events, heartbeat ticks,
 	// protocol violations, etc. Receive delegates to the active behavior so
@@ -303,8 +321,8 @@ func (uc *UserConnection) preAuthBehavior(ctx actor.Context) {
 	case *AppPingTick:
 		uc.sendOutbound(ctx, &AppPing{})
 	case *AppPongReceived:
-		// The heartbeat middleware owns watchdog reset. A pre-auth pong does
-		// not establish identity.
+		// Receive's heartbeat bookkeeping owns the watchdog reset. A pre-auth
+		// pong does not establish identity.
 	case *PongTimeoutExpired:
 		uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: "pong_timeout"}))
 	default:
@@ -333,8 +351,8 @@ func (uc *UserConnection) postAuthBehavior(ctx actor.Context) {
 	case *AppPingTick:
 		uc.sendOutbound(ctx, &AppPing{})
 	case *AppPongReceived:
-		// The heartbeat middleware owns watchdog reset. The actor has no
-		// connection state to update for a pong.
+		// Receive's heartbeat bookkeeping owns the watchdog reset. The
+		// behavior has no connection state to update for a pong.
 	case *PongTimeoutExpired:
 		uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: "pong_timeout"}))
 	case *DecodeFailed:
