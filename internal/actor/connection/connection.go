@@ -273,16 +273,14 @@ func (uc *UserConnection) Receive(ctx actor.Context) {
 func (uc *UserConnection) preAuthBehavior(ctx actor.Context) {
 	switch msg := ctx.Message().(type) {
 	case *InboundAuth:
-		uid, err := uc.handleAuth(ctx, msg)
-		if err != nil {
-			var rej *authRejectionError
-			errors.As(err, &rej)
+		uid, rej := uc.handleAuth(ctx, msg)
+		if rej != nil {
 			uc.sendOutboundBestEffort(ctx, newAuthFailed(rej.Code, rej.Message))
 			uc.logAuthRejected(ctx, rej.Reason, rej.Code)
 			uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: rej.Reason}))
 			return
 		}
-		uc.userID = *uid
+		uc.userID = uid
 		uc.sendOutbound(ctx, &AuthSucceeded{})
 		slog.Info(eventConnectionAuthenticated,
 			"actor_type", actorType,
@@ -381,16 +379,14 @@ func (uc *UserConnection) logAttrs(ctx actor.Context, extra ...any) []any {
 	return append(attrs, extra...)
 }
 
-// authRejectionError carries the AuthFailed payload produced by handleAuth on a
+// authRejection carries the AuthFailed payload produced by handleAuth on a
 // rejection path. preAuthBehavior converts it into the on-the-wire AuthFailed
 // and CloseConnection messages; handleAuth itself stays out of protocol I/O.
-type authRejectionError struct {
+type authRejection struct {
 	Code    errcode.Code
 	Message string
 	Reason  string
 }
-
-func (e *authRejectionError) Error() string { return e.Reason }
 
 func newAuthFailed(code errcode.Code, message string) *AuthFailed {
 	return &AuthFailed{Code: code, Message: message}
@@ -398,19 +394,19 @@ func newAuthFailed(code errcode.Code, message string) *AuthFailed {
 
 // handleAuth runs token validation and User-grain registration. It performs
 // no protocol I/O and does not change actor state or behavior. On success it
-// returns the resolved UserID and a nil error. On failure it returns a nil
-// UserID and an *authRejectionError describing the rejection so the caller can
-// build the appropriate AuthFailed and transition.
-func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*id.UserID, error) {
+// returns the resolved UserID and a nil rejection. On failure it returns the
+// zero UserID and an *authRejection describing the rejection so the caller can
+// build the appropriate AuthFailed and pick the next behavior.
+func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (id.UserID, *authRejection) {
 	claims, err := uc.auth.ValidateToken(context.Background(), msg.Token.String())
 	if err != nil {
 		if errors.Is(err, auth.ErrTokenExpired) {
-			return nil, &authRejectionError{Code: errcode.AuthExpiredToken, Message: "token has expired", Reason: "expired"}
+			return id.UserID{}, &authRejection{Code: errcode.AuthExpiredToken, Message: "token has expired", Reason: "expired"}
 		}
 		if errors.Is(err, auth.ErrIdentityUnavailable) {
-			return nil, &authRejectionError{Code: errcode.ServiceUnavailable, Message: "authentication temporarily unavailable", Reason: "unavailable"}
+			return id.UserID{}, &authRejection{Code: errcode.ServiceUnavailable, Message: "authentication temporarily unavailable", Reason: "unavailable"}
 		}
-		return nil, &authRejectionError{Code: errcode.AuthInvalidToken, Message: "invalid token", Reason: "invalid"}
+		return id.UserID{}, &authRejection{Code: errcode.AuthInvalidToken, Message: "invalid token", Reason: "invalid"}
 	}
 
 	if claims == nil {
@@ -419,7 +415,7 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*id.U
 			"pid", ctx.Self().String(),
 			"reason", "claims_nil",
 		)
-		return nil, &authRejectionError{Code: errcode.AuthInvalidToken, Message: "invalid token", Reason: "contract_violation"}
+		return id.UserID{}, &authRejection{Code: errcode.AuthInvalidToken, Message: "invalid token", Reason: "contract_violation"}
 	}
 	userID := claims.UserID
 
@@ -428,7 +424,7 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*id.U
 			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 		)
-		return nil, &authRejectionError{Code: errcode.InternalError, Message: "service unavailable", Reason: "no_user_client"}
+		return id.UserID{}, &authRejection{Code: errcode.InternalError, Message: "service unavailable", Reason: "no_user_client"}
 	}
 
 	resp, err := uc.userClient.RegisterConnection(userID.String(), &userpb.RegisterConnectionRequest{
@@ -441,7 +437,7 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*id.U
 			"user_id", userID.String(),
 			"reason", "transport_error",
 		)
-		return nil, &authRejectionError{Code: errcode.InternalError, Message: "service unavailable", Reason: "register_transport_error"}
+		return id.UserID{}, &authRejection{Code: errcode.InternalError, Message: "service unavailable", Reason: "register_transport_error"}
 	}
 	if respErr := resp.GetError(); respErr != nil {
 		code, parseErr := errcode.Parse(respErr.GetCode(), respErr.GetStatus())
@@ -456,20 +452,20 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (*id.U
 			"reason", "register_inline_error",
 		)
 		if parseErr != nil {
-			return nil, &authRejectionError{
+			return id.UserID{}, &authRejection{
 				Code:    errcode.InternalError,
 				Message: "service unavailable",
 				Reason:  "register_inline_error_invalid_taxonomy",
 			}
 		}
-		return nil, &authRejectionError{
+		return id.UserID{}, &authRejection{
 			Code:    code,
 			Message: inlineErrorClientMessage(code),
 			Reason:  "register_inline_error",
 		}
 	}
 
-	return &userID, nil
+	return userID, nil
 }
 
 // inlineErrorClientMessages maps a parsed register-inline-error code produced
