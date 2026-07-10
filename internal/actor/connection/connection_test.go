@@ -367,6 +367,51 @@ func TestHeartbeat_PreAuthPingIsSent(t *testing.T) {
 	}
 }
 
+// TestHeartbeat_PongTimeoutClosesConnection pins the watchdog path end to
+// end: a client that never answers pings is disconnected once pongTimeout
+// elapses.
+func TestHeartbeat_PongTimeoutClosesConnection(t *testing.T) {
+	authStub := &stubAuthenticator{validateFn: func(_ context.Context, _ string) (*auth.Claims, error) {
+		t.Fatal("authenticator must not run in this scenario")
+		return nil, nil
+	}}
+	sess := startSession(t, authStub, &recordingGrainCaller{},
+		WithAppHeartbeat(20*time.Millisecond, 40*time.Millisecond),
+	)
+
+	if got := readJSON(t, sess.client); got["type"] != "ping" {
+		t.Fatalf("expected ping, got %v", got)
+	}
+
+	// Never send a pong: the watchdog must expire and stop the actor.
+	expectActorStops(t, sess.system, sess.pid, 2*time.Second)
+}
+
+// TestHeartbeat_PongKeepsConnectionAlive pins the watchdog-reset path: a
+// client that answers every ping stays connected across a span several times
+// longer than pongTimeout. If pongs stopped resetting the watchdog, the
+// connection would close mid-loop and a close frame would arrive instead of
+// the next ping.
+func TestHeartbeat_PongKeepsConnectionAlive(t *testing.T) {
+	authStub := &stubAuthenticator{validateFn: func(_ context.Context, _ string) (*auth.Claims, error) {
+		t.Fatal("authenticator must not run in this scenario")
+		return nil, nil
+	}}
+	sess := startSession(t, authStub, &recordingGrainCaller{},
+		WithAppHeartbeat(20*time.Millisecond, 250*time.Millisecond),
+	)
+
+	// 15 pings ≈ 300ms — past pongTimeout, so survival proves the resets.
+	for i := 0; i < 15; i++ {
+		if got := readJSON(t, sess.client); got["type"] != "ping" {
+			t.Fatalf("frame %d: expected ping, got %v", i, got)
+		}
+		if err := sess.client.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`)); err != nil {
+			t.Fatalf("write pong %d: %v", i, err)
+		}
+	}
+}
+
 func TestAuth_RegisterTransportErrorYields5001AndStops(t *testing.T) {
 	authStub := &stubAuthenticator{validateFn: func(_ context.Context, _ string) (*auth.Claims, error) {
 		return aliceClaims(), nil

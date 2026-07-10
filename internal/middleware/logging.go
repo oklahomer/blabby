@@ -5,11 +5,10 @@
 // # MIDDLEWARE ORDER
 //
 // The architecture's middleware-ordering rule is: persistence (when added) →
-// rate-limit (when added) → auth-timeout / heartbeat → logging. Logging is
-// always installed last so it records the message exactly as the grain or
-// actor will receive it, including any synthetic messages produced by
-// upstream middleware (e.g., *AuthTimeoutExpired, *AppPingTick,
-// *WatchedTerminated).
+// rate-limit (when added) → auth-timeout → logging. Logging is always
+// installed last so it records the message exactly as the grain or actor
+// will receive it, including any synthetic messages produced by upstream
+// middleware (e.g., *AuthTimeoutExpired, *WatchedTerminated).
 //
 // # MESSAGE TYPE RESOLUTION
 //

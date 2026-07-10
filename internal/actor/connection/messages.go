@@ -43,8 +43,9 @@ type InboundAuth struct {
 }
 
 // AppPongReceived is the decoded "pong" frame, the client's reply to an
-// [AppPing]. The heartbeat middleware owns the watchdog reset, so the actor
-// treats it as a no-op: a pong neither establishes identity nor carries state.
+// [AppPing]. Receive's heartbeat bookkeeping owns the watchdog reset, so the
+// behaviors treat it as a no-op: a pong neither establishes identity nor
+// carries state.
 type AppPongReceived struct{}
 
 // Outbound protocol messages enqueued for the write pump, which encodes each
@@ -141,8 +142,8 @@ type CloseConnection struct {
 // established.
 type AuthTimeoutExpired struct{}
 
-// AppPingTick is the heartbeat middleware's interval tick. On receipt the actor
-// enqueues an [AppPing] for the write pump.
+// AppPingTick is the interval tick scheduled by the actor's [heartbeatTimers].
+// On receipt the actor enqueues an [AppPing] for the write pump.
 type AppPingTick struct{}
 
 // PongTimeoutExpired signals that the heartbeat watchdog elapsed without an
