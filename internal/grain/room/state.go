@@ -8,16 +8,19 @@ import (
 	"github.com/oklahomer/blabby/internal/id"
 )
 
-// maxRecentMessages bounds the in-memory ring buffer of recent messages
-// retained by a Room grain. Tunable in a later story; persistence is out of
-// scope for Phase 1.
+// maxRecentMessages bounds the in-memory recent-message window a Room grain
+// retains. The window is the room's hot tier in the no-cache architecture
+// (ADR-008): no production read path consumes it yet — history reads are
+// served from PostgreSQL by the gateway (ADR-007) — but hot-window reads are
+// reserved to be answered by the grain, so the buffer is deliberately kept
+// despite being write-only today.
 const maxRecentMessages = 100
 
 // chatMessage is the in-memory representation of a posted message held by
 // the Room grain. The timestamp is a domain time.Time for readability and
 // type safety; conversion to the project's canonical int64 Unix-milliseconds
-// wire format (architecture.md timestamp rule) happens at the proto
-// boundary in events.go and in PostMessage's response.
+// wire format happens at the proto boundary in events.go and in
+// PostMessage's response.
 type chatMessage struct {
 	senderID  id.UserID
 	text      string
@@ -25,9 +28,9 @@ type chatMessage struct {
 }
 
 // roomState holds a single Room grain's in-memory state. It is mutated
-// directly under the actor model's single-threaded guarantee — the project's
-// global immutability rule does not apply to grain state (architecture.md
-// "Grain State Management").
+// directly: the actor model's single-threaded guarantee makes the grain the
+// sole writer, so copy-on-write ceremony would add allocation without adding
+// safety.
 type roomState struct {
 	// ref is the room's reference metadata, hydrated from the source of truth on
 	// activation. refLoaded reports whether hydration succeeded for an active
@@ -122,9 +125,9 @@ func (s *roomState) recordMessage(msg chatMessage) {
 		bound = maxRecentMessages
 	}
 	if len(s.recentMessages) >= bound {
-		// Drop the oldest message. Copy is intentionally simple — Phase 1
-		// recent-message buffers are small (default 100); a circular buffer
-		// is overkill until measurement says otherwise.
+		// Drop the oldest message. Copy is intentionally simple — the
+		// window is small (default 100); a circular buffer is overkill
+		// until measurement says otherwise.
 		s.recentMessages = append(s.recentMessages[:0], s.recentMessages[1:]...)
 	}
 	s.recentMessages = append(s.recentMessages, msg)
