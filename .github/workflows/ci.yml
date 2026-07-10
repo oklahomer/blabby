@@ -63,6 +63,26 @@ jobs:
       - name: Spec lint
         run: make spec-lint
 
+      # Blocking: govulncheck reports only vulnerabilities the code actually
+      # reaches, so a finding is a real call path into a vulnerable function.
+      # Fix it by bumping the module (or the toolchain for stdlib findings).
+      # The tool version is pinned for reproducible runs; the vulnerability
+      # database it queries updates independently of the pin.
+      - name: Vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          govulncheck ./...
+
+      # Non-blocking: gosec's heuristics flag known-benign spots (env-var
+      # names and the login DTO matching credential patterns, the local
+      # docs-preview tool's subprocess/file use), so findings surface in the
+      # step log without failing the build. Generated code is excluded.
+      - name: Static security scan (informational)
+        continue-on-error: true
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
+          gosec -exclude-dir=gen ./...
+
       - name: Load database schema
         run: psql "$BLABBY_DATABASE_URL" -f internal/persistence/schema.sql
 
