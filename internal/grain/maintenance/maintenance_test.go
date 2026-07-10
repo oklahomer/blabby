@@ -13,10 +13,13 @@ import (
 	clustertest "github.com/oklahomer/blabby/internal/testutil/cluster"
 )
 
-// fakeSweeper is a configurable Sweeper. delay intentionally ignores context and
-// holds the sweep in-flight for a bounded time so tests can observe future
-// timeouts even when the underlying work keeps running; the worker always
-// finishes on its own, so it never blocks cluster shutdown.
+// fakeSweeper is a configurable Sweeper. delay holds the sweep in-flight for a
+// bounded time; gate holds it until the test closes the channel, making
+// "the worker is still running" a structural fact rather than a timing bet.
+// Both intentionally ignore context so tests can observe future timeouts even
+// when the underlying work keeps running; the worker always finishes on its
+// own (tests close the gate before cleanup), so it never blocks cluster
+// shutdown.
 type fakeSweeper struct {
 	mu              sync.Mutex
 	calls           int
@@ -25,11 +28,15 @@ type fakeSweeper struct {
 	deleted         int64
 	err             error
 	delay           time.Duration
+	gate            <-chan struct{}
 }
 
 func (f *fakeSweeper) Sweep(ctx context.Context, now time.Time) (int64, error) {
 	if f.delay > 0 {
 		time.Sleep(f.delay)
+	}
+	if f.gate != nil {
+		<-f.gate
 	}
 	_, hasDeadline := ctx.Deadline()
 	f.mu.Lock()
@@ -198,9 +205,12 @@ func TestMaintenanceGrain_CoalescesConcurrentTriggers(t *testing.T) {
 }
 
 func TestMaintenanceGrain_FutureTimeoutClearsRunning(t *testing.T) {
-	// The sweep runs longer (400ms) than the grain's wait for the worker (150ms), so
-	// the future times out while the worker is still running.
-	fake := &fakeSweeper{delay: 400 * time.Millisecond}
+	// The sweep blocks on a gate the test holds shut, so the worker is
+	// structurally in-flight for the whole test — the future timeout (150ms)
+	// is the only path that can clear `running`.
+	gate := make(chan struct{})
+	defer close(gate) // release the worker; it finishes on its own before cluster cleanup
+	fake := &fakeSweeper{gate: gate}
 	c := clustertest.Start(t, NewKind(fake, WithTimeouts(150*time.Millisecond, 100*time.Millisecond)))
 	client := maintenancepb.GetMaintenanceGrainGrainClient(c, PendingAccountGCIdentity)
 
@@ -212,16 +222,10 @@ func TestMaintenanceGrain_FutureTimeoutClearsRunning(t *testing.T) {
 		t.Fatal("first trigger should be accepted")
 	}
 
-	// After the future times out (~150ms) but before the worker finishes (~400ms),
-	// running is already cleared by the timeout continuation — so a retrigger in that
-	// window is accepted. This proves the future timeout, not the worker's reply,
-	// cleared the flag.
-	time.Sleep(250 * time.Millisecond)
-	retry, err := client.SweepPendingAccounts(&maintenancepb.SweepPendingAccountsRequest{})
-	if err != nil {
-		t.Fatalf("retrigger: %v", err)
-	}
-	if !retry.Accepted {
+	// A retrigger is eventually accepted while the worker is still provably
+	// blocked on the gate, which proves the future-timeout continuation — not
+	// the worker's reply — cleared the flag.
+	if !eventuallyAccepted(t, client, time.Second) {
 		t.Fatal("running did not clear after the future timed out")
 	}
 }

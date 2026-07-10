@@ -32,26 +32,28 @@ import (
 )
 
 // automanagedRefreshTTL is the gossip cycle interval passed to
-// automanaged.NewWithConfig. After the provider's /_health endpoint is
-// reachable, the next monitorStatuses cycle will register the local
-// member in MemberList; waiting one full TTL guarantees that cycle has
-// run.
+// automanaged.NewWithConfig. The readiness probe in waitForClusterReady
+// converges as soon as a monitorStatuses cycle has registered the local
+// member in MemberList, typically within one TTL of /_health binding.
 const automanagedRefreshTTL = 2 * time.Second
 
-// healthReadyTimeout bounds how long Start waits for the automanaged
-// provider's HTTP /_health endpoint to bind. On slow CI runners the
+// healthReadyTimeout bounds how long Start waits for the cluster to become
+// routable: the automanaged provider's /_health endpoint answering, then the
+// readiness-probe activation succeeding. On slow CI runners the provider's
 // listener goroutine may not be scheduled for several hundred ms after
-// StartMember returns; 15s leaves comfortable headroom while still
-// failing fast on a genuinely broken bootstrap.
+// StartMember returns, and the first gossip cycle adds automanagedRefreshTTL
+// on top; 15s leaves comfortable headroom while still failing fast on a
+// genuinely broken bootstrap.
 const healthReadyTimeout = 15 * time.Second
 
-// healthReadyPoll is the interval between /_health probes while waiting.
+// healthReadyPoll is the interval between readiness probes while waiting.
 const healthReadyPoll = 50 * time.Millisecond
 
-// gossipSettleBuffer is the slack added to one refresh cycle to absorb
-// timing jitter on shared CI runners between /_health becoming reachable
-// and monitorStatuses publishing the local member.
-const gossipSettleBuffer = 500 * time.Millisecond
+// readinessProbeKind is the no-op grain kind Start registers alongside the
+// caller's kinds. Cluster readiness is probed by activating one instance of
+// it through the real identity-lookup path; the actor itself does nothing,
+// so the probe cannot disturb the kinds under test.
+const readinessProbeKind = "clustertest-readiness-probe"
 
 // TB is the subset of testing.TB used by Start. *testing.T satisfies it,
 // and a TestMain helper can satisfy it with a tiny shim, letting tests
@@ -113,12 +115,16 @@ func StartWithTimeout(tb TB, requestTimeout time.Duration, kinds ...*cluster.Kin
 	// so the invariant is preserved by inaction here — but it is the same
 	// invariant the production wiring in internal/clusterboot pins, and
 	// integration tests that assert the no-payload contract rely on it.
+	allKinds := make([]*cluster.Kind, 0, len(kinds)+1)
+	allKinds = append(allKinds, kinds...)
+	allKinds = append(allKinds, cluster.NewKind(readinessProbeKind, actor.PropsFromFunc(func(actor.Context) {})))
+
 	clusterCfg := cluster.Configure(
 		"blabby-test",
 		provider,
 		lookup,
 		remoteCfg,
-		cluster.WithKinds(kinds...),
+		cluster.WithKinds(allKinds...),
 		cluster.WithRequestTimeout(requestTimeout),
 	)
 
@@ -129,32 +135,40 @@ func StartWithTimeout(tb TB, requestTimeout time.Duration, kinds ...*cluster.Kin
 
 	// StartMember only sleeps 1s before returning; the automanaged
 	// provider's HTTP listener and first gossip cycle may not have
-	// completed. Block until the local member is reliably routable,
-	// otherwise the first grain RPC races the cluster bootstrap and
-	// fails with "max retries: 3" on slow CI runners.
-	//
-	// We can't poll cluster.MemberList directly: its Length method
-	// reads the underlying member set without locking, racing the
-	// automanaged provider's writer goroutine (upstream issue). Use
-	// a race-safe HTTP probe of the provider's /_health endpoint
-	// instead, then wait one refresh cycle for monitorStatuses to
-	// publish the member into MemberList.
-	waitForClusterReady(tb, autoPort)
+	// completed, and a grain RPC issued before the topology lands fails
+	// with "max retries: 3" (the cluster context's built-in retries back
+	// off for nanoseconds, so they absorb nothing). Block until a probe
+	// activation proves the member is routable.
+	waitForClusterReady(tb, c, autoPort)
 
 	return c
 }
 
-// waitForClusterReady blocks until the automanaged provider's /_health
-// endpoint on autoPort is reachable, then sleeps one gossip refresh
-// interval (plus a small jitter buffer) so the next monitorStatuses
-// cycle has registered the local member in MemberList.
-func waitForClusterReady(tb TB, autoPort int) {
+// waitForClusterReady blocks until the cluster can route a grain activation.
+// Two gates run under one healthReadyTimeout deadline:
+//
+//  1. The automanaged provider's /_health endpoint answers 200 OK, so the
+//     provider's discovery listener is up. Failing here points at a broken
+//     bootstrap rather than slow gossip.
+//  2. An activation of the readiness-probe kind through the real routing
+//     path succeeds. cluster.Get resolves the owner via the disthash
+//     rendezvous — read under the manager's own lock, race-safe unlike
+//     MemberList's unlocked reads (upstream issue) — and round-trips an
+//     ActivationRequest to the placement actor, returning nil until the
+//     first gossip cycle has published the local member. The first non-nil
+//     PID therefore proves exactly what tests need: the next grain RPC
+//     routes instead of dying on "max retries".
+//
+// Gate 2 replaces a fixed automanagedRefreshTTL+buffer sleep. Polling the
+// activation path converges as soon as the topology actually lands instead
+// of always paying the worst case, and it cannot pass early.
+func waitForClusterReady(tb TB, c *cluster.Cluster, autoPort int) {
 	tb.Helper()
+
+	deadline := time.Now().Add(healthReadyTimeout)
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/_health", autoPort)
 	client := &http.Client{Timeout: healthReadyPoll}
-
-	deadline := time.Now().Add(healthReadyTimeout)
 	for {
 		resp, err := client.Get(url)
 		if err == nil {
@@ -170,7 +184,16 @@ func waitForClusterReady(tb TB, autoPort int) {
 		time.Sleep(healthReadyPoll)
 	}
 
-	time.Sleep(automanagedRefreshTTL + gossipSettleBuffer)
+	for {
+		if pid := c.Get("readiness", readinessProbeKind); pid != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			tb.Fatalf("cluster did not become routable within %s: readiness-probe activation kept returning nil", healthReadyTimeout)
+			return
+		}
+		time.Sleep(healthReadyPoll)
+	}
 }
 
 // clusterShutdownTimeout bounds how long a test's cleanup waits for

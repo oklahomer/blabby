@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -487,26 +488,33 @@ func TestJWTAuthenticator_ValidateToken_AlgConfusion(t *testing.T) {
 }
 
 func TestJWTAuthenticator_ExpiredToken(t *testing.T) {
-	authenticator, _, _ := newTestAuthenticator(t, []byte("test-secret"), auth.WithExpiration(1*time.Second))
-	ctx := context.Background()
+	// JWT exp has second granularity, so observing expiry needs a multi-second
+	// wait. The synctest bubble makes it instant: time.Sleep advances a fake
+	// clock once every goroutine in the bubble blocks, and the jwt library's
+	// time.Now() comparisons observe the advanced time. The whole flow is
+	// in-memory (fake verifier/resolver, no sockets), which is what makes the
+	// bubble applicable.
+	synctest.Test(t, func(t *testing.T) {
+		authenticator, _, _ := newTestAuthenticator(t, []byte("test-secret"), auth.WithExpiration(1*time.Second))
+		ctx := context.Background()
 
-	result, err := authenticator.Authenticate(ctx, auth.AuthParams{MailAddress: testEmail, Password: testPassword})
-	if err != nil {
-		t.Fatalf("setup: %v", err)
-	}
+		result, err := authenticator.Authenticate(ctx, auth.AuthParams{MailAddress: testEmail, Password: testPassword})
+		if err != nil {
+			t.Fatalf("setup: %v", err)
+		}
 
-	// Wait for token to expire. JWT exp has second granularity.
-	time.Sleep(2 * time.Second)
+		time.Sleep(2 * time.Second)
 
-	_, err = authenticator.ValidateToken(ctx, result.Token)
-	if !errors.Is(err, auth.ErrTokenExpired) {
-		t.Errorf("expected ErrTokenExpired, got %v", err)
-	}
-	// The original jwt error should remain reachable via errors.Is so callers that
-	// assert on the underlying chain keep working.
-	if !errors.Is(err, jwt.ErrTokenExpired) {
-		t.Errorf("expected underlying jwt.ErrTokenExpired in chain, got %v", err)
-	}
+		_, err = authenticator.ValidateToken(ctx, result.Token)
+		if !errors.Is(err, auth.ErrTokenExpired) {
+			t.Errorf("expected ErrTokenExpired, got %v", err)
+		}
+		// The original jwt error should remain reachable via errors.Is so callers that
+		// assert on the underlying chain keep working.
+		if !errors.Is(err, jwt.ErrTokenExpired) {
+			t.Errorf("expected underlying jwt.ErrTokenExpired in chain, got %v", err)
+		}
+	})
 }
 
 func TestJWTAuthenticator_ConfigurableExpiration(t *testing.T) {
