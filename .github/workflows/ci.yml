@@ -1,7 +1,12 @@
 name: CI
 
+# push is filtered to main so a feature branch with an open PR builds once
+# (via pull_request, on the merge ref) instead of twice; merges to main and
+# direct pushes to main still build via push. A branch pushed before its PR
+# exists builds when the PR opens — pull_request fires on the current head.
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -30,9 +35,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # go-version-file honors go.mod's toolchain directive, so CI runs the
+      # exact patched toolchain the module pins. setup-go exports
+      # GOTOOLCHAIN=local, which would otherwise ignore the pin (a bare
+      # "1.26" resolved to an older patch release and the vulnerability
+      # gate correctly failed on an already-fixed stdlib CVE).
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
 
       - uses: actions/setup-node@v4
         with:
@@ -62,6 +72,26 @@ jobs:
 
       - name: Spec lint
         run: make spec-lint
+
+      # Blocking: govulncheck reports only vulnerabilities the code actually
+      # reaches, so a finding is a real call path into a vulnerable function.
+      # Fix it by bumping the module (or the toolchain for stdlib findings).
+      # The tool version is pinned for reproducible runs; the vulnerability
+      # database it queries updates independently of the pin.
+      - name: Vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          govulncheck ./...
+
+      # Non-blocking: gosec's heuristics flag known-benign spots (env-var
+      # names and the login DTO matching credential patterns, the local
+      # docs-preview tool's subprocess/file use), so findings surface in the
+      # step log without failing the build. Generated code is excluded.
+      - name: Static security scan (informational)
+        continue-on-error: true
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
+          gosec -exclude-dir=gen ./...
 
       - name: Load database schema
         run: psql "$BLABBY_DATABASE_URL" -f internal/persistence/schema.sql
