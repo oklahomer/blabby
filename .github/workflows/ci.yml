@@ -35,9 +35,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # go-version-file honors go.mod's toolchain directive, so CI runs the
+      # exact patched toolchain the module pins. setup-go exports
+      # GOTOOLCHAIN=local, which would otherwise ignore the pin (a bare
+      # "1.26" resolved to an older patch release and the vulnerability
+      # gate correctly failed on an already-fixed stdlib CVE).
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
 
       - uses: actions/setup-node@v4
         with:
