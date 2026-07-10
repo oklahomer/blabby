@@ -7,6 +7,7 @@ import (
 )
 
 func TestNewRoomID(t *testing.T) {
+	t.Parallel()
 	t.Run("positive value round-trips through Int64 and String", func(t *testing.T) {
 		rid, err := NewRoomID(4)
 		if err != nil {
@@ -42,6 +43,7 @@ func TestNewRoomID(t *testing.T) {
 }
 
 func TestRoomID_IsZero(t *testing.T) {
+	t.Parallel()
 	if !(RoomID{}).IsZero() {
 		t.Error("IsZero() = false for the zero value, want true")
 	}
@@ -55,6 +57,7 @@ func TestRoomID_IsZero(t *testing.T) {
 }
 
 func TestParseRoomID(t *testing.T) {
+	t.Parallel()
 	t.Run("decimal string parses to the same value", func(t *testing.T) {
 		rid, err := ParseRoomID("5")
 		if err != nil {
@@ -75,6 +78,7 @@ func TestParseRoomID(t *testing.T) {
 }
 
 func TestRoomID_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
 	rid, _ := NewRoomID(7240534144614405)
 
 	data, err := json.Marshal(rid)
@@ -98,6 +102,7 @@ func TestRoomID_JSONRoundTrip(t *testing.T) {
 // runtime test. If a future refactor accidentally aliases UserID and RoomID to
 // the same struct (e.g., via a generic Identifier[T]), this file stops compiling.
 func TestUserIDAndRoomIDAreDistinctTypes(t *testing.T) {
+	t.Parallel()
 	uid, _ := NewUserID(1)
 	rid, _ := NewRoomID(1)
 

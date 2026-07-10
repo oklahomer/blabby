@@ -355,14 +355,14 @@ func serve(servers ...*http.Server) error {
 
 	serveErr := make(chan error, len(servers))
 	for _, srv := range servers {
-		go func(s *http.Server) {
-			slog.Info("server.http.listening", "addr", s.Addr)
-			err := s.ListenAndServe()
+		go func() {
+			slog.Info("server.http.listening", "addr", srv.Addr)
+			err := srv.ListenAndServe()
 			if errors.Is(err, http.ErrServerClosed) {
 				err = nil
 			}
 			serveErr <- err
-		}(srv)
+		}()
 	}
 
 	select {
@@ -382,13 +382,13 @@ func serve(servers ...*http.Server) error {
 	defer cancel()
 	shutdownErrs := make(chan error, len(servers))
 	for _, srv := range servers {
-		go func(s *http.Server) {
-			if err := s.Shutdown(shutdownCtx); err != nil {
-				shutdownErrs <- fmt.Errorf("http shutdown %s: %w", s.Addr, err)
+		go func() {
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				shutdownErrs <- fmt.Errorf("http shutdown %s: %w", srv.Addr, err)
 				return
 			}
 			shutdownErrs <- nil
-		}(srv)
+		}()
 	}
 	var shutdownErr error
 	for range servers {

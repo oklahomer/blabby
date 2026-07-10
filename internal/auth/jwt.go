@@ -105,7 +105,7 @@ func (a *JWTAuthenticator) Authenticate(ctx context.Context, params AuthParams) 
 		return nil, fmt.Errorf("failed to sign token: %w", err)
 	}
 
-	slog.Info("authentication successful", "user_id", user.UserID.String())
+	slog.Info("auth.token.issued", "user_id", user.UserID.String())
 
 	return &Result{
 		UserID: user.UserID,
@@ -134,7 +134,7 @@ func (a *JWTAuthenticator) ValidateToken(ctx context.Context, tokenString string
 	}
 
 	claims := new(jwt.RegisteredClaims)
-	_, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+	_, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}

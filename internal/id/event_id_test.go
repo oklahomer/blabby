@@ -7,6 +7,7 @@ import (
 )
 
 func TestNewEventID(t *testing.T) {
+	t.Parallel()
 	for _, v := range []int64{0, -1, -9999} {
 		if _, err := NewEventID(v); !errors.Is(err, ErrInvalidEventID) {
 			t.Errorf("NewEventID(%d): got %v, want ErrInvalidEventID", v, err)
@@ -25,6 +26,7 @@ func TestNewEventID(t *testing.T) {
 }
 
 func TestEventID_IsZero(t *testing.T) {
+	t.Parallel()
 	if !(EventID{}).IsZero() {
 		t.Error("IsZero() = false for the zero value, want true")
 	}
@@ -38,6 +40,7 @@ func TestEventID_IsZero(t *testing.T) {
 }
 
 func TestParseEventID(t *testing.T) {
+	t.Parallel()
 	e, err := ParseEventID("9007199254740993")
 	if err != nil {
 		t.Fatalf("ParseEventID: %v", err)
@@ -53,6 +56,7 @@ func TestParseEventID(t *testing.T) {
 }
 
 func TestEventIDMarshalsAsDecimalString(t *testing.T) {
+	t.Parallel()
 	// A 63-bit-ish value that loses precision as a JSON number.
 	e, err := NewEventID(9007199254740993)
 	if err != nil {
@@ -68,6 +72,7 @@ func TestEventIDMarshalsAsDecimalString(t *testing.T) {
 }
 
 func TestEventIDUnmarshal(t *testing.T) {
+	t.Parallel()
 	t.Run("round trips through a struct field", func(t *testing.T) {
 		type wrap struct {
 			ID EventID `json:"id"`

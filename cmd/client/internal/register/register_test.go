@@ -79,6 +79,7 @@ func filled(t *testing.T, rec *recorder) Model {
 }
 
 func TestEnterSubmitsValidForm(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := filled(t, rec)
 
@@ -99,6 +100,7 @@ func TestEnterSubmitsValidForm(t *testing.T) {
 }
 
 func TestSubmitValidationErrors(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		mutate   func(*testing.T, Model) Model
@@ -176,6 +178,7 @@ func TestSubmitValidationErrors(t *testing.T) {
 }
 
 func TestEscEmitsCancelledWithTypedEmail(t *testing.T) {
+	t.Parallel()
 	m := New((&recorder{}).submit, "srv")
 	m = typeIn(t, m, "dana@example.com")
 	next, cmd := m.Update(keyMsg("esc"))
@@ -195,6 +198,7 @@ func TestEscEmitsCancelledWithTypedEmail(t *testing.T) {
 }
 
 func TestKeysSuppressedWhileCreating(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := filled(t, rec)
 	next, _ := m.Update(keyMsg("enter"))
@@ -210,6 +214,7 @@ func TestKeysSuppressedWhileCreating(t *testing.T) {
 }
 
 func TestRejectionClearsPasswordsAndShowsHeadline(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := filled(t, rec)
 	next, _ := m.Update(keyMsg("enter"))
@@ -229,6 +234,7 @@ func TestRejectionClearsPasswordsAndShowsHeadline(t *testing.T) {
 }
 
 func TestTransportErrorIncludesUnderlyingReason(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := filled(t, rec)
 	next, _ := m.Update(keyMsg("enter"))
@@ -245,6 +251,7 @@ func TestTransportErrorIncludesUnderlyingReason(t *testing.T) {
 }
 
 func TestViewShowsHelpAndInFlightCopy(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, "srv")
 	if view := m.View(80, 24); !strings.Contains(view, "create account") {

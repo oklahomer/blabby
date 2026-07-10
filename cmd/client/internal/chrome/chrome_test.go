@@ -6,6 +6,7 @@ import (
 )
 
 func TestRenderIncludesAllPaneContent(t *testing.T) {
+	t.Parallel()
 	out := Render(State{
 		Width:     100,
 		Height:    30,
@@ -21,6 +22,7 @@ func TestRenderIncludesAllPaneContent(t *testing.T) {
 }
 
 func TestRenderFallsBackToTooSmallNotice(t *testing.T) {
+	t.Parallel()
 	out := Render(State{Width: 40, Height: 10})
 	if !strings.Contains(out, "Terminal too small") {
 		t.Fatalf("expected too-small notice, got:\n%s", out)

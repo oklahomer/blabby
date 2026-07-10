@@ -7,6 +7,7 @@ import (
 )
 
 func TestCrockfordSymbolIsUnbiased(t *testing.T) {
+	t.Parallel()
 	counts := make(map[byte]int)
 	for i := 0; i < 256; i++ {
 		sym := crockfordSymbol(byte(i))
@@ -26,6 +27,7 @@ func TestCrockfordSymbolIsUnbiased(t *testing.T) {
 }
 
 func TestNewPublicCodeIsValidAndCanonical(t *testing.T) {
+	t.Parallel()
 	for i := 0; i < 200; i++ {
 		code, err := NewPublicCode()
 		if err != nil {
@@ -52,6 +54,7 @@ func TestNewPublicCodeIsValidAndCanonical(t *testing.T) {
 }
 
 func TestPublicCode_IsZero(t *testing.T) {
+	t.Parallel()
 	if !(PublicCode{}).IsZero() {
 		t.Error("IsZero() = false for the zero value, want true")
 	}
@@ -65,6 +68,7 @@ func TestPublicCode_IsZero(t *testing.T) {
 }
 
 func TestParsePublicCode(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		in      string
@@ -99,6 +103,7 @@ func TestParsePublicCode(t *testing.T) {
 }
 
 func TestFormatAndParsePrefixedCodes(t *testing.T) {
+	t.Parallel()
 	code, err := NewPublicCode()
 	if err != nil {
 		t.Fatalf("NewPublicCode: %v", err)

@@ -3,6 +3,7 @@ package api
 import "testing"
 
 func TestHumanise(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		status   string

@@ -7,6 +7,7 @@ import (
 )
 
 func TestCanSetRole(t *testing.T) {
+	t.Parallel()
 	const (
 		owner  = domain.MembershipRoleOwner
 		admin  = domain.MembershipRoleAdmin
@@ -37,6 +38,7 @@ func TestCanSetRole(t *testing.T) {
 }
 
 func TestCanTransferOwnership(t *testing.T) {
+	t.Parallel()
 	if !domain.CanTransferOwnership(domain.MembershipRoleOwner) {
 		t.Error("the owner must be able to transfer ownership")
 	}

@@ -1,7 +1,8 @@
 package room
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"time"
 
 	"github.com/oklahomer/blabby/internal/domain"
@@ -142,6 +143,6 @@ func (s *roomState) memberIDs() []id.UserID {
 	for userID := range s.members {
 		out = append(out, userID)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Int64() < out[j].Int64() })
+	slices.SortFunc(out, func(a, b id.UserID) int { return cmp.Compare(a.Int64(), b.Int64()) })
 	return out
 }

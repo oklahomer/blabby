@@ -7,6 +7,7 @@ import (
 )
 
 func TestViewPreAuthShowsServerOnly(t *testing.T) {
+	t.Parallel()
 	out := View(State{Server: "http://localhost:8080", Now: time.Date(2026, 5, 24, 14, 22, 1, 0, time.UTC)}, false, 25, 20)
 	if !strings.Contains(out, "Profile") {
 		t.Errorf("missing Profile header:\n%s", out)
@@ -23,6 +24,7 @@ func TestViewPreAuthShowsServerOnly(t *testing.T) {
 }
 
 func TestViewPostAuthShowsEmailAndID(t *testing.T) {
+	t.Parallel()
 	out := View(State{
 		Email:  "rina@example.com",
 		UserID: "u-rina-1",

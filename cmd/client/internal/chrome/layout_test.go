@@ -6,6 +6,7 @@ import (
 )
 
 func TestComputeWidthsSumToTotal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		w, h  int
@@ -41,6 +42,7 @@ func TestComputeWidthsSumToTotal(t *testing.T) {
 }
 
 func TestLayoutInnerDimensionsSubtractBorderBudget(t *testing.T) {
+	t.Parallel()
 	l, err := Compute(120, 40)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -56,6 +58,7 @@ func TestLayoutInnerDimensionsSubtractBorderBudget(t *testing.T) {
 }
 
 func TestComputeRejectsTooSmall(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		w, h int

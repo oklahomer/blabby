@@ -7,6 +7,7 @@ import (
 )
 
 func TestNewUserID(t *testing.T) {
+	t.Parallel()
 	t.Run("positive value round-trips through Int64 and String", func(t *testing.T) {
 		uid, err := NewUserID(42)
 		if err != nil {
@@ -50,6 +51,7 @@ func TestNewUserID(t *testing.T) {
 }
 
 func TestUserID_IsZero(t *testing.T) {
+	t.Parallel()
 	if !(UserID{}).IsZero() {
 		t.Error("IsZero() = false for the zero value, want true")
 	}
@@ -63,6 +65,7 @@ func TestUserID_IsZero(t *testing.T) {
 }
 
 func TestParseUserID(t *testing.T) {
+	t.Parallel()
 	t.Run("decimal string parses to the same value", func(t *testing.T) {
 		uid, err := ParseUserID("123")
 		if err != nil {
@@ -91,6 +94,7 @@ func TestParseUserID(t *testing.T) {
 }
 
 func TestUserID_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
 	uid, _ := NewUserID(7240534144614400)
 
 	data, err := json.Marshal(uid)

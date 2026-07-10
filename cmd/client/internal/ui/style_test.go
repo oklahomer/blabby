@@ -6,6 +6,7 @@ import (
 )
 
 func TestPaneBorderColorChangesWithFocus(t *testing.T) {
+	t.Parallel()
 	unfocused := PaneBorder(false).GetBorderTopForeground()
 	focused := PaneBorder(true).GetBorderTopForeground()
 
@@ -15,6 +16,7 @@ func TestPaneBorderColorChangesWithFocus(t *testing.T) {
 }
 
 func TestStylesProduceNonEmptyRender(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		render string

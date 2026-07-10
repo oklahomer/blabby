@@ -102,10 +102,10 @@ func triggerPendingAccountGC(client *http.Client, url string) {
 // errors are warnings.
 type cronLogger struct{}
 
-func (cronLogger) Info(msg string, keysAndValues ...interface{}) {
+func (cronLogger) Info(msg string, keysAndValues ...any) {
 	slog.Debug("server.gc_cron: "+msg, keysAndValues...)
 }
 
-func (cronLogger) Error(err error, msg string, keysAndValues ...interface{}) {
-	slog.Warn("server.gc_cron: "+msg, append([]interface{}{"error", err}, keysAndValues...)...)
+func (cronLogger) Error(err error, msg string, keysAndValues ...any) {
+	slog.Warn("server.gc_cron: "+msg, append([]any{"error", err}, keysAndValues...)...)
 }

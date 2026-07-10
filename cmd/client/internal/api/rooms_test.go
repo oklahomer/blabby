@@ -31,6 +31,7 @@ func rejectsToken(t *testing.T, v any) bool {
 }
 
 func TestLoadJoinedRoomsCmdSuccess(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/rooms/joined" {
 			http.Error(w, "wrong route", http.StatusNotFound)
@@ -62,6 +63,7 @@ func TestLoadJoinedRoomsCmdSuccess(t *testing.T) {
 }
 
 func TestLoadJoinedRoomsCmdEmpty(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"rooms":[]}`))
@@ -79,6 +81,7 @@ func TestLoadJoinedRoomsCmdEmpty(t *testing.T) {
 }
 
 func TestLoadJoinedRoomsCmdUnauthorized(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -108,6 +111,7 @@ func TestLoadJoinedRoomsCmdUnauthorized(t *testing.T) {
 }
 
 func TestLoadJoinedRoomsCmdServiceUnavailable(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -131,6 +135,7 @@ func TestLoadJoinedRoomsCmdServiceUnavailable(t *testing.T) {
 }
 
 func TestLoadJoinedRoomsCmdMalformedBody(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{not json`))
@@ -154,6 +159,7 @@ func TestLoadJoinedRoomsCmdMalformedBody(t *testing.T) {
 }
 
 func TestLoadJoinedRoomsCmdTransportError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	addr := srv.URL
 	srv.Close()
@@ -175,6 +181,7 @@ func TestLoadJoinedRoomsCmdTransportError(t *testing.T) {
 }
 
 func TestLoadRoomsCmdSuccess(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/rooms" {
 			http.Error(w, "wrong route", http.StatusNotFound)
@@ -209,6 +216,7 @@ func TestLoadRoomsCmdSuccess(t *testing.T) {
 }
 
 func TestLoadRoomsCmdRejected(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -235,6 +243,7 @@ func TestLoadRoomsCmdRejected(t *testing.T) {
 }
 
 func TestLoadRoomsCmdEnvelopeWithoutStatus(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(`Bad Gateway`))
@@ -258,6 +267,7 @@ func TestLoadRoomsCmdEnvelopeWithoutStatus(t *testing.T) {
 }
 
 func TestLoadRoomsCmdEncodesQueryAndCursorAndEchoesNext(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("q"); got != "gen 話" {
 			t.Errorf("q = %q, want the raw fragment", got)
@@ -294,6 +304,7 @@ func TestLoadRoomsCmdEncodesQueryAndCursorAndEchoesNext(t *testing.T) {
 }
 
 func TestLoadRoomsCmdNullNextIsEmpty(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RawQuery != "" {
 			t.Errorf("zero RoomQuery must add no parameters, got %q", r.URL.RawQuery)
@@ -314,6 +325,7 @@ func TestLoadRoomsCmdNullNextIsEmpty(t *testing.T) {
 }
 
 func TestCreateRoomCmd(t *testing.T) {
+	t.Parallel()
 	t.Run("success", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost || r.URL.Path != "/rooms" {
@@ -383,6 +395,7 @@ func TestCreateRoomCmd(t *testing.T) {
 }
 
 func TestLeaveRoomCmd(t *testing.T) {
+	t.Parallel()
 	t.Run("success", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodDelete || r.URL.Path != "/rooms/general/membership" {
@@ -444,6 +457,7 @@ func TestLeaveRoomCmd(t *testing.T) {
 }
 
 func TestJoinRoomCmdSuccess(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut || r.URL.Path != "/rooms/general/membership" {
 			http.Error(w, "wrong route", http.StatusNotFound)
@@ -474,6 +488,7 @@ func TestJoinRoomCmdSuccess(t *testing.T) {
 }
 
 func TestJoinRoomCmdAlreadyMember(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
@@ -503,6 +518,7 @@ func TestJoinRoomCmdAlreadyMember(t *testing.T) {
 }
 
 func TestJoinRoomCmdNotFound(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -526,6 +542,7 @@ func TestJoinRoomCmdNotFound(t *testing.T) {
 }
 
 func TestJoinRoomCmdTransportError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	addr := srv.URL
 	srv.Close()
@@ -566,6 +583,7 @@ func (d *deadlineCapturingTransport) RoundTrip(req *http.Request) (*http.Respons
 }
 
 func TestRoomCmdsZeroTimeoutUsesDefault(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(RoomListResponse{Rooms: nil})

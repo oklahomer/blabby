@@ -10,6 +10,7 @@ import (
 )
 
 func TestRegisterCmdSuccess(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/users" {
 			http.Error(w, "wrong route", http.StatusNotFound)
@@ -39,6 +40,7 @@ func TestRegisterCmdSuccess(t *testing.T) {
 }
 
 func TestRegisterCmdRejected(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
@@ -59,6 +61,7 @@ func TestRegisterCmdRejected(t *testing.T) {
 }
 
 func TestRegisterCmdTransportError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	addr := srv.URL
 	srv.Close()
@@ -70,6 +73,7 @@ func TestRegisterCmdTransportError(t *testing.T) {
 }
 
 func TestRegisterCmdPasswordNeverLeaksToErrorPath(t *testing.T) {
+	t.Parallel()
 	const secret = "a-long-passphrase"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -87,6 +91,7 @@ func TestRegisterCmdPasswordNeverLeaksToErrorPath(t *testing.T) {
 }
 
 func TestVerifyEmailCmd(t *testing.T) {
+	t.Parallel()
 	t.Run("success", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost || r.URL.Path != "/users/verifications" {
@@ -148,6 +153,7 @@ func TestVerifyEmailCmd(t *testing.T) {
 }
 
 func TestResendVerificationCmd(t *testing.T) {
+	t.Parallel()
 	t.Run("success", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost || r.URL.Path != "/users/verifications/resend" {

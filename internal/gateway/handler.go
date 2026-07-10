@@ -74,17 +74,17 @@ func (g *Gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 			// The password verified, so naming the pending state reveals nothing
 			// an account owner does not already know; the client uses the
 			// distinct status to route the user to email verification.
-			slog.Warn("login rejected", "reason", "account_pending")
+			slog.Warn("gateway.login.rejected", "reason", "account_pending")
 			WriteErrorResponse(w, http.StatusUnauthorized,
 				ErrAuthAccountPending("verify your email to finish creating your account"))
 			return
 		}
 		if errors.Is(err, auth.ErrInvalidCredentials) {
-			slog.Warn("login rejected", "reason", "invalid_credentials")
+			slog.Warn("gateway.login.rejected", "reason", "invalid_credentials")
 			WriteErrorResponse(w, http.StatusUnauthorized, ErrAuthInvalidToken("invalid credentials"))
 			return
 		}
-		slog.Error("login authentication error", "error", err.Error())
+		slog.Error("gateway.login.error", "error", err.Error())
 		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("authentication unavailable"))
 		return
 	}

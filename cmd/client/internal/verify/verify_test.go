@@ -57,6 +57,7 @@ func typeIn(t *testing.T, m Model, s string) Model {
 }
 
 func TestEnterSubmitsSixDigitPIN(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, rec.resend, "dana@example.com", "srv")
 	m = typeIn(t, m, "482910")
@@ -75,6 +76,7 @@ func TestEnterSubmitsSixDigitPIN(t *testing.T) {
 }
 
 func TestEnterRejectsMalformedPIN(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, rec.resend, "dana@example.com", "srv")
 	m = typeIn(t, m, "123")
@@ -93,6 +95,7 @@ func TestEnterRejectsMalformedPIN(t *testing.T) {
 }
 
 func TestNonDigitInputIsAbsorbed(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, rec.resend, "dana@example.com", "srv")
 	m = typeIn(t, m, "12ab34x")
@@ -102,6 +105,7 @@ func TestNonDigitInputIsAbsorbed(t *testing.T) {
 }
 
 func TestCtrlRDispatchesResendWithoutLocking(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, rec.resend, "dana@example.com", "srv")
 
@@ -125,6 +129,7 @@ func TestCtrlRDispatchesResendWithoutLocking(t *testing.T) {
 }
 
 func TestResendOutcomesRender(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, rec.resend, "dana@example.com", "srv")
 
@@ -145,6 +150,7 @@ func TestResendOutcomesRender(t *testing.T) {
 }
 
 func TestVerifyRejectionClearsPIN(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, rec.resend, "dana@example.com", "srv")
 	m = typeIn(t, m, "000000")
@@ -165,6 +171,7 @@ func TestVerifyRejectionClearsPIN(t *testing.T) {
 }
 
 func TestTransportErrorIncludesUnderlyingReason(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, rec.resend, "dana@example.com", "srv")
 	m = typeIn(t, m, "482910")
@@ -182,6 +189,7 @@ func TestTransportErrorIncludesUnderlyingReason(t *testing.T) {
 }
 
 func TestEscEmitsCancelled(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, rec.resend, "dana@example.com", "srv")
 	next, cmd := m.Update(keyMsg("esc"))
@@ -201,6 +209,7 @@ func TestEscEmitsCancelled(t *testing.T) {
 }
 
 func TestKeysSuppressedWhileVerifying(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, rec.resend, "dana@example.com", "srv")
 	m = typeIn(t, m, "482910")
@@ -216,6 +225,7 @@ func TestKeysSuppressedWhileVerifying(t *testing.T) {
 }
 
 func TestViewShowsEmailAndHelp(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	m := New(rec.submit, rec.resend, "dana@example.com", "srv")
 	view := m.View(80, 24)
