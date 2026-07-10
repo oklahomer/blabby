@@ -1,7 +1,12 @@
 name: CI
 
+# push is filtered to main so a feature branch with an open PR builds once
+# (via pull_request, on the merge ref) instead of twice; merges to main and
+# direct pushes to main still build via push. A branch pushed before its PR
+# exists builds when the PR opens — pull_request fires on the current head.
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
