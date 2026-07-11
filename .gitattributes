@@ -1,0 +1,3 @@
+# Rendered from the .puml next to each file by .github/workflows/plantuml.yml;
+# marking them generated collapses their diffs in pull-request review.
+*.svg linguist-generated=true

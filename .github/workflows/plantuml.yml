@@ -1,0 +1,73 @@
+name: Render PlantUML
+
+# Renders every tracked .puml file to a same-named .svg beside it
+# (docs/ABC.puml → docs/ABC.svg) and commits the result back to the pushed
+# branch, so markdown can link the .svg and the .puml stays the source of
+# truth.
+#
+# Trigger design: the workflow fires only on pushes that touch a .puml file,
+# and the bot commit contains only .svg files, so the commit cannot retrigger
+# the workflow. Rendering covers ALL tracked .puml files (not just the changed
+# ones) — the pinned renderer is deterministic, so unchanged sources produce
+# byte-identical .svg output and the empty-diff guard below skips the commit.
+# That keeps the file-selection logic trivial and self-heals any diagram a
+# previous run missed.
+#
+# workflow_dispatch renders everything on demand: for adopting the convention
+# on existing diagrams, or for repair when the bot could not push (e.g. a PR
+# from a fork, where the token has no write access — the ci.yml freshness
+# check fails in that case and a maintainer dispatches this workflow after
+# the merge).
+#
+# The PlantUML image tag comes from the Makefile's PLANTUML_IMAGE variable so
+# `make diagrams`, this workflow, and the ci.yml freshness check always render
+# with the same version. Keep `@startuml` bare in .puml sources: a named
+# `@startuml foo` overrides the output filename and breaks the ABC.puml →
+# ABC.svg convention.
+
+on:
+  push:
+    paths: ["**/*.puml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Serialize runs per branch: two quick pushes queue instead of racing each
+# other's bot commit. The pull --rebase before push covers the remaining
+# window between checkout and push.
+concurrency:
+  group: plantuml-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve PlantUML image from Makefile
+        id: image
+        run: echo "image=$(sed -n 's/^PLANTUML_IMAGE *= *//p' Makefile)" >> "$GITHUB_OUTPUT"
+
+      - name: Render all tracked .puml files
+        run: |
+          files=$(git ls-files '*.puml')
+          if [ -z "$files" ]; then
+            echo "No .puml files tracked; nothing to render."
+            exit 0
+          fi
+          docker run --rm -v "$PWD:/data" "${{ steps.image.outputs.image }}" -tsvg $files
+
+      - name: Commit rendered SVGs
+        run: |
+          git add -A -- '*.svg'
+          if git diff --cached --quiet; then
+            echo "All .svg files already match their sources."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "docs: render PlantUML diagrams"
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push origin "HEAD:refs/heads/${{ github.ref_name }}"
