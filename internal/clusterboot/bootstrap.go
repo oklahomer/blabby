@@ -1,6 +1,7 @@
 package clusterboot
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/asynkron/protoactor-go/actor"
@@ -12,6 +13,7 @@ import (
 	"github.com/oklahomer/blabby/internal/grain/maintenance"
 	"github.com/oklahomer/blabby/internal/grain/room"
 	"github.com/oklahomer/blabby/internal/grain/user"
+	"github.com/oklahomer/blabby/internal/logging"
 )
 
 const (
@@ -77,8 +79,11 @@ func Kinds(deps GrainDeps) []*cluster.Kind {
 // cluster.Config.RequestLog is intentionally left at its false default: the
 // built-in RequestLog formatter logs whole proto request bodies via slog.Any,
 // which would leak message text and bearer tokens into the log stream.
+//
+// The actor system is built with protoActorLogger so proto.actor's own logging
+// joins blabby's JSON stream at Warn and above.
 func Build(cc Config, kinds ...*cluster.Kind) *cluster.Cluster {
-	system := actor.NewActorSystem()
+	system := actor.NewActorSystem(actor.WithLoggerFactory(protoActorLogger))
 
 	// Honor an explicitly supplied advertised host whenever one is set, not only
 	// in multi-node mode: a single-node config that opts into a fixed advertised
@@ -106,6 +111,22 @@ func Build(cc Config, kinds ...*cluster.Kind) *cluster.Cluster {
 		cluster.WithKinds(kinds...),
 	)
 	return cluster.New(system, cfg)
+}
+
+// protoActorLogger routes proto.actor's internal logger through the process JSON
+// slog stream at Warn and above. It captures slog.Default()'s handler at call
+// time — each binary calls logging.SetupDefault() before Build, so the JSON
+// handler is already installed — and raises the floor to Warn with
+// logging.NewMinLevelHandler, tagging every line with the library and system id.
+//
+// Info is dropped deliberately. proto.actor's built-in dead-letter subscriber
+// logs whole message bodies at Info — the same leak class the RequestLog default
+// above avoids — and its cluster startup chatter duplicates blabby's own
+// server.cluster.* lines, so no operator signal is lost.
+func protoActorLogger(system *actor.ActorSystem) *slog.Logger {
+	return slog.New(logging.NewMinLevelHandler(slog.Default().Handler(), slog.LevelWarn)).
+		With("lib", "proto.actor").
+		With("system", system.ID)
 }
 
 // ShutdownClient stops a cluster the local node joined with StartClient. It is

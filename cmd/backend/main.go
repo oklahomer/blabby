@@ -139,6 +139,11 @@ func run(dbCfg postgres.Config, cc clusterboot.Config) error {
 	sub := clusterboot.SubscribeTopologyLogging(c)
 	defer c.ActorSystem.EventStream.Unsubscribe(sub)
 
+	// Subscribe before StartMember so no dead letter published during startup
+	// is missed.
+	dlSub := clusterboot.SubscribeDeadLetterLogging(c)
+	defer c.ActorSystem.EventStream.Unsubscribe(dlSub)
+
 	c.StartMember()
 
 	// Address is the peer-reachable address protoactor advertises; logging it

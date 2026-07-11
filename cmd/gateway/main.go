@@ -293,6 +293,11 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 	sub := clusterboot.SubscribeTopologyLogging(c)
 	defer c.ActorSystem.EventStream.Unsubscribe(sub)
 
+	// Subscribe before StartClient so no dead letter published during startup
+	// is missed.
+	dlSub := clusterboot.SubscribeDeadLetterLogging(c)
+	defer c.ActorSystem.EventStream.Unsubscribe(dlSub)
+
 	c.StartClient()
 
 	// Address is what backends use to reach this gateway's UserConnection PIDs
