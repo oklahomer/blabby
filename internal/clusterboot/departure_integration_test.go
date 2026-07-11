@@ -364,7 +364,7 @@ func startTestMembers(t *testing.T, count int, pool *pgxpool.Pool) ([]*testMembe
 		}
 
 		member := &testMember{
-			cluster:    Build(cc, Kinds(newDatabaseDeps(t, pool, i))...),
+			cluster:    Build(cc, Telemetry{}, Kinds(newDatabaseDeps(t, pool, i))...),
 			topologies: make(chan *cluster.ClusterTopology, 16),
 		}
 		member.loggingSub = SubscribeTopologyLogging(member.cluster)
@@ -403,7 +403,7 @@ func startTestClient(t *testing.T, rawSeeds string, expectedAddresses []string) 
 	}
 
 	client := &testClient{
-		cluster:    Build(cc),
+		cluster:    Build(cc, Telemetry{}),
 		topologies: make(chan *cluster.ClusterTopology, 16),
 	}
 	client.loggingSub = SubscribeTopologyLogging(client.cluster)

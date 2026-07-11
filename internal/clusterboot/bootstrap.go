@@ -9,6 +9,7 @@ import (
 	"github.com/asynkron/protoactor-go/cluster/clusterproviders/automanaged"
 	"github.com/asynkron/protoactor-go/cluster/identitylookup/disthash"
 	"github.com/asynkron/protoactor-go/remote"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/oklahomer/blabby/internal/grain/maintenance"
 	"github.com/oklahomer/blabby/internal/grain/room"
@@ -59,6 +60,15 @@ func Kinds(deps GrainDeps) []*cluster.Kind {
 	}
 }
 
+// Telemetry carries the optional observability collaborators for Build. The
+// zero value leaves metrics disabled.
+type Telemetry struct {
+	// MeterProvider, when non-nil, enables proto.actor's built-in OpenTelemetry
+	// instrumentation against this provider. A caller builds it via
+	// internal/telemetry and exposes the paired scrape handler (see ADR-022).
+	MeterProvider metric.MeterProvider
+}
+
 // Build constructs (but does not start) a proto.actor cluster from cc, hosting
 // the given grain kinds. The caller starts the returned cluster with
 // StartMember.
@@ -80,10 +90,20 @@ func Kinds(deps GrainDeps) []*cluster.Kind {
 // built-in RequestLog formatter logs whole proto request bodies via slog.Any,
 // which would leak message text and bearer tokens into the log stream.
 //
-// The actor system is built with protoActorLogger so proto.actor's own logging
-// joins blabby's JSON stream at Warn and above.
-func Build(cc Config, kinds ...*cluster.Kind) *cluster.Cluster {
-	system := actor.NewActorSystem(actor.WithLoggerFactory(protoActorLogger))
+// The actor system is built from a single actor.Config path so proto.actor's
+// own logging always joins blabby's JSON stream at Warn and above via
+// protoActorLogger. When tel.MeterProvider is set, that same config enables
+// proto.actor's OpenTelemetry metrics — which requires BOTH the provider and
+// the MetricsEnabled flag; a provider alone yields a no-op extension and an
+// empty scrape (ADR-022). The zero-value Telemetry leaves both unset.
+func Build(cc Config, tel Telemetry, kinds ...*cluster.Kind) *cluster.Cluster {
+	sysCfg := actor.NewConfig()
+	sysCfg.LoggerFactory = protoActorLogger
+	if tel.MeterProvider != nil {
+		sysCfg.MetricsProvider = tel.MeterProvider
+		sysCfg.MetricsEnabled = true
+	}
+	system := actor.NewActorSystemWithConfig(sysCfg)
 
 	// Honor an explicitly supplied advertised host whenever one is set, not only
 	// in multi-node mode: a single-node config that opts into a fixed advertised

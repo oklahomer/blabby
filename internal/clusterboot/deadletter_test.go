@@ -157,7 +157,7 @@ func TestDeadLetterLogHandler_Throttles(t *testing.T) {
 // the actor system's logger drops it.
 func TestSubscribeDeadLetterLogging_Integration(t *testing.T) {
 	lines := captureJSONLogs(t, func() {
-		c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Kinds(testGrainDeps())...)
+		c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Telemetry{}, Kinds(testGrainDeps())...)
 		sub := SubscribeDeadLetterLogging(c)
 		defer c.ActorSystem.EventStream.Unsubscribe(sub)
 
@@ -187,7 +187,7 @@ func TestSubscribeDeadLetterLogging_Integration(t *testing.T) {
 // TestSubscribeDeadLetterLogging_ReturnsSubscription confirms the subscription
 // is established on the built cluster's EventStream.
 func TestSubscribeDeadLetterLogging_ReturnsSubscription(t *testing.T) {
-	c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Kinds(testGrainDeps())...)
+	c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Telemetry{}, Kinds(testGrainDeps())...)
 
 	sub := SubscribeDeadLetterLogging(c)
 	if sub == nil {

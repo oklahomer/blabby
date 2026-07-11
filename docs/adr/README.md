@@ -53,6 +53,7 @@ ADR numbers are permanent identifiers assigned in creation order — they are no
 | ADR | Why read it |
 |-----|-------------|
 | [ADR-021](adr-021-scheduled-maintenance-jobs.md) | Why periodic jobs run via an internal trigger, a singleton grain, and an advisory-lock backstop. |
+| [ADR-022](adr-022-protoactor-metrics-exposure.md) | Why Proto.Actor metrics run through an owned MeterProvider on a dedicated Prometheus registry, exposed per binary. |
 
 ## Index
 
@@ -79,3 +80,4 @@ ADR numbers are permanent identifiers assigned in creation order — they are no
 | [ADR-019](adr-019-snowflake-ids-and-worker-lease-fencing.md) | Snowflake ids and worker-lease fencing -- time-ordered ids minted safely across a cluster | Accepted | 2026-07-05 |
 | [ADR-020](adr-020-pgroonga-search-stack.md) | PGroonga search stack -- CJK-capable full-text in PostgreSQL, hand-written SQL over pgx | Accepted | 2026-07-05 |
 | [ADR-021](adr-021-scheduled-maintenance-jobs.md) | Scheduled maintenance jobs -- an internal trigger, a singleton grain, and an advisory-lock backstop | Accepted | 2026-07-06 |
+| [ADR-022](adr-022-protoactor-metrics-exposure.md) | Proto.Actor metrics exposure -- an owned MeterProvider on a dedicated Prometheus registry, exposed per binary | Accepted | 2026-07-11 |

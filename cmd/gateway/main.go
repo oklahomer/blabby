@@ -41,6 +41,7 @@ import (
 	"github.com/oklahomer/blabby/internal/persistence"
 	"github.com/oklahomer/blabby/internal/persistence/postgres"
 	"github.com/oklahomer/blabby/internal/persistence/workerlease"
+	"github.com/oklahomer/blabby/internal/telemetry"
 	"github.com/oklahomer/blabby/internal/verification"
 )
 
@@ -77,6 +78,10 @@ const (
 	// shutdownTimeout bounds graceful HTTP drain on SIGINT/SIGTERM.
 	shutdownTimeout = 10 * time.Second
 
+	// telemetryShutdownTimeout bounds the metrics MeterProvider flush/stop on
+	// shutdown when --metrics is enabled.
+	telemetryShutdownTimeout = 5 * time.Second
+
 	// Gateway cluster demo defaults make `go run ./cmd/gateway` join a local
 	// single-node backend (on its default discovery port) as a client, so the
 	// Quick Start needs no flags. A real deployment overrides --seeds,
@@ -109,7 +114,10 @@ type config struct {
 	internalListenAddr string
 	// gcSchedule is the local pending-account GC cron spec; empty means the local
 	// cron is disabled (--gc-schedule off).
-	gcSchedule     string
+	gcSchedule string
+	// metrics, when true, serves the Prometheus scrape endpoint at GET /metrics
+	// on the internal listener.
+	metrics        bool
 	jwtSecret      string
 	usingDevSecret bool
 }
@@ -139,6 +147,7 @@ func parseConfig(args []string) (config, postgres.Config, clusterboot.Config, er
 	listen := fs.String("listen", defaultListenAddr, "public HTTP listen address (host:port)")
 	internalListen := fs.String("internal-listen", defaultInternalListenAddr, "internal listen address (host:port) for operational endpoints; keep network-restricted")
 	gcSchedule := fs.String("gc-schedule", defaultGCSchedule, `pending-account GC trigger schedule (cron spec or @every duration); "off" disables the local cron`)
+	metrics := fs.Bool("metrics", false, "serve Prometheus metrics at GET /metrics on the internal listener (operational endpoint; keep network-restricted)")
 	secret := fs.String("jwt-secret", "", "JWT signing secret; a development default is used when empty")
 	dbCfg := postgres.BindFlags(fs)
 	clusterCfg := clusterboot.BindFlags(fs, gatewayClusterDefaults())
@@ -150,6 +159,9 @@ func parseConfig(args []string) (config, postgres.Config, clusterboot.Config, er
 	if err != nil {
 		return config{}, postgres.Config{}, clusterboot.Config{}, err
 	}
+	// metrics needs no boundary validation (a plain bool), so it is set on the
+	// parsed config directly rather than threaded through newConfig.
+	cfg.metrics = *metrics
 	dc, err := dbCfg()
 	if err != nil {
 		return config{}, postgres.Config{}, clusterboot.Config{}, err
@@ -283,10 +295,32 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 		postgres.NewTransactor(pool),
 	)
 
+	// Metrics are opt-in (--metrics). When enabled, one MeterProvider feeds
+	// proto.actor's instrumentation and its paired scrape handler is mounted on
+	// the internal listener; the provider is flushed on shutdown. When disabled,
+	// tel stays the zero value and metricsHandler stays nil (route absent).
+	var tel clusterboot.Telemetry
+	var metricsHandler http.Handler
+	if cfg.metrics {
+		pm, err := telemetry.NewPrometheusMetrics()
+		if err != nil {
+			return fmt.Errorf("build telemetry: %w", err)
+		}
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), telemetryShutdownTimeout)
+			defer cancel()
+			if err := pm.Shutdown(shutdownCtx); err != nil {
+				slog.Warn("server.telemetry.shutdown_error", "error", err)
+			}
+		}()
+		tel = clusterboot.Telemetry{MeterProvider: pm.MeterProvider()}
+		metricsHandler = pm.HTTPHandler()
+	}
+
 	// The gateway joins as a cluster client: it registers no grain kinds (a
 	// client routes to grains via the topology that members advertise) and never
 	// hosts an activation.
-	c := clusterboot.Build(cc)
+	c := clusterboot.Build(cc, tel)
 	defer clusterboot.ShutdownClient(c)
 
 	// Subscribe before StartClient so the initial cluster topology is not missed.
@@ -316,6 +350,7 @@ func run(cfg config, dbCfg postgres.Config, cc clusterboot.Config) error {
 		Timeline:      gateway.NewRoomTimelineReader(pool),
 		Cluster:       c,
 		ActorRoot:     c.ActorSystem.Root,
+		Metrics:       metricsHandler,
 	})
 
 	// The public API and the internal operational endpoints (scheduled-job
