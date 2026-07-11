@@ -109,6 +109,8 @@ That's the whole loop — from a fresh clone to exchanging messages in a few min
 
 Want to run several gateways and backends that discover each other and route messages across nodes? See [`docs/multi-node-cluster.md`](docs/multi-node-cluster.md) for a runnable walk-through.
 
+**Metrics (optional).** Both binaries can expose Proto.Actor's OpenTelemetry metrics — actor spawn/restart/failure counts, mailbox and dead-letter counters, cluster member count — as a Prometheus scrape endpoint. Pass `--metrics` to the gateway to serve `GET /metrics` on its internal listener (`curl localhost:9090/metrics` with the default `--internal-listen`), or `--metrics-listen 127.0.0.1:9464` to the backend to open a dedicated operational listener (`curl localhost:9464/metrics`). Both are unauthenticated, so keep them network-restricted. See [ADR-022](docs/adr/adr-022-protoactor-metrics-exposure.md).
+
 ## Project Structure
 
 ```

@@ -20,6 +20,7 @@ func TestParseConfig(t *testing.T) {
 		wantInternalListen string
 		wantGCSchedule     string
 		wantGCDisabled     bool
+		wantMetrics        bool
 		wantSecret         string
 		wantUsingDev       bool
 		wantMultiNode      bool
@@ -90,6 +91,24 @@ func TestParseConfig(t *testing.T) {
 			args:     []string{"--listen", "127.0.0.1:9000", "--internal-listen", "127.0.0.1:9000"},
 			wantErr:  true,
 			errMatch: "must differ",
+		},
+		{
+			name:          "metrics flag enables the scrape endpoint",
+			args:          []string{"--metrics"},
+			wantListen:    defaultListenAddr,
+			wantMetrics:   true,
+			wantSecret:    devJWTSecret,
+			wantUsingDev:  true,
+			wantMultiNode: true,
+		},
+		{
+			name:          "metrics off by default",
+			args:          nil,
+			wantListen:    defaultListenAddr,
+			wantMetrics:   false,
+			wantSecret:    devJWTSecret,
+			wantUsingDev:  true,
+			wantMultiNode: true,
 		},
 		{
 			name:           "custom gc schedule",
@@ -163,6 +182,9 @@ func TestParseConfig(t *testing.T) {
 			}
 			if gotCfg.gcSchedule != wantGC {
 				t.Errorf("gcSchedule = %q, want %q", gotCfg.gcSchedule, wantGC)
+			}
+			if gotCfg.metrics != tc.wantMetrics {
+				t.Errorf("metrics = %v, want %v", gotCfg.metrics, tc.wantMetrics)
 			}
 			if gotCfg.jwtSecret != tc.wantSecret {
 				t.Errorf("jwtSecret = %q, want %q", gotCfg.jwtSecret, tc.wantSecret)

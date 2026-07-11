@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric/noop"
+
 	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 )
@@ -71,7 +73,7 @@ func TestBuildConstructsCluster(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := Build(tc.cc, Kinds(testGrainDeps())...)
+			c := Build(tc.cc, Telemetry{}, Kinds(testGrainDeps())...)
 			if c.ActorSystem == nil {
 				t.Fatal("Build returned a cluster without an actor system")
 			}
@@ -79,10 +81,46 @@ func TestBuildConstructsCluster(t *testing.T) {
 	}
 }
 
+// TestBuildMetricsToggle proves the single construction path both preserves the
+// zero-value (metrics-off) behavior and turns proto.actor's OpenTelemetry
+// metrics on only when a provider is supplied — and, critically, sets the
+// MetricsEnabled flag alongside the provider (a provider without the flag is a
+// silent no-op). It also confirms the logger factory survives on both paths, so
+// the metrics refactor does not reopen the dead-letter payload leak.
+func TestBuildMetricsToggle(t *testing.T) {
+	cc := Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}
+
+	t.Run("off by default with zero-value Telemetry", func(t *testing.T) {
+		c := Build(cc, Telemetry{}, Kinds(testGrainDeps())...)
+		if c.ActorSystem.Config.MetricsEnabled {
+			t.Error("MetricsEnabled = true for zero-value Telemetry, want false")
+		}
+		if c.ActorSystem.Config.MetricsProvider != nil {
+			t.Error("MetricsProvider set for zero-value Telemetry, want nil")
+		}
+		if c.ActorSystem.Config.LoggerFactory == nil {
+			t.Error("LoggerFactory is nil; proto.actor logging would not join blabby's stream")
+		}
+	})
+
+	t.Run("enabled when a provider is supplied", func(t *testing.T) {
+		c := Build(cc, Telemetry{MeterProvider: noop.NewMeterProvider()}, Kinds(testGrainDeps())...)
+		if !c.ActorSystem.Config.MetricsEnabled {
+			t.Error("MetricsEnabled = false with a provider; the scrape would be empty")
+		}
+		if c.ActorSystem.Config.MetricsProvider == nil {
+			t.Error("MetricsProvider is nil despite a supplied provider")
+		}
+		if c.ActorSystem.Config.LoggerFactory == nil {
+			t.Error("LoggerFactory is nil; proto.actor logging would not join blabby's stream")
+		}
+	})
+}
+
 // TestSubscribeTopologyLogging confirms the subscription is established on the
 // built cluster's EventStream.
 func TestSubscribeTopologyLogging(t *testing.T) {
-	c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Kinds(testGrainDeps())...)
+	c := Build(Config{bindHost: defaultClusterHost, discoveryPort: defaultDiscoveryPort}, Telemetry{}, Kinds(testGrainDeps())...)
 
 	sub := SubscribeTopologyLogging(c)
 	if sub == nil {
@@ -127,7 +165,7 @@ func TestShutdownClientDoesNotPanic(t *testing.T) {
 		t.Fatalf("newClusterConfig: %v", err)
 	}
 
-	c := Build(cc) // a client registers no kinds
+	c := Build(cc, Telemetry{}) // a client registers no kinds
 	c.StartClient()
 	ShutdownClient(c)
 }

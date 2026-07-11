@@ -25,6 +25,12 @@ type Gateway struct {
 	cluster      *cluster.Cluster
 	actorRoot    *actor.RootContext
 
+	// metrics is the Prometheus scrape handler served at GET /metrics on the
+	// internal listener. It is set only when the operator opted in (--metrics);
+	// nil leaves the route unregistered so the path returns 404 — see
+	// RegisterInternalRoutes.
+	metrics http.Handler
+
 	// userGrain is a test seam. Production construction in NewGateway
 	// leaves it nil and userGrainFor falls through to
 	// clusterUserGrainCaller. Non-nil only in tests.
@@ -48,6 +54,11 @@ type Deps struct {
 	Timeline      RoomTimeline
 	Cluster       *cluster.Cluster
 	ActorRoot     *actor.RootContext
+
+	// Metrics is the optional Prometheus scrape handler for the internal
+	// listener. A nil value (the default) leaves GET /metrics unregistered, so
+	// the route returns 404 and the feature stays off.
+	Metrics http.Handler
 }
 
 // NewGateway constructs a Gateway from deps. Production wires all fields.
@@ -63,6 +74,7 @@ func NewGateway(deps Deps) *Gateway {
 		timeline:     deps.Timeline,
 		cluster:      deps.Cluster,
 		actorRoot:    deps.ActorRoot,
+		metrics:      deps.Metrics,
 	}
 }
 
@@ -107,16 +119,31 @@ func (g *Gateway) RegisterRoutes() http.Handler {
 	return mux
 }
 
+// endpointMetrics is the mux pattern for the Prometheus scrape handler on the
+// internal listener. It is registered only when a metrics handler was injected
+// (--metrics); otherwise the path falls through to the 404 catch-all.
+const endpointMetrics = "GET /metrics"
+
 // RegisterInternalRoutes returns the handler for the gateway's internal listener:
 // operational endpoints (scheduled-job triggers) that must not be reachable from the
 // public API. The caller serves this on a separate, network-restricted listener (see
 // cmd/gateway), so these routes never share the public mux.
+//
+// GET /metrics is registered only when g.metrics is non-nil (the operator passed
+// --metrics); with the feature off the path returns 404 like any unknown route.
 func (g *Gateway) RegisterInternalRoutes() http.Handler {
 	mux := http.NewServeMux()
 
 	gcMethod, gcPath := splitMethodPath(endpointPendingAccountGC)
 	mux.HandleFunc(endpointPendingAccountGC, g.handlePendingAccountGC)
 	mux.HandleFunc(gcPath, g.handleMethodNotAllowed(gcMethod))
+
+	if g.metrics != nil {
+		metricsMethod, metricsPath := splitMethodPath(endpointMetrics)
+		mux.Handle(endpointMetrics, g.metrics)
+		mux.HandleFunc(metricsPath, g.handleMethodNotAllowed(metricsMethod))
+	}
+
 	mux.HandleFunc("/", g.handleNotFound)
 	return mux
 }
