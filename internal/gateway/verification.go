@@ -131,7 +131,7 @@ func (s *RegistrationService) Resend(ctx context.Context, params ResendParams) e
 	}
 	if shouldSend {
 		if err := s.sender.Send(ctx, toSend.to, toSend.pin, s.policy.PinTTL); err != nil {
-			slog.Error("resend: pin delivery failed", "error", err)
+			slog.Error("gateway.verification.pin_delivery_failed", "error", err)
 		}
 	}
 	return nil

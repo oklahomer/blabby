@@ -43,13 +43,13 @@ func (g *Gateway) handleRoomCreate(w http.ResponseWriter, r *http.Request) {
 	logRoomEntry(endpointRoomCreate, r.Method, userID, id.RoomID{})
 	info, err := g.roomCreator.CreateRoom(r.Context(), userID, name)
 	if err != nil {
-		slog.Error("room creation failed", "user_id", userID, "error", err.Error())
+		slog.Error("gateway.room.create_failed", "user_id", userID, "error", err.Error())
 		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("room creation unavailable"))
 		return
 	}
 
 	if _, err := g.userGrainFor(userID).JoinRoom(&userpb.JoinRoomRequest{RoomId: info.ID.String()}); err != nil {
-		slog.Warn("room creation: joined-rooms cache warm-up failed",
+		slog.Warn("gateway.room.cache_warmup_failed",
 			"user_id", userID, "room_id", info.ID, "error", err)
 	}
 

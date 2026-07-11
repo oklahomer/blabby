@@ -124,7 +124,7 @@ func (d *UserRepoDirectory) ResolveUserID(ctx context.Context, code id.PublicCod
 		return id.UserID{}, auth.ErrPublicCodeUnknown
 	}
 	if err != nil {
-		slog.Error("resolve user public_code failed", "error", err)
+		slog.Error("gateway.directory.resolve_failed", "error", err)
 		return id.UserID{}, err
 	}
 	return userID, nil
@@ -136,10 +136,10 @@ func (d *UserRepoDirectory) ResolveUserID(ctx context.Context, code id.PublicCod
 func (d *UserRepoDirectory) rehashPassword(ctx context.Context, userID id.UserID, password string) {
 	hash, err := auth.HashPassword(password)
 	if err != nil {
-		slog.Error("password rehash: hash failed", "user_id", userID, "error", err)
+		slog.Error("gateway.password_rehash.hash_failed", "user_id", userID, "error", err)
 		return
 	}
 	if err := d.repo.SetPasswordHash(ctx, d.pool, userID, hash); err != nil {
-		slog.Warn("password rehash: store failed", "user_id", userID, "error", err)
+		slog.Warn("gateway.password_rehash.store_failed", "user_id", userID, "error", err)
 	}
 }

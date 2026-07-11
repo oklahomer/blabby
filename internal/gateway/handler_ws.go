@@ -37,7 +37,7 @@ var wsUpgrader = websocket.Upgrader{
 func (g *Gateway) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
-		slog.Warn("ws.upgrade.failed",
+		slog.Warn("gateway.ws.upgrade_failed",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"remote_addr", r.RemoteAddr,
@@ -61,7 +61,7 @@ func (g *Gateway) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	props := connection.NewProps(conn, g.auth, g.cluster)
 	pid = g.actorRoot.Spawn(props)
-	slog.Info("ws.upgrade.ok",
+	slog.Info("gateway.ws.upgraded",
 		"method", r.Method,
 		"path", r.URL.Path,
 		"remote_addr", r.RemoteAddr,

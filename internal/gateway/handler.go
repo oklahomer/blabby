@@ -91,7 +91,7 @@ func (g *Gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if result == nil || result.Token == "" {
 		// Defensive: a buggy authenticator that returns success with no token
 		// must not produce a 200 with an empty bearer.
-		slog.Error("authenticator returned no token on success path")
+		slog.Error("gateway.login.contract_violation")
 		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("authentication unavailable"))
 		return
 	}
@@ -99,7 +99,7 @@ func (g *Gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(LoginResponse{Token: result.Token}); err != nil {
-		slog.Error("failed to write login response", "error", err)
+		slog.Error("gateway.login.write_failed", "error", err)
 	}
 }
 

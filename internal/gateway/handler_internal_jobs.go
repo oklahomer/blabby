@@ -27,7 +27,7 @@ type PendingAccountGCResponse struct {
 func (g *Gateway) handlePendingAccountGC(w http.ResponseWriter, r *http.Request) {
 	accepted, err := g.maintenance.TriggerPendingAccountGC(r.Context())
 	if err != nil {
-		slog.Error("internal job: pending-account GC trigger failed", "error", err.Error())
+		slog.Error("gateway.job.gc_trigger_failed", "error", err.Error())
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("maintenance unavailable"))
 		return
 	}
@@ -42,6 +42,6 @@ func (g *Gateway) handlePendingAccountGC(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.Error("failed to write internal job response", "error", err)
+		slog.Error("gateway.job.write_failed", "error", err)
 	}
 }

@@ -129,14 +129,14 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 	}
 	req, derr := decodeSendMessageRequest(r, w)
 	if derr != nil {
-		slog.Warn("room handler rejected request",
+		slog.Warn("gateway.room.rejected",
 			"endpoint", endpointRoomMessage, "method", r.Method,
 			"user_id", userID, "room_id", roomID, "reason", derr.reason)
 		WriteErrorResponse(w, httpStatus(derr.detail.Code), derr.detail)
 		return
 	}
 
-	slog.Info("room handler enter",
+	slog.Info("gateway.room.entered",
 		"endpoint", endpointRoomMessage, "method", r.Method,
 		"user_id", userID, "room_id", roomID, "text_len", len(req.Text))
 
@@ -144,7 +144,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 		RoomId: roomID.String(), Text: req.Text,
 	})
 	if err != nil {
-		slog.Warn("room handler transport error",
+		slog.Warn("gateway.room.transport_error",
 			"endpoint", endpointRoomMessage, "method", r.Method,
 			"user_id", userID, "room_id", roomID,
 			"outcome", outcomeTransportError, "text_len", len(req.Text))
@@ -154,7 +154,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 	if pe := resp.GetError(); pe != nil {
 		ed, parseErr := FromProtoErrorDetail(pe)
 		if parseErr != nil {
-			slog.Error("room handler received invalid business error",
+			slog.Error("gateway.room.contract_violation",
 				"endpoint", endpointRoomMessage, "method", r.Method,
 				"user_id", userID, "room_id", roomID,
 				"code", pe.GetCode(), "status", pe.GetStatus(),
@@ -162,7 +162,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 			WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("internal server error"))
 			return
 		}
-		slog.Info("room handler exit",
+		slog.Info("gateway.room.exited",
 			"endpoint", endpointRoomMessage, "method", r.Method,
 			"user_id", userID, "room_id", roomID,
 			"outcome", outcomeBusinessError, "code", ed.Code, "text_len", len(req.Text))
@@ -174,7 +174,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 	if pt := resp.GetTimestamp(); pt != nil {
 		ts = pt.AsTime().UnixMilli()
 	}
-	slog.Info("room handler exit",
+	slog.Info("gateway.room.exited",
 		"endpoint", endpointRoomMessage, "method", r.Method,
 		"user_id", userID, "room_id", roomID,
 		"outcome", outcomeOK, "code", 0, "text_len", len(req.Text))
@@ -188,7 +188,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 func authenticatedUserID(w http.ResponseWriter, r *http.Request, endpoint string) (id.UserID, bool) {
 	userID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
-		slog.Error("auth context missing on protected route",
+		slog.Error("gateway.auth.context_missing",
 			"endpoint", endpoint, "method", r.Method)
 		WriteErrorResponse(w, http.StatusInternalServerError,
 			ErrInternalError("authentication context unavailable"))
@@ -204,7 +204,7 @@ func authenticatedUserID(w http.ResponseWriter, r *http.Request, endpoint string
 func (g *Gateway) requireRoomID(w http.ResponseWriter, r *http.Request, endpoint string, userID id.UserID) (id.RoomID, bool) {
 	code, err := id.ParseRoomCode(r.PathValue("id"))
 	if err != nil {
-		slog.Warn("room handler rejected request",
+		slog.Warn("gateway.room.rejected",
 			"endpoint", endpoint, "method", r.Method,
 			"user_id", userID, "reason", "invalid_room_code")
 		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("room id is invalid"))
@@ -213,7 +213,7 @@ func (g *Gateway) requireRoomID(w http.ResponseWriter, r *http.Request, endpoint
 	roomID, err := g.rooms.Resolve(r.Context(), code)
 	switch {
 	case errors.Is(err, persistence.ErrRoomNotFound):
-		slog.Warn("room handler rejected request",
+		slog.Warn("gateway.room.rejected",
 			"endpoint", endpoint, "method", r.Method,
 			"user_id", userID, "reason", "room_not_found")
 		WriteErrorResponse(w, http.StatusNotFound, ErrRoomNotFound("room not found"))
@@ -324,7 +324,7 @@ func writeJSON(w http.ResponseWriter, httpStatus int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Error("failed to write room handler response", "error", err)
+		slog.Error("gateway.room.write_failed", "error", err)
 	}
 }
 
@@ -338,14 +338,14 @@ func writeJSON(w http.ResponseWriter, httpStatus int, v any) {
 func writeBusinessErrorResponse(w http.ResponseWriter, endpoint, method string, userID id.UserID, roomID id.RoomID, pe *commonpb.ErrorDetail) {
 	ed, err := FromProtoErrorDetail(pe)
 	if err != nil {
-		slog.Error("room handler received invalid business error",
+		slog.Error("gateway.room.contract_violation",
 			"endpoint", endpoint, "method", method,
 			"user_id", userID, "room_id", roomID,
 			"code", pe.GetCode(), "status", pe.GetStatus(), "error", err)
 		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("internal server error"))
 		return
 	}
-	slog.Info("room handler exit",
+	slog.Info("gateway.room.exited",
 		"endpoint", endpoint, "method", method,
 		"user_id", userID, "room_id", roomID,
 		"outcome", outcomeBusinessError, "code", ed.Code)
@@ -353,20 +353,20 @@ func writeBusinessErrorResponse(w http.ResponseWriter, endpoint, method string, 
 }
 
 func logRoomEntry(endpoint, method string, userID id.UserID, roomID id.RoomID) {
-	slog.Info("room handler enter",
+	slog.Info("gateway.room.entered",
 		"endpoint", endpoint, "method", method,
 		"user_id", userID, "room_id", roomID)
 }
 
 func logRoomExit(endpoint, method string, userID id.UserID, roomID id.RoomID, outcome string, code int) {
-	slog.Info("room handler exit",
+	slog.Info("gateway.room.exited",
 		"endpoint", endpoint, "method", method,
 		"user_id", userID, "room_id", roomID,
 		"outcome", outcome, "code", code)
 }
 
 func logRoomTransportError(endpoint, method string, userID id.UserID, roomID id.RoomID) {
-	slog.Warn("room handler transport error",
+	slog.Warn("gateway.room.transport_error",
 		"endpoint", endpoint, "method", method,
 		"user_id", userID, "room_id", roomID,
 		"outcome", outcomeTransportError)
