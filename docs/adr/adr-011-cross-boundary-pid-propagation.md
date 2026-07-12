@@ -101,10 +101,10 @@ Concrete current applications:
 
 - **User grain `RegisterConnection`:** UserConnection actors register their PID with the User grain so the grain can fan out `ForwardMessage` and `NotifyRoomEvent` to every active connection.
 - **UserConnection actor (producer side):** When invoking `RegisterConnection`, MUST set `requester_pid` to a `PID` populated from `ctx.Self()` (`Address` and `Id`).
+- **User grain `RegisterConnection` (response side):** the response carries the responding activation's own PID (`grain_pid`, populated from the grain's `ctx.Self()`) so the UserConnection can watch the activation and re-register when it dies — the reverse half of the bidirectional watch ([ADR-006](adr-006-bidirectional-watch-pattern.md)).
 
 Likely future applications (re-derive when reaching them, but expect the same answer):
 
-- **Grain reactivation on node failure:** Bidirectional watch — if a grain needs to watch an outside actor and react to its termination, the watch target's PID needs to be carried in the watch-establish message via the same mechanism.
 - Any later feature where a regular actor subscribes to grain-emitted events.
 
 ## References

@@ -50,8 +50,9 @@ primitive, and each survivor knows exactly one repair action.**
 - Re-registration uses the existing idempotent register path; watch eviction
   on the grain side (ADR-012) is unchanged. Each direction heals
   independently, with no coordination between them.
-- The silent-delivery-loss window is one death-watch propagation delay — the
-  same bound in both directions.
+- The silent-delivery-loss window is one death-watch propagation delay plus
+  one re-register round trip, rather than "until the client happens to
+  reconnect".
 
 ## Consequences
 
