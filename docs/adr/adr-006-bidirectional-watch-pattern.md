@@ -1,6 +1,7 @@
 # ADR-006: Bidirectional watch pattern — why both sides watch each other for self-healing
 
-- **Status:** Proposed
+- **Status:** Accepted
+- **Date:** 2026-07-12
 - **Related:** [ADR-012](adr-012-watch-based-connection-lifecycle.md), [ADR-001](adr-001-grain-topology.md)
 
 ## Context
@@ -13,49 +14,44 @@ or gateway process, the grain with its passivation timeout or its host node.
 A reference to a dead counterpart is worse than no reference: it fails
 silently, message by message.
 
-One direction of this problem is solved and shipped.
-[ADR-012](adr-012-watch-based-connection-lifecycle.md) has the User grain
-`Watch` each registered connection and evict the PID on `*actor.Terminated`
-— a connection's death, however it happens, heals the grain's view.
-
-The reverse direction is not yet implemented, and the gap is observable:
-when a User grain passivates or its node is lost, the connections that were
-registered with it remain alive and unaware. The next *command* heals the
-grain — any message addressed to it triggers reactivation, and the command
-side recovers (the recovery path today is client-driven: a grain call times
-out or fails, the socket closes, the client reconnects and re-registers). But
-*deliveries* have no such trigger. A reactivated User grain starts with an
-empty connection set ([ADR-010](adr-010-eventual-consistency-model.md)), so
-room fan-outs addressed to that user vanish silently until the client happens
-to reconnect. The user sits at a live socket receiving nothing, with no
-signal that anything is wrong.
+The two directions fail differently. A dead connection leaves the grain
+fanning out to a socket that no longer exists. A dead grain activation is
+subtler: commands are inherently self-healing, because any message addressed
+to the grain's identity triggers reactivation — but a reactivated User grain
+starts with an empty connection set
+([ADR-010](adr-010-eventual-consistency-model.md)), and *deliveries* have no
+trigger of their own. A user who is reading, not typing, generates no
+failing call that would surface the problem: without a server-side repair,
+that user sits at a live socket receiving nothing until the client happens
+to reconnect.
 
 ## Decision
 
-**Make the watch bidirectional: in addition to the shipped
-grain-watches-connection direction, the UserConnection actor watches its User
-grain's activation and re-registers when the activation dies.**
+**The watch is bidirectional: each side watches the other through the same
+primitive, and each survivor knows exactly one repair action.**
 
-The proposed reverse direction:
-
-- On successful registration, the UserConnection obtains the PID of the User
-  grain's current activation and calls `ctx.Watch` on it. (The registration
-  response is the natural carrier for the activation PID, consistent with
+- The User grain `Watch`es every registered connection PID and evicts it on
+  `*actor.Terminated` — a connection's death, however it happens, heals the
+  grain's view. [ADR-012](adr-012-watch-based-connection-lifecycle.md)
+  details this direction.
+- In the reverse direction, the registration response carries the responding
+  activation's own PID (`grain_pid`, populated from the grain's `ctx.Self()`
+  — the registration response is the natural carrier, consistent with
   passing PIDs in payloads per
-  [ADR-011](adr-011-cross-boundary-pid-propagation.md).)
-- When `*actor.Terminated` for the grain's activation arrives, the connection
+  [ADR-011](adr-011-cross-boundary-pid-propagation.md)), and the
+  UserConnection calls `ctx.Watch` on it.
+- When `*actor.Terminated` for the watched activation arrives, the connection
   re-issues `RegisterConnection`. Addressing the grain by identity reactivates
   it — possibly on another node — and the fresh activation learns about this
-  connection immediately instead of at the client's next reconnect.
+  connection immediately instead of at the client's next reconnect. Every new
+  activation PID gets a fresh watch; a bounded number of failed re-register
+  attempts closes the connection, so the client's reconnect remains the
+  fallback layer beneath the self-healing one.
 - Re-registration uses the existing idempotent register path; watch eviction
   on the grain side (ADR-012) is unchanged. Each direction heals
   independently, with no coordination between them.
-- The silent-delivery-loss window shrinks from "until the client reconnects"
-  to one death-watch propagation delay — the same bound ADR-012 already
-  accepts in the other direction.
-
-This ADR stays **Proposed** until that reverse direction ships; it is the
-design intent the implemented half was built to compose with.
+- The silent-delivery-loss window is one death-watch propagation delay — the
+  same bound in both directions.
 
 ## Consequences
 
@@ -76,13 +72,12 @@ design intent the implemented half was built to compose with.
 - **Watching an activation, not an identity.** The grain-side PID names one
   activation; every reactivation requires a fresh watch. Getting this subtly
   wrong (watching a stale PID, racing a reactivation) produces exactly the
-  silent gap the pattern is meant to close, so the implementation needs
-  deliberate failover tests.
+  silent gap the pattern closes, so deliberate failover tests guard the
+  fresh-watch discipline.
 - **Re-registration storms are possible.** A node loss kills many activations
   at once; every affected connection re-registers near-simultaneously, and
-  each re-registration reactivates a grain. Acceptable at Phase 1 scale, but
-  the implementation should consider jitter if measurement shows thundering
-  herds.
+  each re-registration reactivates a grain. Acceptable at current scale;
+  jitter is worth adding only if measurement shows thundering herds.
 - **A second moving part per session.** Each connection carries watch state
   and a repair path that must be reasoned about alongside the auth and pump
   lifecycles it already manages.
@@ -97,14 +92,14 @@ design intent the implemented half was built to compose with.
 
 ## Alternatives considered
 
-### Client-driven recovery only (the current state)
+### Client-driven recovery only
 
 Rely on command failures to surface grain death: a grain call fails, the
-connection closes, the client reconnects. Shipped today and acceptable for
-Phase 1, but it converts a server-side, detectable event into user-visible
-silence for delivery-only sessions (a user who is reading, not typing, has no
-failing command to trip recovery). Kept as the fallback layer, not the
-design.
+connection closes, the client reconnects. Simple, but it converts a
+server-side, detectable event into user-visible silence for delivery-only
+sessions (a user who is reading, not typing, has no failing command to trip
+recovery). Kept as the fallback layer — a connection that exhausts its
+re-register attempts closes so the client reconnects — not the design.
 
 ### Periodic re-registration heartbeat
 
@@ -123,10 +118,11 @@ belongs to the live actors that embody it.
 
 ## References
 
-- [ADR-012](adr-012-watch-based-connection-lifecycle.md) — the implemented
-  half: grain watches connection, evicts on Terminated.
+- [ADR-012](adr-012-watch-based-connection-lifecycle.md) — the
+  grain-watches-connection half: watch the registered PID, evict on
+  Terminated.
 - [ADR-011](adr-011-cross-boundary-pid-propagation.md) — the PID-in-payload
-  mechanism the registration response would extend.
+  mechanism the registration response extends.
 - [ADR-010](adr-010-eventual-consistency-model.md) — the unpersisted-state
   honesty this pattern narrows but does not replace.
 - `internal/grain/user/state.go` — the connection set that re-registration

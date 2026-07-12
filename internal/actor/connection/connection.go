@@ -4,9 +4,13 @@
 //
 // Auth happens after WebSocket upgrade as the first text frame, not via
 // HTTP headers (see ADR-003). On successful auth the actor registers with
-// the user's grain so that Room-grain fan-outs reach the WebSocket. On
-// disconnect the actor stops; the User grain learns via a death-watch and
-// evicts the entry on its own (ADR-012). There is no Deregister RPC.
+// the user's grain so that Room-grain fan-outs reach the WebSocket. The
+// watch between the two is bidirectional (ADR-006). On disconnect the actor
+// stops; the User grain learns via a death-watch and evicts the entry on its
+// own (ADR-012) — there is no Deregister RPC. In return the actor watches
+// the grain activation it registered with and re-registers when that
+// activation dies, so deliveries survive a grain relocation without a
+// client reconnect.
 package connection
 
 import (

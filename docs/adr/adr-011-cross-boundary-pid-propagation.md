@@ -113,4 +113,4 @@ Likely future applications (re-derive when reaching them, but expect the same an
 - `internal/grain/user/sender_pid_test.go` — the regression test that empirically disproved the `ctx.Sender()` approach and now verifies the PID-in-payload design (single-device, multi-device, re-registration).
 - `cluster/default_context.go:98` (protoactor-go `v0.0.0-20260118094027-288962e52f3f`) — `cluster.Request` always uses `RequestFuture` internally; this is what makes `ctx.Sender()` always be a future PID for cluster grain RPC.
 - [ADR-004](adr-004-message-routing-through-user-grain.md) — Message routing through User grain; this ADR provides the PID-passing mechanics ADR-004 depends on.
-- [ADR-006](adr-006-bidirectional-watch-pattern.md) — Bidirectional watch; the same mechanics will apply when watches need to target outside actors.
+- [ADR-006](adr-006-bidirectional-watch-pattern.md) — Bidirectional watch; the registration response's `grain_pid` uses these same mechanics so the connection can watch the grain activation.
