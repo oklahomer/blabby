@@ -42,8 +42,7 @@ connection lifecycle design.
 
 Each tour follows one theme through the codebase: what the Proto.Actor
 feature does, where blabby uses it, why it took that shape, and a hands-on
-step you can run. Tours land one pull request at a time; names below become
-links as each file arrives.
+step you can run.
 
 | Tour | Proto.Actor features | Key code |
 |---|---|---|
@@ -53,7 +52,7 @@ links as each file arrives.
 | [reentrancy-and-timers.md](reentrancy-and-timers.md) | `ReenterAfter`, futures, `TimerScheduler` | `internal/grain/maintenance`, `internal/actor/connection` |
 | [observability.md](observability.md) | EventStream, dead letters, throttle, logger factory, metrics | `internal/clusterboot`, `internal/telemetry`, `internal/middleware` |
 | [cluster-bootstrap.md](cluster-bootstrap.md) | member vs client, automanaged provider, disthash, remote | `internal/clusterboot` |
-| roads-not-taken.md | pub-sub, routers, Proto.Persistence, receive-timeout, mailboxes | comparisons rather than tours |
+| [roads-not-taken.md](roads-not-taken.md) | pub-sub, routers, Proto.Persistence, receive-timeout, mailboxes | comparisons rather than tours |
 
 ## Design decisions
 
