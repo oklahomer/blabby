@@ -1,0 +1,40 @@
+@startuml
+' Rendered to fanout.svg by .github/workflows/plantuml.yml (docs/ABC.puml →
+' docs/ABC.svg). Keep @startuml bare: a named @startuml would override the
+' output filename and break that convention. To preview locally, run
+' `make diagrams` (same pinned renderer as CI; see PLANTUML_IMAGE in the
+' Makefile).
+'
+' Source of truth: internal/grain/room/fanout.go (jobs, dispatcher, worker)
+' and room.go (spawn site, command handlers). ADR-015 carries the design.
+
+participant "Sender's\nUser grain" as sender
+participant "Room grain" as room
+participant "Fan-out child\n(long-lived worker)" as worker
+participant "Each member's\nUser grain" as member
+database "PostgreSQL" as db
+
+sender -> room : PostMessage
+room -> room : validate membership
+room -> db : persist the message
+room -> room : snapshot recipients,\nbuild immutable payload
+room -> worker : Send(fanout job)\n(fire and forget)
+room --> sender : PostMessageResponse
+
+note over sender, worker
+  The grain's mailbox is free the moment the job is queued.
+  The sender's own echo below therefore cannot deadlock:
+  it targets a User grain that is no longer blocked on the
+  Room grain's reply. (ADR-015)
+end note
+
+loop for every member, the sender included
+  worker -> member : ForwardMessage
+  member -> member : deliver to each\nregistered connection
+end
+note right of worker
+  Best effort: a failed recipient is
+  logged (grain.fanout.error) and
+  skipped, never aborting the rest.
+end note
+@enduml
