@@ -402,6 +402,14 @@ func (uc *UserConnection) postAuthBehavior(ctx actor.Context) {
 		if !samePID(msg.Who, uc.grainPID) {
 			return
 		}
+		// A pending retry means a repair cycle is already in flight for this
+		// same dead activation (grainPID only rotates on success). A duplicate
+		// death signal — a real Terminated plus an endpoint-terminated
+		// translation, say — must not start a second chain and orphan the
+		// pending timer's cancel handle.
+		if uc.reregisterRetryCancel != nil {
+			return
+		}
 		grainPID, err := uc.reregister(ctx)
 		if err != nil {
 			if uc.recordReregisterFailure(ctx, err) {

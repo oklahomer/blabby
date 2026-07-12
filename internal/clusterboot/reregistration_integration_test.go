@@ -169,7 +169,12 @@ func dialUserConnection(t *testing.T, gateway *cluster.Cluster, authenticator au
 		t.Fatalf("dial websocket: %v", err)
 	}
 	t.Cleanup(func() { _ = ws.Close() })
-	pid := <-pidCh
+	var pid *actor.PID
+	select {
+	case pid = <-pidCh:
+	case <-time.After(multiMemberTimeout):
+		t.Fatal("UserConnection actor was not spawned; the WebSocket upgrade likely failed")
+	}
 	t.Cleanup(func() { _ = gateway.ActorSystem.Root.PoisonFuture(pid).Wait() })
 	return ws, pid
 }
@@ -227,14 +232,23 @@ func readWSMessageWithText(t *testing.T, ws *websocket.Conn, wantText string) {
 	}
 }
 
-// waitForLogEvent polls the captured log stream for event; the emitting actor
-// runs on its own mailbox goroutine, so the assertion has to wait.
+// waitForLogEvent polls the captured log stream until a line's msg equals
+// event; the emitting actor runs on its own mailbox goroutine, so the
+// assertion has to wait. Unlike captureLines, unparseable lines are skipped
+// rather than fatal: polling races the writers, so the final line can be
+// mid-write.
 func waitForLogEvent(t *testing.T, logs *logcapture.Buffer, event string) {
 	t.Helper()
 	requireEventually(t, "observe log event "+event, func() error {
-		if !strings.Contains(logs.String(), event) {
-			return errors.New("event not observed yet")
+		for _, raw := range strings.Split(logs.String(), "\n") {
+			var line map[string]any
+			if err := json.Unmarshal([]byte(raw), &line); err != nil {
+				continue
+			}
+			if line["msg"] == event {
+				return nil
+			}
 		}
-		return nil
+		return errors.New("event not observed yet")
 	})
 }

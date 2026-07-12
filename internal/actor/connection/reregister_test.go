@@ -159,6 +159,39 @@ func TestReregisterExhaustionClosesConnection(t *testing.T) {
 	expectActorStops(t, sess.system, sess.pid, 2*time.Second)
 }
 
+func TestDuplicateTerminatedDuringPendingRetryIsIgnored(t *testing.T) {
+	grain := &recordingGrainCaller{}
+	sess := startSession(t, aliceAuthenticator(), grain,
+		WithReregisterRetryDelay(150*time.Millisecond))
+	activation1 := spawnStubActivation(t, sess.system)
+	activation2 := spawnStubActivation(t, sess.system)
+	grain.enqueue(
+		registerReply{resp: respWithGrainPid(activation1)}, // auth-time registration
+		registerReply{err: errors.New("boom")},             // first repair attempt fails
+		registerReply{resp: respWithGrainPid(activation2)}, // the scheduled retry succeeds
+	)
+
+	authenticate(t, sess)
+	_ = sess.system.Root.PoisonFuture(activation1).Wait()
+	grain.waitForCalls(t, 2, 2*time.Second)
+
+	// A duplicate death signal for the same dead activation, arriving while
+	// the retry is pending. Without the dispatch-site guard this would start
+	// a second repair chain and orphan the pending timer, whose tick would
+	// then drive an extra attempt.
+	sess.system.Root.Send(sess.pid, &actor.Terminated{
+		Who: &actor.PID{Address: activation1.Address, Id: activation1.Id},
+	})
+
+	// Exactly three calls: auth, the failed attempt, the retried success.
+	grain.waitForCalls(t, 3, 2*time.Second)
+	time.Sleep(300 * time.Millisecond) // an orphaned timer would fire in here
+	if calls := grain.snapshot(); len(calls) != 3 {
+		t.Fatalf("RegisterConnection calls after duplicate Terminated: got %d, want 3", len(calls))
+	}
+	assertDeliveryFlows(t, sess, "after-duplicate-terminated")
+}
+
 func TestNilGrainPidAtAuthProceedsWithoutWatch(t *testing.T) {
 	buf := logcapture.JSON(t, slog.LevelDebug)
 	grain := &recordingGrainCaller{} // default reply carries no grain_pid
