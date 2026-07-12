@@ -6,7 +6,9 @@ ASYNCAPI_PORT ?= 8082
 # Pinned PlantUML renderer. .github/workflows/plantuml.yml and the ci.yml
 # freshness check read this variable, so local and CI rendering always use the
 # same version — different PlantUML versions emit different SVG bytes for the
-# same source, which would make the freshness check flap.
+# same source, which would make the freshness check flap. The Makefile is in
+# the render workflow's path trigger for the same reason: bumping this pin
+# re-renders every diagram with the new version.
 PLANTUML_IMAGE = ghcr.io/plantuml/plantuml:1.2026.6
 
 # Dev database credentials used by db-shell; match the docker-compose.yml defaults.

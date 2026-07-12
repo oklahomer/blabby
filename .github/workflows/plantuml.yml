@@ -1,14 +1,22 @@
 name: Render PlantUML
 
 # Renders every tracked .puml file to a same-named .svg beside it
-# (docs/ABC.puml → docs/ABC.svg) and commits the result back to the pushed
-# branch, so markdown can link the .svg and the .puml stays the source of
-# truth.
+# (docs/ABC.puml → docs/ABC.svg), prunes tracked .svg files whose source is
+# gone, and commits the result back to the pushed branch, so markdown can
+# link the .svg and the .puml stays the source of truth.
 #
-# Trigger design: the workflow fires only on pushes that touch a .puml file,
-# and the bot commit contains only .svg files, so the commit cannot retrigger
-# the workflow. Rendering covers ALL tracked .puml files (not just the changed
-# ones) — the pinned renderer is deterministic, so unchanged sources produce
+# Trigger design: the workflow fires on branch pushes that touch a .puml file
+# or the Makefile (which carries the PLANTUML_IMAGE pin — a version bump must
+# re-render everything, or the ci.yml freshness check would fail with nothing
+# to repair it). The bot commit contains only .svg files, so it cannot
+# retrigger the workflow. The trigger is constrained to branches, and the job
+# additionally guards on ref_type: paths filters are not evaluated for tag
+# pushes, and a run on a tag ref would make the push step create a branch
+# named after the tag (workflow_dispatch can also be pointed at a tag, which
+# is why the filter alone is not enough).
+#
+# Rendering covers ALL tracked .puml files (not just the changed ones) — the
+# pinned renderer is deterministic, so unchanged sources produce
 # byte-identical .svg output and the empty-diff guard below skips the commit.
 # That keeps the file-selection logic trivial and self-heals any diagram a
 # previous run missed.
@@ -27,7 +35,10 @@ name: Render PlantUML
 
 on:
   push:
-    paths: ["**/*.puml"]
+    branches: ["**"]
+    paths:
+      - "**/*.puml"
+      - "Makefile"
   workflow_dispatch:
 
 permissions:
@@ -42,6 +53,7 @@ concurrency:
 
 jobs:
   render:
+    if: github.ref_type == 'branch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,14 +62,27 @@ jobs:
         id: image
         run: echo "image=$(sed -n 's/^PLANTUML_IMAGE *= *//p' Makefile)" >> "$GITHUB_OUTPUT"
 
+      # Every tracked .svg is a render of its sibling .puml (declared
+      # generated in .gitattributes); one without a source is a leftover from
+      # a deleted or renamed diagram and gets pruned here, staged for the
+      # commit step below.
+      - name: Prune SVGs whose .puml source is gone
+        run: |
+          for svg in $(git ls-files '*.svg'); do
+            if [ ! -f "${svg%.svg}.puml" ]; then
+              echo "Pruning orphaned $svg (no ${svg%.svg}.puml)"
+              git rm --quiet -- "$svg"
+            fi
+          done
+
       - name: Render all tracked .puml files
         run: |
           files=$(git ls-files '*.puml')
           if [ -z "$files" ]; then
             echo "No .puml files tracked; nothing to render."
-            exit 0
+          else
+            docker run --rm -v "$PWD:/data" "${{ steps.image.outputs.image }}" -tsvg $files
           fi
-          docker run --rm -v "$PWD:/data" "${{ steps.image.outputs.image }}" -tsvg $files
 
       - name: Commit rendered SVGs
         run: |
