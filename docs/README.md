@@ -48,8 +48,8 @@ links as each file arrives.
 | Tour | Proto.Actor features | Key code |
 |---|---|---|
 | [actors-and-grains.md](actors-and-grains.md) | regular actors, virtual actors (grains), PIDs vs identities, grain codegen, typed clients | `internal/actor/connection`, `internal/grain/` |
-| supervision.md | guardians, supervisor strategies, directives | `internal/supervision`, `internal/grain/room/supervision.go` |
-| lifecycle-and-passivation.md | death watch, `Terminated`, passivation, `Stop` vs `Poison` | `internal/grain/user`, `internal/middleware/terminated.go` |
+| [supervision.md](supervision.md) | guardians, supervisor strategies, directives | `internal/supervision`, `internal/grain/room/supervision.go` |
+| [lifecycle-and-passivation.md](lifecycle-and-passivation.md) | death watch, `Terminated`, passivation, `Stop` vs `Poison` | `internal/grain/user`, `internal/middleware/terminated.go` |
 | reentrancy-and-timers.md | `ReenterAfter`, futures, `TimerScheduler` | `internal/grain/maintenance`, `internal/actor/connection` |
 | observability.md | EventStream, dead letters, throttle, logger factory, metrics | `internal/clusterboot`, `internal/telemetry`, `internal/middleware` |
 | [cluster-bootstrap.md](cluster-bootstrap.md) | member vs client, automanaged provider, disthash, remote | `internal/clusterboot` |

@@ -1,0 +1,37 @@
+@startuml
+' Rendered to passivation.svg by .github/workflows/plantuml.yml (docs/ABC.puml
+' → docs/ABC.svg). Keep @startuml bare: a named @startuml would override the
+' output filename and break that convention. To preview locally, run
+' `make diagrams` (same pinned renderer as CI; see PLANTUML_IMAGE in the
+' Makefile).
+'
+' Source of truth: the generated grain wrapper (gen/*_grain.pb.go:
+' SetReceiveTimeout on start, Poison(self) on *actor.ReceiveTimeout) and
+' protoactor-go's disthash placement actor, which watches each activation
+' and broadcasts ActivationTerminated when it stops.
+
+participant "Caller\n(gateway or another grain)" as caller
+participant "Cluster placement\n(disthash, per member)" as placement
+participant "User grain\nactivation" as grain
+database "PostgreSQL" as db
+
+== Activation on first message ==
+caller -> placement : first message for identity "alice"
+placement -> grain : spawn activation on the owning member
+grain -> grain : SetReceiveTimeout(kind's\npassivation timeout)
+grain -> db : hydrate durable state (Init)
+grain --> caller : response
+
+== Idle passivation ==
+... no messages for the kind's timeout (User: 2 min, Room: 5 min) ...
+grain -> grain : actor.ReceiveTimeout arrives
+grain -> grain : Poison(self): drain the\nmailbox, then stop
+placement -> placement : watch fires Terminated(activation)
+placement -> placement : broadcast ActivationTerminated\nso every member forgets the PID
+
+== Re-activation on the next message ==
+caller -> placement : next message for "alice"
+placement -> grain : fresh activation\n(possibly on another member)
+grain -> db : hydrate again
+grain --> caller : response
+@enduml
