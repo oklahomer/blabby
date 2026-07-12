@@ -5,58 +5,18 @@ A small, real-time group-chat system built on [Proto.Actor](https://proto.actor/
 What makes it worth a look:
 
 - **Grain-per-entity modelling.** Each user and each room is a virtual actor with single-threaded state — no locks, no shared mutable maps. Commands route through a user's own grain to room grains.
+- **Guided feature tours.** Seven hands-on documents walk the Proto.Actor features the code exercises — actors and grains, supervision, lifecycle and passivation, reentrancy and timers, observability — each ending in a step you can run against the live system. Start at the [documentation hub](docs/README.md).
 - **A clean client contract.** HTTP for commands and queries, a WebSocket for the real-time event stream, JSON on the wire, JWT for identity.
 - **Decisions written down.** Non-obvious choices live in [Architecture Decision Records](docs/adr/), each with context and consequences.
 - **Clone-and-run.** Generated protobuf code is committed and a terminal client ships in the same module; the only runtime dependency is PostgreSQL, started with a single `docker compose up -d postgres` — no broker, no cache.
 
 ## Architecture
 
-A stateless **gateway** (`cmd/gateway`) fronts a cluster of grains hosted by the **backend** (`cmd/backend`). Clients speak HTTP + WebSocket to the gateway; everything behind it is actors. The two are separate binaries: the gateway joins the cluster as a *client* (it calls grains but hosts none), the backend joins as a *member* (it hosts the grains), so the API tier and the grain tier scale independently.
+![Component view: client, gateway tier with its two listeners, backend tier with the three grains, PostgreSQL](docs/architecture.svg)
 
-```mermaid
-flowchart LR
-    TUI["TUI client<br/>cmd/client"]
-    subgraph GATEWAY["Gateway tier — cmd/gateway (cluster client)"]
-        GW["Gateway<br/>HTTP + WebSocket"]
-        UC["UserConnection actor<br/>(one per WebSocket)"]
-    end
-    subgraph BACKEND["Backend tier — cmd/backend (cluster member)"]
-        UG["User grain"]
-        RG["Room grain"]
-    end
-    TUI -- "HTTP: POST /login, PUT/DELETE membership, POST messages" --> GW
-    TUI <-- "WebSocket events: message, joined, left" --> GW
-    GW -- "spawns per socket" --> UC
-    UC -- "RegisterConnection (PID in body)" --> UG
-    UG -- "route join / leave / send" --> RG
-    RG -- "fan-out to members" --> UG
-    UG -- "ForwardMessage / NotifyRoomEvent (cross-tier)" --> UC
-```
+A stateless **gateway** (`cmd/gateway`) fronts a cluster of grains hosted by the **backend** (`cmd/backend`): clients speak HTTP and WebSocket to the gateway, and everything behind it is actors. The two are separate binaries — the gateway joins the cluster as a *client* and hosts one `UserConnection` actor per socket, the backend joins as a *member* and hosts the `User`, `Room`, and `Maintenance` grains — so the API tier and the grain tier scale independently. Durable state lives in PostgreSQL; grain memory is a cache over it.
 
-- **Gateway** (`cmd/gateway`) — translates client JSON/WebSocket frames to and from grain calls, validates JWTs, and shapes structured error responses. It joins the cluster as a client and hosts the per-connection UserConnection actors.
-- **UserConnection actor** — one per WebSocket connection; it authenticates, registers itself with the user's grain, and writes events back to the socket. It is a regular actor, not a grain.
-- **User grain** (`cmd/backend`) — a user's agent inside the cluster: it holds the set of that user's live connections and routes the user's commands to room grains.
-- **Room grain** (`cmd/backend`) — owns room membership and the message pipeline; it stamps each message with a server timestamp and fans events out to every member (the sender included, so other devices echo).
-
-For a deeper view, see the end-to-end [sequence diagram](docs/overall.svg) (source: [`docs/overall.puml`](docs/overall.puml)) and [`docs/userconnection_design_en.md`](docs/userconnection_design_en.md) (the connection lifecycle).
-
-## API Contracts
-
-The client-facing contracts are defined by [`api/openapi.yaml`](api/openapi.yaml) for HTTP commands and queries and [`api/asyncapi.yaml`](api/asyncapi.yaml) for the WebSocket event stream.
-
-To browse both contracts from one local landing page, run:
-
-```bash
-make docs-preview
-```
-
-Then open [http://localhost:8081](http://localhost:8081). The preview requires Node.js and `npx`; it uses the same Redocly and AsyncAPI CLI packages as `make spec-lint`, downloading them into the npm cache on first use. No generated documentation is written into the repository.
-
-Override the two local ports when needed:
-
-```bash
-DOCS_PORT=9081 ASYNCAPI_PORT=9082 make docs-preview
-```
+The [technical documentation](docs/README.md) carries the depth: the tier model with its decision records, seven guided feature tours, and the [message-flow sequence diagram](docs/overall.svg) from login through fan-out to self-healing.
 
 ## Quick Start
 
@@ -109,60 +69,14 @@ That's the whole loop — from a fresh clone to exchanging messages in a few min
 
 Want to run several gateways and backends that discover each other and route messages across nodes? See [`docs/multi-node-cluster.md`](docs/multi-node-cluster.md) for a runnable walk-through.
 
-**Metrics (optional).** Both binaries can expose Proto.Actor's OpenTelemetry metrics — actor spawn/restart/failure counts, mailbox and dead-letter counters, cluster member count — as a Prometheus scrape endpoint. Pass `--metrics` to the gateway to serve `GET /metrics` on its internal listener (`curl localhost:9090/metrics` with the default `--internal-listen`), or `--metrics-listen 127.0.0.1:9464` to the backend to open a dedicated operational listener (`curl localhost:9464/metrics`). Both are unauthenticated, so keep them network-restricted. See [ADR-022](docs/adr/adr-022-protoactor-metrics-exposure.md).
+**Metrics (optional).** Pass `--metrics` to the gateway or `--metrics-listen 127.0.0.1:9464` to the backend to expose Proto.Actor's built-in metrics as a Prometheus scrape endpoint; the [observability tour](docs/observability.md) covers what you get and how it is wired.
 
-## Project Structure
+## Documentation
 
-```
-blabby/
-├── cmd/
-│   ├── backend/        # Grain tier — cluster member hosting the User and Room grains
-│   ├── gateway/        # API tier — HTTP/WebSocket front end; joins the cluster as a client
-│   ├── client/         # Terminal (TUI) chat client
-│   └── docs-preview/   # Local browser preview for the API contracts
-├── internal/
-│   ├── grain/
-│   │   ├── user/       # User grain — connection set + command routing
-│   │   └── room/       # Room grain — membership + message fan-out
-│   ├── actor/
-│   │   └── connection/ # UserConnection actor — bridges a WebSocket to the User grain
-│   ├── gateway/        # HTTP/WebSocket gateway, auth middleware, error envelope
-│   ├── auth/           # Authenticator interface + JWT impl + in-memory user store
-│   ├── id/             # UserID / RoomID value types, parsed once at boundaries
-│   ├── logging/        # slog JSON setup
-│   ├── middleware/     # Receiver middleware for structured grain/actor logging
-│   ├── persistence/    # Placeholder for a future durable store (not wired yet)
-│   └── testutil/
-│       ├── grain/      # Grain unit-test helpers (fake grain context, etc.)
-│       └── cluster/    # In-process test cluster bootstrap
-├── proto/              # Protobuf service + message definitions
-├── gen/                # Generated Go from proto (committed — clone and build)
-├── api/                # API specs: openapi.yaml (HTTP) + asyncapi.yaml (WebSocket)
-└── docs/
-    └── adr/            # Architecture Decision Records
-```
-
-## Code Generation
-
-blabby uses [buf](https://buf.build/) to orchestrate protobuf code generation with two plugins:
-
-1. **`buf.build/protocolbuffers/go`** generates Go structs for protobuf messages (`.pb.go` files).
-2. **`protoc-gen-go-grain`** generates Proto.Actor grain interfaces, clients, and actor wrappers (`_grain.pb.go` files) from `service` definitions.
-
-The generated code in `gen/` is committed, so you can clone and build without running code generation locally.
-
-To regenerate after editing `.proto` files you need the [buf](https://buf.build/docs/installation/) CLI and the grain plugin:
-
-```bash
-go install github.com/asynkron/protoactor-go/protobuf/protoc-gen-go-grain@latest
-buf generate
-```
-
-The output is deterministic; verify it matches what's committed with:
-
-```bash
-buf generate && git diff --exit-code gen/
-```
+- [`docs/README.md`](docs/README.md) — the hub: architecture at a glance, seven guided tours of the Proto.Actor features this codebase exercises, and a cross-reference from the official Proto.Actor docs pages to the code that exercises each.
+- [`docs/adr/`](docs/adr/) — Architecture Decision Records: the context, alternatives, and consequences behind the non-obvious choices.
+- [`api/openapi.yaml`](api/openapi.yaml) and [`api/asyncapi.yaml`](api/asyncapi.yaml) — machine-readable client contracts for HTTP and WebSocket traffic; browse both locally with `make docs-preview`.
+- Implementation details live in the Go docs: `go doc ./...`, or browse a package, e.g. `go doc ./internal/grain/room`.
 
 ## Development
 
@@ -170,20 +84,51 @@ Common tasks are wrapped in the `Makefile`:
 
 ```bash
 make build         # compile ./cmd/backend, ./cmd/gateway, and ./cmd/client
-make test          # go test ./...
+make test          # race-flagged suite plus the multi-member cluster test
 make lint          # golangci-lint
 make spec-lint     # validate the OpenAPI and AsyncAPI contracts
 make docs-preview  # browse both API contracts locally
+make diagrams      # render docs/*.puml to the committed SVGs (Docker)
 make coverage      # test coverage report
 make generate      # buf generate
 ```
 
-## Learn More
+## Code Generation
 
-- [`docs/README.md`](docs/README.md) — the technical documentation hub: architecture at a glance, guided tours of the Proto.Actor features this codebase exercises, and pointers into the decision records behind them.
-- [`docs/adr/`](docs/adr/) — Architecture Decision Records explaining the major design choices and their trade-offs.
-- [`api/openapi.yaml`](api/openapi.yaml) and [`api/asyncapi.yaml`](api/asyncapi.yaml) — machine-readable client contracts for HTTP and WebSocket traffic.
-- Implementation details live in the Go docs: `go doc ./...`, or browse a package, e.g. `go doc ./internal/grain/room`.
+The protobuf contracts under `proto/` generate both message types and Proto.Actor grain scaffolding — interfaces, typed clients, actor wrappers — via [buf](https://buf.build/) and `protoc-gen-go-grain`. The output in `gen/` is committed, so cloning and building needs no codegen toolchain. To regenerate after editing `.proto` files:
+
+```bash
+go install github.com/asynkron/protoactor-go/protobuf/protoc-gen-go-grain@latest
+buf generate && git diff --exit-code gen/   # regenerate, then verify determinism
+```
+
+## Project Structure
+
+```
+blabby/
+├── cmd/
+│   ├── backend/        # Grain tier — cluster member hosting the User, Room, and Maintenance grains
+│   ├── gateway/        # API tier — HTTP/WebSocket front end; joins the cluster as a client
+│   ├── client/         # Terminal (TUI) chat client
+│   └── docs-preview/   # Local browser preview for the API contracts
+├── internal/
+│   ├── grain/          # User, Room, and Maintenance grain implementations
+│   ├── actor/          # UserConnection actor — bridges a WebSocket to the User grain
+│   ├── gateway/        # HTTP/WebSocket handlers, auth boundary, error envelope
+│   ├── clusterboot/    # Cluster assembly: discovery, identity lookup, logging, telemetry wiring
+│   ├── persistence/    # PostgreSQL repositories and schema (rooms, membership, messages, accounts)
+│   ├── middleware/     # Receiver middleware: structured logging, death-watch translation
+│   ├── supervision/    # Logging decorator over the supervisor strategies
+│   ├── telemetry/      # Prometheus-backed OpenTelemetry MeterProvider
+│   ├── auth/           # Authenticator interface + JWT implementation
+│   ├── id/             # UserID / RoomID value types, parsed once at boundaries
+│   ├── testutil/       # In-process cluster and grain test harnesses
+│   └── ...             # plus focused support packages (domain types, error taxonomy, logging setup, snowflake ids)
+├── proto/              # Protobuf service + message definitions
+├── gen/                # Generated Go from proto (committed — clone and build)
+├── api/                # API specs: openapi.yaml (HTTP) + asyncapi.yaml (WebSocket)
+└── docs/               # Technical hub, feature tours, rendered diagrams, and ADRs
+```
 
 ## Related Reading & Examples
 
