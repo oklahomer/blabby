@@ -4,9 +4,13 @@
 //
 // Auth happens after WebSocket upgrade as the first text frame, not via
 // HTTP headers (see ADR-003). On successful auth the actor registers with
-// the user's grain so that Room-grain fan-outs reach the WebSocket. On
-// disconnect the actor stops; the User grain learns via a death-watch and
-// evicts the entry on its own (ADR-012). There is no Deregister RPC.
+// the user's grain so that Room-grain fan-outs reach the WebSocket. The
+// watch between the two is bidirectional (ADR-006). On disconnect the actor
+// stops; the User grain learns via a death-watch and evicts the entry on its
+// own (ADR-012) — there is no Deregister RPC. In return the actor watches
+// the grain activation it registered with and re-registers when that
+// activation dies, so deliveries survive a grain relocation without a
+// client reconnect.
 package connection
 
 import (
@@ -17,6 +21,7 @@ import (
 
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
+	"github.com/asynkron/protoactor-go/scheduler"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -50,6 +55,9 @@ const (
 	eventConnectionDecodeFailed           = "connection.decode.failed"
 	eventConnectionRegisterInlineError    = "connection.register.inline_error"
 	eventConnectionRegisterTransportError = "connection.register.transport_error"
+	eventConnectionRegisterNoGrainPid     = "connection.register.no_grain_pid"
+	eventConnectionReregisterSucceeded    = "connection.reregister.succeeded"
+	eventConnectionReregisterFailed       = "connection.reregister.failed"
 	eventConnectionWriteError             = "connection.write.error"
 	eventConnectionWriteBackpressure      = "connection.write.backpressure"
 	eventConnectionEventUnknown           = "connection.event.unknown"
@@ -63,6 +71,13 @@ const (
 const (
 	defaultAuthTimeout = 5 * time.Second
 	outboundBufferSize = 64
+
+	// Re-registration retry policy (ADR-006). A re-register addresses the
+	// grain by identity, which itself reactivates it, so the first attempt
+	// usually succeeds; a short fixed delay beats exponential backoff until
+	// measurement says otherwise.
+	reregisterMaxAttempts       = 3
+	defaultReregisterRetryDelay = time.Second
 )
 
 // UserGrainCaller abstracts the cluster RegisterConnection RPC so unit
@@ -82,6 +97,15 @@ type UserConnection struct {
 	userClient UserGrainCaller
 
 	userID id.UserID
+
+	// grainPID is the User grain activation this connection registered with
+	// and watches, so the grain's death triggers a re-register (ADR-006).
+	// Nil when the grain did not report one (version skew); then self-healing
+	// degrades to client-driven recovery for this session.
+	grainPID              *actor.PID
+	reregisterAttempts    int
+	reregisterRetryDelay  time.Duration
+	reregisterRetryCancel scheduler.CancelFunc
 
 	outbound  chan any
 	shutdown  func()
@@ -122,6 +146,13 @@ func WithUserGrainCaller(uc UserGrainCaller) Option {
 	return func(c *userConnectionConfig) { c.userClient = uc }
 }
 
+// WithReregisterRetryDelay overrides the default delay between re-register
+// attempts after the watched grain activation dies. Used in tests to drive
+// the retry-exhaustion path quickly.
+func WithReregisterRetryDelay(d time.Duration) Option {
+	return func(c *userConnectionConfig) { c.reregisterRetryDelay = d }
+}
+
 // WithAppHeartbeat enables application-level ping/pong timing for the
 // connection. This option only sets the cadence; the actor owns the timers
 // themselves — one [heartbeatTimers] per spawn, driven from Receive — and
@@ -139,9 +170,10 @@ func WithAppHeartbeat(pingInterval, pongTimeout time.Duration) Option {
 // returned Props can be used with rootContext.Spawn to start the actor.
 func NewProps(conn *websocket.Conn, a auth.Authenticator, c *cluster.Cluster, opts ...Option) *actor.Props {
 	cfg := userConnectionConfig{
-		conn:        conn,
-		auth:        a,
-		authTimeout: defaultAuthTimeout,
+		conn:                 conn,
+		auth:                 a,
+		authTimeout:          defaultAuthTimeout,
+		reregisterRetryDelay: defaultReregisterRetryDelay,
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -161,11 +193,12 @@ func NewProps(conn *websocket.Conn, a auth.Authenticator, c *cluster.Cluster, op
 	return actor.PropsFromProducer(
 		func() actor.Actor {
 			uc := &UserConnection{
-				conn:       cfg.conn,
-				auth:       cfg.auth,
-				userClient: cfg.userClient,
-				outbound:   make(chan any, outboundBufferSize),
-				heartbeat:  newHeartbeatTimers(cfg.heartbeat),
+				conn:                 cfg.conn,
+				auth:                 cfg.auth,
+				userClient:           cfg.userClient,
+				reregisterRetryDelay: cfg.reregisterRetryDelay,
+				outbound:             make(chan any, outboundBufferSize),
+				heartbeat:            newHeartbeatTimers(cfg.heartbeat),
 			}
 			uc.behavior = actor.NewBehavior()
 			return uc
@@ -176,11 +209,12 @@ func NewProps(conn *websocket.Conn, a auth.Authenticator, c *cluster.Cluster, op
 }
 
 type userConnectionConfig struct {
-	conn        *websocket.Conn
-	auth        auth.Authenticator
-	userClient  UserGrainCaller
-	authTimeout time.Duration
-	heartbeat   heartbeatConfig
+	conn                 *websocket.Conn
+	auth                 auth.Authenticator
+	userClient           UserGrainCaller
+	authTimeout          time.Duration
+	reregisterRetryDelay time.Duration
+	heartbeat            heartbeatConfig
 }
 
 // Receive handles actor lifecycle messages directly and delegates ordinary
@@ -225,6 +259,7 @@ func (uc *UserConnection) Receive(ctx actor.Context) {
 		uc.heartbeat.start(ctx)
 	case *actor.Stopping:
 		uc.heartbeat.stop()
+		uc.cancelReregisterRetry()
 		uc.shutdown()
 	case *actor.Stopped:
 
@@ -285,13 +320,14 @@ func (uc *UserConnection) Receive(ctx actor.Context) {
 // auth rejection paths. Pump failures and peer closes stop the actor because
 // the connection has no useful state to preserve.
 //
-// Successful authentication registers this actor with the User grain, emits an
-// AuthSucceeded outbound message for the write pump, and switches future
-// message handling to postAuthBehavior.
+// Successful authentication registers this actor with the User grain, arms a
+// watch on the grain's activation PID so its death triggers a re-register
+// (ADR-006), emits an AuthSucceeded outbound message for the write pump, and
+// switches future message handling to postAuthBehavior.
 func (uc *UserConnection) preAuthBehavior(ctx actor.Context) {
 	switch msg := ctx.Message().(type) {
 	case *InboundAuth:
-		uid, rej := uc.handleAuth(ctx, msg)
+		uid, grainPID, rej := uc.handleAuth(ctx, msg)
 		if rej != nil {
 			uc.sendOutboundBestEffort(ctx, newAuthFailed(rej.Code, rej.Message))
 			uc.logAuthRejected(ctx, rej.Reason, rej.Code)
@@ -299,6 +335,10 @@ func (uc *UserConnection) preAuthBehavior(ctx actor.Context) {
 			return
 		}
 		uc.userID = uid
+		uc.grainPID = grainPID
+		if grainPID != nil {
+			ctx.Watch(grainPID)
+		}
 		uc.sendOutbound(ctx, &AuthSucceeded{})
 		slog.Info(eventConnectionAuthenticated,
 			"actor_type", actorType,
@@ -339,6 +379,13 @@ func (uc *UserConnection) preAuthBehavior(ctx actor.Context) {
 // are no longer used for room commands in the current protocol, so protocol
 // violations are logged instead of being treated as auth failures.
 //
+// This phase also owns the reverse half of the bidirectional watch (ADR-006):
+// Terminated for the watched grain activation, or a ReregisterRetry tick after
+// a failed attempt, drives a re-register so a fresh activation learns about
+// this connection without waiting for the client to reconnect. Handling these
+// here rather than in Receive makes phase-correctness free — pre-auth has no
+// watch, and the closing behavior drops stray ticks.
+//
 // AuthTimeoutExpired is ignored here because the auth timeout middleware
 // schedules a one-shot timer at actor startup. That timer may still arrive
 // after the behavior has switched from preAuthBehavior to postAuthBehavior.
@@ -348,6 +395,45 @@ func (uc *UserConnection) postAuthBehavior(ctx actor.Context) {
 		uc.forwardMessage(ctx, msg)
 	case *userpb.NotifyRoomEventRequest:
 		uc.forwardRoomEvent(ctx, msg)
+	case *actor.Terminated:
+		// Death of the watched User grain activation. Anything else — e.g. a
+		// late notification for an already-replaced activation — is ignored.
+		// samePID compares by value: Who is never the stored pointer.
+		if !samePID(msg.Who, uc.grainPID) {
+			return
+		}
+		// A pending retry means a repair cycle is already in flight for this
+		// same dead activation (grainPID only rotates on success). A duplicate
+		// death signal — a real Terminated plus an endpoint-terminated
+		// translation, say — must not start a second chain and orphan the
+		// pending timer's cancel handle.
+		if uc.reregisterRetryCancel != nil {
+			return
+		}
+		grainPID, err := uc.reregister(ctx)
+		if err != nil {
+			if uc.recordReregisterFailure(ctx, err) {
+				uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: "reregister_failed"}))
+			}
+			return
+		}
+		uc.recordReregisterSuccess(ctx, grainPID)
+		if grainPID != nil {
+			ctx.Watch(grainPID)
+		}
+	case *ReregisterRetry:
+		uc.reregisterRetryCancel = nil // the one-shot has fired; the handle is spent
+		grainPID, err := uc.reregister(ctx)
+		if err != nil {
+			if uc.recordReregisterFailure(ctx, err) {
+				uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: "reregister_failed"}))
+			}
+			return
+		}
+		uc.recordReregisterSuccess(ctx, grainPID)
+		if grainPID != nil {
+			ctx.Watch(grainPID)
+		}
 	case *AppPingTick:
 		uc.sendOutbound(ctx, &AppPing{})
 	case *AppPongReceived:
@@ -412,19 +498,22 @@ func newAuthFailed(code errcode.Code, message string) *AuthFailed {
 
 // handleAuth runs token validation and User-grain registration. It performs
 // no protocol I/O and does not change actor state or behavior. On success it
-// returns the resolved UserID and a nil rejection. On failure it returns the
-// zero UserID and an *authRejection describing the rejection so the caller can
-// build the appropriate AuthFailed and pick the next behavior.
-func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (id.UserID, *authRejection) {
+// returns the resolved UserID, the responding grain activation's PID for the
+// caller to watch (nil when the grain did not report one — version skew; the
+// caller proceeds without self-healing rather than failing auth), and a nil
+// rejection. On failure it returns the zero UserID, a nil PID, and an
+// *authRejection describing the rejection so the caller can build the
+// appropriate AuthFailed and pick the next behavior.
+func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (id.UserID, *actor.PID, *authRejection) {
 	claims, err := uc.auth.ValidateToken(context.Background(), msg.Token.String())
 	if err != nil {
 		if errors.Is(err, auth.ErrTokenExpired) {
-			return id.UserID{}, &authRejection{Code: errcode.AuthExpiredToken, Message: "token has expired", Reason: "expired"}
+			return id.UserID{}, nil, &authRejection{Code: errcode.AuthExpiredToken, Message: "token has expired", Reason: "expired"}
 		}
 		if errors.Is(err, auth.ErrIdentityUnavailable) {
-			return id.UserID{}, &authRejection{Code: errcode.ServiceUnavailable, Message: "authentication temporarily unavailable", Reason: "unavailable"}
+			return id.UserID{}, nil, &authRejection{Code: errcode.ServiceUnavailable, Message: "authentication temporarily unavailable", Reason: "unavailable"}
 		}
-		return id.UserID{}, &authRejection{Code: errcode.AuthInvalidToken, Message: "invalid token", Reason: "invalid"}
+		return id.UserID{}, nil, &authRejection{Code: errcode.AuthInvalidToken, Message: "invalid token", Reason: "invalid"}
 	}
 
 	if claims == nil {
@@ -433,7 +522,7 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (id.Us
 			"pid", ctx.Self().String(),
 			"reason", "claims_nil",
 		)
-		return id.UserID{}, &authRejection{Code: errcode.AuthInvalidToken, Message: "invalid token", Reason: "contract_violation"}
+		return id.UserID{}, nil, &authRejection{Code: errcode.AuthInvalidToken, Message: "invalid token", Reason: "contract_violation"}
 	}
 	userID := claims.UserID
 
@@ -442,7 +531,7 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (id.Us
 			"actor_type", actorType,
 			"pid", ctx.Self().String(),
 		)
-		return id.UserID{}, &authRejection{Code: errcode.InternalError, Message: "service unavailable", Reason: "no_user_client"}
+		return id.UserID{}, nil, &authRejection{Code: errcode.InternalError, Message: "service unavailable", Reason: "no_user_client"}
 	}
 
 	resp, err := uc.userClient.RegisterConnection(userID.String(), &userpb.RegisterConnectionRequest{
@@ -455,7 +544,7 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (id.Us
 			"user_id", userID.String(),
 			"reason", "transport_error",
 		)
-		return id.UserID{}, &authRejection{Code: errcode.InternalError, Message: "service unavailable", Reason: "register_transport_error"}
+		return id.UserID{}, nil, &authRejection{Code: errcode.InternalError, Message: "service unavailable", Reason: "register_transport_error"}
 	}
 	if respErr := resp.GetError(); respErr != nil {
 		code, parseErr := errcode.Parse(respErr.GetCode(), respErr.GetStatus())
@@ -470,20 +559,29 @@ func (uc *UserConnection) handleAuth(ctx actor.Context, msg *InboundAuth) (id.Us
 			"reason", "register_inline_error",
 		)
 		if parseErr != nil {
-			return id.UserID{}, &authRejection{
+			return id.UserID{}, nil, &authRejection{
 				Code:    errcode.InternalError,
 				Message: "service unavailable",
 				Reason:  "register_inline_error_invalid_taxonomy",
 			}
 		}
-		return id.UserID{}, &authRejection{
+		return id.UserID{}, nil, &authRejection{
 			Code:    code,
 			Message: inlineErrorClientMessage(code),
 			Reason:  "register_inline_error",
 		}
 	}
 
-	return userID, nil
+	grainPID := grainPIDFromResponse(resp)
+	if grainPID == nil {
+		slog.Warn(eventConnectionRegisterNoGrainPid,
+			"actor_type", actorType,
+			"pid", ctx.Self().String(),
+			"user_id", userID.String(),
+			"path", "auth",
+		)
+	}
+	return userID, grainPID, nil
 }
 
 // inlineErrorClientMessages maps a parsed register-inline-error code produced

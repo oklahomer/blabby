@@ -162,6 +162,11 @@ func TestUserGrain_Integration_RoutesCommandsThroughCluster(t *testing.T) {
 	if ed := regResp.GetError(); ed != nil {
 		t.Fatalf("RegisterConnection: error code=%d", ed.GetCode())
 	}
+	// A real activation reports its own PID for the connection-side watch
+	// (ADR-006); over the cluster the exact PID is opaque, so assert presence.
+	if pid := regResp.GetGrainPid(); pid.GetAddress() == "" || pid.GetId() == "" {
+		t.Errorf("grain_pid must be populated on success, got %+v", pid)
+	}
 
 	room := &commonpb.RoomRef{RoomId: "4", PublicCode: "G000000004", Name: "General", Status: "active"}
 	if _, err := uc.ForwardMessage(&userpb.ForwardMessageRequest{

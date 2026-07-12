@@ -150,6 +150,12 @@ type AppPingTick struct{}
 // [AppPongReceived]. The active behavior begins closing the connection.
 type PongTimeoutExpired struct{}
 
+// ReregisterRetry is the one-shot timer message scheduled after a failed
+// re-registration attempt (see postAuthBehavior). On receipt the actor
+// retries RegisterConnection against its User grain; the closing behavior
+// drops stray ticks.
+type ReregisterRetry struct{}
+
 // DecodeFailureReason classifies why the decoder could not turn an inbound
 // frame into a typed message.
 type DecodeFailureReason string

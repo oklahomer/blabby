@@ -29,7 +29,7 @@ test-race:
 
 # Proto.Actor cannot run multiple in-process members cleanly under -race.
 test-cluster:
-	go test -count=1 ./internal/clusterboot -run '^TestMultiMemberDepartureAndReactivation$$'
+	go test -count=1 ./internal/clusterboot -run '^TestMultiMember(DepartureAndReactivation|GrainWatchReregistration)$$'
 
 lint:
 	golangci-lint run

@@ -36,7 +36,7 @@ ADR numbers are permanent identifiers assigned in creation order — they are no
 | [ADR-012](adr-012-watch-based-connection-lifecycle.md) | Why there is no explicit Deregister — connection lifecycle is keyed by PID via watch. |
 | [ADR-013](adr-013-business-errors-as-response-values.md) | Why business errors are a shared `ErrorDetail` response value, not a gRPC status. |
 | [ADR-009](adr-009-error-response-format.md) | Why errors carry dual numeric + string codes with range encoding. |
-| [ADR-006](adr-006-bidirectional-watch-pattern.md) | *(Proposed)* the planned bidirectional-watch self-healing for reconnect. |
+| [ADR-006](adr-006-bidirectional-watch-pattern.md) | Why both sides watch each other, so a session heals across grain relocation without a reconnect. |
 
 ### Persistence & data — the store, its keys, and search
 
@@ -64,7 +64,7 @@ ADR numbers are permanent identifiers assigned in creation order — they are no
 | [ADR-003](adr-003-websocket-authentication.md) | WebSocket authentication -- why first-message auth over query parameter token | Accepted | 2026-06-13 |
 | [ADR-004](adr-004-message-routing-through-user-grain.md) | Message routing through User grain -- why User grain acts as the user's agent | Accepted | 2026-06-13 |
 | [ADR-005](adr-005-unconditional-fan-out.md) | Unconditional fan-out -- why Room grain sends to all members regardless of connection state | Accepted | 2026-06-13 |
-| [ADR-006](adr-006-bidirectional-watch-pattern.md) | Bidirectional watch pattern -- why both sides watch each other for self-healing | Proposed | -- |
+| [ADR-006](adr-006-bidirectional-watch-pattern.md) | Bidirectional watch pattern -- why both sides watch each other for self-healing | Accepted | 2026-07-12 |
 | [ADR-007](adr-007-database-authoritative-persistence.md) | Database-authoritative persistence -- normalized entities plus an append-only event journal | Accepted | 2026-07-05 |
 | [ADR-008](adr-008-no-redis.md) | No Redis -- why grain memory hydrated from the store replaces a cache tier | Accepted | 2026-07-05 |
 | [ADR-009](adr-009-error-response-format.md) | Error response format -- why dual numeric + string codes with range encoding | Accepted | 2026-06-13 |

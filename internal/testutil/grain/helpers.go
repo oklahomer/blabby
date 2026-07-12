@@ -50,7 +50,7 @@ import (
 // fakeGrainContext is a no-cluster stand-in for [cluster.GrainContext].
 //
 // It satisfies the interface at compile time by embedding [actor.Context] as
-// a nil field. Only Identity, Kind, Cluster, Message, and Sender are
+// a nil field. Only Identity, Kind, Cluster, Message, Sender, and Self are
 // implemented; calling any other embedded actor.Context method will panic.
 // That is intentional — tests should never reach the actor runtime through
 // the fake.
@@ -60,6 +60,7 @@ type fakeGrainContext struct {
 	kind     string
 	message  any
 	sender   *actor.PID
+	self     *actor.PID
 	watcher  *WatchRecorder
 }
 
@@ -68,6 +69,14 @@ func (f *fakeGrainContext) Kind() string              { return f.kind }
 func (f *fakeGrainContext) Cluster() *cluster.Cluster { return nil }
 func (f *fakeGrainContext) Message() any              { return f.message }
 func (f *fakeGrainContext) Sender() *actor.PID        { return f.sender }
+
+// Self returns the fake activation PID: the [WithSelf] override when one was
+// supplied, otherwise a deterministic default of NewPID(defaultSelfAddress,
+// identity). A non-nil default matters because handlers read ctx.Self()
+// unconditionally on their success paths (e.g. RegisterConnection returning
+// its activation PID); tests derive the expected value from ctx.Self() on the
+// same fake rather than hardcoding the default's shape.
+func (f *fakeGrainContext) Self() *actor.PID { return f.self }
 
 // Watch records the PID when a recorder is attached; otherwise it is a
 // no-op. Overriding Watch keeps the embedded actor.Context.Watch (which
@@ -105,6 +114,12 @@ func WithSender(pid *actor.PID) FakeGrainContextOption {
 // exercising ReceiveDefault.
 func WithMessage(msg any) FakeGrainContextOption {
 	return func(f *fakeGrainContext) { f.message = msg }
+}
+
+// WithSelf overrides the activation PID returned by Self(). Without the
+// option, Self() returns the deterministic default described there.
+func WithSelf(pid *actor.PID) FakeGrainContextOption {
+	return func(f *fakeGrainContext) { f.self = pid }
 }
 
 // WithWatchRecorder installs a recorder that captures every Watch call
@@ -146,6 +161,10 @@ func (w *WatchRecorder) PIDs() []*actor.PID {
 // silently lied to User grain tests).
 const defaultKind = ""
 
+// defaultSelfAddress is the address of the default Self() PID. Clearly fake,
+// so a production address can never be mistaken for it in assertions or logs.
+const defaultSelfAddress = "graintest"
+
 // NewFakeGrainContext returns a [cluster.GrainContext] that reports the given
 // identity. The kind defaults to the empty string; pass [WithKind] when a
 // test inspects Kind().
@@ -155,7 +174,11 @@ const defaultKind = ""
 // panic. Use a real cluster (see internal/testutil/cluster) when you need
 // integration coverage.
 func NewFakeGrainContext(identity string, opts ...FakeGrainContextOption) cluster.GrainContext {
-	f := &fakeGrainContext{identity: identity, kind: defaultKind}
+	f := &fakeGrainContext{
+		identity: identity,
+		kind:     defaultKind,
+		self:     actor.NewPID(defaultSelfAddress, identity),
+	}
 	for _, opt := range opts {
 		opt(f)
 	}

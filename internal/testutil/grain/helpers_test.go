@@ -36,21 +36,35 @@ func TestNewFakeGrainContext_PanicsOnUnsupportedActorOps(t *testing.T) {
 			t.Fatal("expected panic on unsupported actor.Context call, got nil")
 		}
 	}()
-	_ = ctx.Self() // backed by nil actor.Context — must panic
+	_ = ctx.ActorSystem() // backed by nil actor.Context — must panic
+}
+
+func TestNewFakeGrainContext_DefaultSelf(t *testing.T) {
+	ctx := NewFakeGrainContext("general")
+
+	self := ctx.Self()
+	if self.GetAddress() != defaultSelfAddress || self.GetId() != "general" {
+		t.Errorf("Self: got %v, want %s/general", self, defaultSelfAddress)
+	}
 }
 
 func TestFakeGrainContext_Options(t *testing.T) {
 	sender := actor.NewPID("test", "sender-1")
+	self := actor.NewPID("test", "activation-1")
 	rec := &WatchRecorder{}
 	ctx := NewFakeGrainContext("room-1",
 		WithKind("RoomGrain"),
 		WithSender(sender),
+		WithSelf(self),
 		WithMessage("hello"),
 		WithWatchRecorder(rec),
 	)
 
 	if ctx.Sender() != sender {
 		t.Errorf("Sender: got %v, want %v", ctx.Sender(), sender)
+	}
+	if ctx.Self() != self {
+		t.Errorf("Self: got %v, want %v", ctx.Self(), self)
 	}
 	if got := ctx.Message(); got != "hello" {
 		t.Errorf("Message: got %v, want %q", got, "hello")
