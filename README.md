@@ -180,6 +180,24 @@ make generate      # buf generate
 
 ## Learn More
 
+- [`docs/README.md`](docs/README.md) — the technical documentation hub: architecture at a glance, guided tours of the Proto.Actor features this codebase exercises, and pointers into the decision records behind them.
 - [`docs/adr/`](docs/adr/) — Architecture Decision Records explaining the major design choices and their trade-offs.
 - [`api/openapi.yaml`](api/openapi.yaml) and [`api/asyncapi.yaml`](api/asyncapi.yaml) — machine-readable client contracts for HTTP and WebSocket traffic.
 - Implementation details live in the Go docs: `go doc ./...`, or browse a package, e.g. `go doc ./internal/grain/room`.
+
+## Related Reading & Examples
+
+Writing and small example repositories by the maintainer on protoactor-go's building blocks. The dates matter: the older posts describe the API names of their day (`Context.Tell` has since become `Send`), while the mechanics they explain still hold.
+
+- [Introduction to golang's actor model implementation](https://blog.oklahome.net/2018/07/protoactor-go-introduction.html) (2018) — terminology, concepts, and constructing your first actors.
+- [How actors communicate with each other](https://blog.oklahome.net/2018/09/protoactor-go-messaging-protocol.html) (2018) — the messaging methods and what each guarantees.
+- [How actor.Future works to synchronize concurrent task execution](https://blog.oklahome.net/2018/11/protoactor-go-how-future-works.html) (2018) — futures, `PipeTo`, and awaiting inside an actor.
+- [How middleware works to intercept incoming and outgoing messages](https://blog.oklahome.net/2018/11/protoactor-go-middleware.html) (2018) — the interception points this repo's logging middleware builds on.
+- [Use plugins to add behaviors to an actor](https://blog.oklahome.net/2018/12/protoactor-go-use-plugin-to-add-behavior.html) (2018) — composing reusable capabilities from middleware.
+- [How proto.actor's clustering works to achieve higher availability](https://blog.oklahome.net/2021/05/protoactor-clustering.html) (2021) — the clustering model this repo's gateway/backend split rides on.
+
+Focused example repositories, each isolating one mechanism in a few files:
+
+- [protoactor-go-sender-example](https://github.com/oklahomer/protoactor-go-sender-example) — how an actor resolves the sender to reply to.
+- [protoactor-go-future-example](https://github.com/oklahomer/protoactor-go-future-example) — future handling patterns.
+- [protoactor-go-middleware-example](https://github.com/oklahomer/protoactor-go-middleware-example) — middleware in isolation.
