@@ -1,0 +1,29 @@
+@startuml
+' Rendered to connection-states.svg by .github/workflows/plantuml.yml
+' (docs/ABC.puml → docs/ABC.svg). Keep @startuml bare: a named @startuml
+' would override the output filename and break that convention. To preview
+' locally, run `make diagrams` (same pinned renderer as CI; see
+' PLANTUML_IMAGE in the Makefile).
+'
+' Source of truth: the behavior dispatch in
+' internal/actor/connection/connection.go (Receive, preAuthBehavior,
+' postAuthBehavior, newClosingBehavior).
+
+state "Pre-auth" as pre : awaits an auth frame\ncarrying the JWT
+state "Post-auth" as post : writes room events and\nheartbeats to the socket
+state "Closing" as closing : close frame queued;\ndrops everything else
+
+[*] -down-> pre : Started: pumps and heartbeat start,\nauth deadline scheduled
+pre -down-> post : auth accepted;\nPID registered\nwith the User grain
+pre -down-> closing : auth rejected, auth timeout,\nprotocol violation, pong timeout
+post -down-> closing : pong timeout
+closing -down-> [*] : write pump flushes the close\nframe, then the actor stops
+
+note left of post
+  From every phase, transport tear-down
+  (peer close, pump failure) stops the
+  actor directly. Once auth has registered
+  the PID, the User grain's watch observes
+  the termination and evicts the connection.
+end note
+@enduml

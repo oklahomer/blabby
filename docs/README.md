@@ -23,10 +23,12 @@ grain per room, and a single fixed-identity `Maintenance` grain for periodic
 jobs. The two tiers scale independently, and every hop between them rides
 Proto.Actor's gRPC remote.
 
-State lives in PostgreSQL. Grains hydrate from it on activation and treat
-their in-memory state as a cache over the database
-([ADR-007](adr/adr-007-database-authoritative-persistence.md)), so a grain
-can passivate, move to another member, and pick up where it left off.
+State lives in PostgreSQL. The User and Room grains hydrate their durable
+state from it on activation and treat the in-memory copy as a cache over
+the database
+([ADR-007](adr/adr-007-database-authoritative-persistence.md)), so an
+activation can passivate, move to another member, and pick up where it
+left off.
 
 A message's full journey, from login through fan-out to disconnect and
 self-healing, is drawn in the [message-flow sequence diagram](overall.svg)
@@ -45,12 +47,12 @@ links as each file arrives.
 
 | Tour | Proto.Actor features | Key code |
 |---|---|---|
-| actors-and-grains.md | regular actors, virtual actors (grains), PIDs vs identities, grain codegen, typed clients | `internal/actor/connection`, `internal/grain/` |
+| [actors-and-grains.md](actors-and-grains.md) | regular actors, virtual actors (grains), PIDs vs identities, grain codegen, typed clients | `internal/actor/connection`, `internal/grain/` |
 | supervision.md | guardians, supervisor strategies, directives | `internal/supervision`, `internal/grain/room/supervision.go` |
 | lifecycle-and-passivation.md | death watch, `Terminated`, passivation, `Stop` vs `Poison` | `internal/grain/user`, `internal/middleware/terminated.go` |
 | reentrancy-and-timers.md | `ReenterAfter`, futures, `TimerScheduler` | `internal/grain/maintenance`, `internal/actor/connection` |
 | observability.md | EventStream, dead letters, throttle, logger factory, metrics | `internal/clusterboot`, `internal/telemetry`, `internal/middleware` |
-| cluster-bootstrap.md | member vs client, automanaged provider, disthash, remote | `internal/clusterboot` |
+| [cluster-bootstrap.md](cluster-bootstrap.md) | member vs client, automanaged provider, disthash, remote | `internal/clusterboot` |
 | roads-not-taken.md | pub-sub, routers, Proto.Persistence, receive-timeout, mailboxes | comparisons rather than tours |
 
 ## Design decisions
