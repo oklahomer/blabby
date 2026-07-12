@@ -10,6 +10,44 @@ on:
   pull_request:
 
 jobs:
+  # Verifies every committed .svg matches a fresh render of its .puml source
+  # and that no .svg outlives its source, catching a hand-edited .svg, a
+  # render the PlantUML workflow missed, or a leftover from a deleted or
+  # renamed diagram. Expected transient failure: a push that changes a .puml
+  # runs this job before the Render PlantUML workflow lands its bot commit.
+  # With the bot App configured (see plantuml.yml), the bot commit re-triggers
+  # CI and this job passes on the repaired head; on the GITHUB_TOKEN fallback
+  # (e.g. forks), GitHub starts no runs for the bot's push, so re-run CI
+  # manually after the bot commit lands. The image tag comes from the
+  # Makefile so this check renders with the same pinned version as the bot.
+  diagrams:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify no SVG outlives its .puml source
+        run: |
+          failed=0
+          for svg in $(git ls-files '*.svg'); do
+            if [ ! -f "${svg%.svg}.puml" ]; then
+              echo "::error file=$svg::$svg has no matching ${svg%.svg}.puml source; delete it or restore the source"
+              failed=1
+            fi
+          done
+          exit $failed
+
+      - name: Verify committed SVGs match their .puml sources
+        run: |
+          files=$(git ls-files '*.puml')
+          if [ -z "$files" ]; then
+            echo "No .puml files tracked; nothing to verify."
+            exit 0
+          fi
+          image=$(sed -n 's/^PLANTUML_IMAGE *= *//p' Makefile)
+          docker run --rm -v "$PWD:/data" "$image" -tsvg $files
+          git add -A -- '*.svg'
+          git diff --cached --exit-code -- '*.svg'
+
   ci:
     runs-on: ubuntu-latest
     # Postgres with PGroonga, mirroring docker-compose, so the database-gated

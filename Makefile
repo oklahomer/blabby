@@ -1,7 +1,15 @@
-.PHONY: generate build test test-race test-cluster lint spec-lint docs-preview coverage docker up db-reset db-shell setup-hooks
+.PHONY: generate build test test-race test-cluster lint spec-lint docs-preview diagrams coverage docker up db-reset db-shell setup-hooks
 
 DOCS_PORT ?= 8081
 ASYNCAPI_PORT ?= 8082
+
+# Pinned PlantUML renderer. .github/workflows/plantuml.yml and the ci.yml
+# freshness check read this variable, so local and CI rendering always use the
+# same version — different PlantUML versions emit different SVG bytes for the
+# same source, which would make the freshness check flap. The Makefile is in
+# the render workflow's path trigger for the same reason: bumping this pin
+# re-renders every diagram with the new version.
+PLANTUML_IMAGE = ghcr.io/plantuml/plantuml:1.2026.6
 
 # Dev database credentials used by db-shell; match the docker-compose.yml defaults.
 POSTGRES_USER ?= blabby
@@ -44,6 +52,13 @@ spec-lint:
 
 docs-preview:
 	go run ./cmd/docs-preview --port $(DOCS_PORT) --asyncapi-port $(ASYNCAPI_PORT)
+
+# Render every tracked .puml to a same-named .svg beside it (docs/ABC.puml →
+# docs/ABC.svg). The push-triggered PlantUML workflow does the same on CI and
+# commits the result, so running this locally is optional — useful for
+# previewing a diagram before pushing. Requires Docker.
+diagrams:
+	docker run --rm -v $(PWD):/data $(PLANTUML_IMAGE) -tsvg $$(git ls-files '*.puml')
 
 # Coverage measures the product/server core under internal/: domain types,
 # grains, gateway, auth, supervision, and test-cluster wiring. The repository's

@@ -1,0 +1,140 @@
+name: Render PlantUML
+
+# Renders every tracked .puml file to a same-named .svg beside it
+# (docs/ABC.puml → docs/ABC.svg), prunes tracked .svg files whose source is
+# gone, and commits the result back to the pushed branch, so markdown can
+# link the .svg and the .puml stays the source of truth.
+#
+# Push credential: the commit is pushed with an installation token minted
+# from a GitHub App when the repository provides one, falling back to the
+# workflow's GITHUB_TOKEN otherwise. The difference matters: GitHub starts no
+# new workflow runs for events caused by GITHUB_TOKEN, so a fallback push
+# leaves the bot commit without CI runs (re-run CI manually after it lands),
+# while an App-authenticated push re-triggers CI on the repaired head like
+# any ordinary push. App setup (one-time): create a GitHub App with
+# Repository → Contents: Read and write as its only permission, install it on
+# this repository only, then store the App ID as the BOT_APP_ID Actions
+# variable and the App's private key as the BOT_APP_PRIVATE_KEY Actions
+# secret. Forks have neither and get the fallback automatically.
+#
+# Trigger design: the workflow fires on branch pushes that touch a .puml file
+# or the Makefile (which carries the PLANTUML_IMAGE pin — a version bump must
+# re-render everything, or the ci.yml freshness check would fail with nothing
+# to repair it). The bot commit contains only .svg files, so it cannot
+# retrigger this workflow regardless of credential. The trigger is
+# constrained to branches, and the job additionally guards on ref_type: paths
+# filters are not evaluated for tag pushes, and a run on a tag ref would make
+# the push step create a branch named after the tag (workflow_dispatch can
+# also be pointed at a tag, which is why the filter alone is not enough).
+#
+# Rendering covers ALL tracked .puml files (not just the changed ones) — the
+# pinned renderer is deterministic, so unchanged sources produce
+# byte-identical .svg output and the empty-diff guard below skips the commit.
+# That keeps the file-selection logic trivial and self-heals any diagram a
+# previous run missed.
+#
+# workflow_dispatch renders everything on demand: for adopting the convention
+# on existing diagrams, or for repair when the bot could not push (e.g. a PR
+# from a fork, where the token has no write access — the ci.yml freshness
+# check fails in that case and a maintainer dispatches this workflow after
+# the merge).
+#
+# The PlantUML image tag comes from the Makefile's PLANTUML_IMAGE variable so
+# `make diagrams`, this workflow, and the ci.yml freshness check always render
+# with the same version. Keep `@startuml` bare in .puml sources: a named
+# `@startuml foo` overrides the output filename and breaks the ABC.puml →
+# ABC.svg convention.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "**/*.puml"
+      - "Makefile"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Serialize runs per branch: two quick pushes queue instead of racing each
+# other's bot commit. The pull --rebase before push covers the remaining
+# window between checkout and push.
+concurrency:
+  group: plantuml-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  render:
+    if: github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      # Secrets are not readable inside `if:` expressions, so their presence
+      # is mapped through env into a step output the later steps branch on.
+      - name: Check for bot App credentials
+        id: cred
+        env:
+          HAS_APP: ${{ vars.BOT_APP_ID != '' && secrets.BOT_APP_PRIVATE_KEY != '' }}
+        run: echo "use-app=${HAS_APP}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint an installation token for the bot App
+        if: steps.cred.outputs.use-app == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          # client-id accepts the numeric App ID too (the JWT issuer claim
+          # takes either); the app-id input is deprecated.
+          client-id: ${{ vars.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Resolve PlantUML image from Makefile
+        id: image
+        run: echo "image=$(sed -n 's/^PLANTUML_IMAGE *= *//p' Makefile)" >> "$GITHUB_OUTPUT"
+
+      # Every tracked .svg is a render of its sibling .puml (declared
+      # generated in .gitattributes); one without a source is a leftover from
+      # a deleted or renamed diagram and gets pruned here, staged for the
+      # commit step below.
+      - name: Prune SVGs whose .puml source is gone
+        run: |
+          for svg in $(git ls-files '*.svg'); do
+            if [ ! -f "${svg%.svg}.puml" ]; then
+              echo "Pruning orphaned $svg (no ${svg%.svg}.puml)"
+              git rm --quiet -- "$svg"
+            fi
+          done
+
+      - name: Render all tracked .puml files
+        run: |
+          files=$(git ls-files '*.puml')
+          if [ -z "$files" ]; then
+            echo "No .puml files tracked; nothing to render."
+          else
+            docker run --rm -v "$PWD:/data" "${{ steps.image.outputs.image }}" -tsvg $files
+          fi
+
+      - name: Commit rendered SVGs
+        run: |
+          git add -A -- '*.svg'
+          if git diff --cached --quiet; then
+            echo "All .svg files already match their sources."
+            exit 0
+          fi
+          # Attribute the commit to the App's bot user when the App pushed
+          # it, so repository history shows which automation acted; the
+          # fallback keeps the stock github-actions identity.
+          if [ -n "${{ steps.app-token.outputs.token }}" ]; then
+            slug="${{ steps.app-token.outputs.app-slug }}"
+            uid=$(GH_TOKEN="${{ steps.app-token.outputs.token }}" gh api "/users/${slug}%5Bbot%5D" --jq .id)
+            git config user.name "${slug}[bot]"
+            git config user.email "${uid}+${slug}[bot]@users.noreply.github.com"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          fi
+          git commit -m "docs: render PlantUML diagrams"
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push origin "HEAD:refs/heads/${{ github.ref_name }}"

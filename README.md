@@ -38,7 +38,7 @@ flowchart LR
 - **User grain** (`cmd/backend`) — a user's agent inside the cluster: it holds the set of that user's live connections and routes the user's commands to room grains.
 - **Room grain** (`cmd/backend`) — owns room membership and the message pipeline; it stamps each message with a server timestamp and fans events out to every member (the sender included, so other devices echo).
 
-For a deeper view, see [`docs/overall.puml`](docs/overall.puml) (component diagram) and [`docs/userconnection_design_en.md`](docs/userconnection_design_en.md) (the connection lifecycle).
+For a deeper view, see the end-to-end [sequence diagram](docs/overall.svg) (source: [`docs/overall.puml`](docs/overall.puml)) and [`docs/userconnection_design_en.md`](docs/userconnection_design_en.md) (the connection lifecycle).
 
 ## API Contracts
 
