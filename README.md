@@ -5,7 +5,7 @@ A small, real-time group-chat system built on [Proto.Actor](https://proto.actor/
 What makes it worth a look:
 
 - **Grain-per-entity modelling.** Each user and each room is a virtual actor with single-threaded state — no locks, no shared mutable maps. Commands route through a user's own grain to room grains.
-- **Guided feature tours.** Seven hands-on documents walk the Proto.Actor features the code exercises — actors and grains, supervision, lifecycle and passivation, reentrancy and timers, observability — each ending in a step you can run against the live system. Start at the [documentation hub](docs/README.md).
+- **Guided feature tours.** Seven documents walk the Proto.Actor features and design tradeoffs the code exercises — actors and grains, supervision, lifecycle and passivation, reentrancy and timers, observability, cluster bootstrap, and roads not taken. Start at the [documentation hub](docs/README.md).
 - **A clean client contract.** HTTP for commands and queries, a WebSocket for the real-time event stream, JSON on the wire, JWT for identity.
 - **Decisions written down.** Non-obvious choices live in [Architecture Decision Records](docs/adr/), each with context and consequences.
 - **Clone-and-run.** Generated protobuf code is committed and a terminal client ships in the same module; the only runtime dependency is PostgreSQL, started with a single `docker compose up -d postgres` — no broker, no cache.
@@ -50,13 +50,13 @@ go run ./cmd/client --server http://localhost:8080
 
 **5. Log in and chat.** The client opens a three-pane workspace with a centered sign-in modal. Sign in with one of the built-in development accounts:
 
-| Username | Password |
-|----------|-----------|
-| `alice`  | `alice123`  |
-| `bob`    | `bob123`    |
-| `charlie`| `charlie123`|
+| Email | Password |
+|-------|----------|
+| `alice@example.com` | `alice123` |
+| `bob@example.com` | `bob123` |
+| `charlie@example.com` | `charlie123` |
 
-Type the username, press `tab`, type the password, press `enter`. Then:
+Type the email address, press `tab`, type the password, press `enter`. Then:
 
 - Press `/` to open room search, pick a room (`general` or `random`), and join it.
 - Highlight a joined room in the **Rooms** pane and press `enter` to make it active.
@@ -81,6 +81,8 @@ Want to run several gateways and backends that discover each other and route mes
 ## Development
 
 Common tasks are wrapped in the `Makefile`:
+
+`make spec-lint` also requires Node and `npx` on `PATH`; the other Quick Start requirements are enough to build, run, and test the Go binaries locally.
 
 ```bash
 make build         # compile ./cmd/backend, ./cmd/gateway, and ./cmd/client
