@@ -14,10 +14,12 @@ jobs:
   # and that no .svg outlives its source, catching a hand-edited .svg, a
   # render the PlantUML workflow missed, or a leftover from a deleted or
   # renamed diagram. Expected transient failure: a push that changes a .puml
-  # runs this job before the Render PlantUML workflow lands its bot commit;
-  # the bot commit then re-triggers CI and this job passes. The image tag
-  # comes from the Makefile so this check renders with the same pinned
-  # version as the bot.
+  # runs this job before the Render PlantUML workflow lands its bot commit.
+  # With the bot App configured (see plantuml.yml), the bot commit re-triggers
+  # CI and this job passes on the repaired head; on the GITHUB_TOKEN fallback
+  # (e.g. forks), GitHub starts no runs for the bot's push, so re-run CI
+  # manually after the bot commit lands. The image tag comes from the
+  # Makefile so this check renders with the same pinned version as the bot.
   diagrams:
     runs-on: ubuntu-latest
     steps:
