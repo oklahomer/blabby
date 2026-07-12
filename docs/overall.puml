@@ -1,7 +1,9 @@
 @startuml
 ' Rendered to overall.svg by .github/workflows/plantuml.yml (docs/ABC.puml →
 ' docs/ABC.svg). Keep @startuml bare: a named @startuml would override the
-' output filename and break that convention.
+' output filename and break that convention. To preview locally, run
+' `make diagrams` (same pinned renderer as CI; see PLANTUML_IMAGE in the
+' Makefile).
 
 'https://plantuml.com/sequence-diagram
 
