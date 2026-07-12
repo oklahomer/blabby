@@ -270,6 +270,10 @@ func (g *Grain) ReceiveDefault(ctx cluster.GrainContext) {
 // resulting death-watch notification arrives at ReceiveDefault (as
 // middleware.WatchedTerminated) and the entry is evicted. There is no
 // Deregister RPC — see ADR-012.
+//
+// The success response carries this activation's own PID (grain_pid) so the
+// connection can arm the reverse watch and re-register when the activation
+// dies — the other half of the bidirectional watch (ADR-006).
 func (g *Grain) RegisterConnection(req *userpb.RegisterConnectionRequest, ctx cluster.GrainContext) (*userpb.RegisterConnectionResponse, error) {
 	requesterPid := req.GetRequesterPid()
 	if requesterPid == nil {
@@ -300,7 +304,9 @@ func (g *Grain) RegisterConnection(req *userpb.RegisterConnectionRequest, ctx cl
 		"pid_address", pid.GetAddress(),
 		"pid_id", pid.GetId(),
 	)
-	return &userpb.RegisterConnectionResponse{}, nil
+	return &userpb.RegisterConnectionResponse{
+		GrainPid: &userpb.PID{Address: ctx.Self().Address, Id: ctx.Self().Id},
+	}, nil
 }
 
 // JoinRoom routes a join command to the Room grain identified by req.RoomId

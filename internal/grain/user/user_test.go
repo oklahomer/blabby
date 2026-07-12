@@ -258,10 +258,8 @@ func TestGrain_RegisterConnection(t *testing.T) {
 		h := newGrain(t)
 		pid := actor.NewPID("addr", "conn-1")
 
-		resp, err := h.g.RegisterConnection(
-			pidRegisterReq(pid),
-			fakeUserCtx("1", graintest.WithWatchRecorder(h.watcher)),
-		)
+		hctx := fakeUserCtx("1", graintest.WithWatchRecorder(h.watcher))
+		resp, err := h.g.RegisterConnection(pidRegisterReq(pid), hctx)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -273,6 +271,12 @@ func TestGrain_RegisterConnection(t *testing.T) {
 		}
 		if got := h.watcher.PIDs(); !reflect.DeepEqual(got, []*actor.PID{pid}) {
 			t.Errorf("Watch PIDs: got %v, want [%v]", got, pid)
+		}
+		// The response carries the activation's own PID so the connection can
+		// watch it and re-register on Terminated (ADR-006).
+		grainPid := resp.GetGrainPid()
+		if grainPid.GetAddress() != hctx.Self().Address || grainPid.GetId() != hctx.Self().Id {
+			t.Errorf("grain_pid: got %+v, want %v", grainPid, hctx.Self())
 		}
 	})
 
@@ -289,6 +293,9 @@ func TestGrain_RegisterConnection(t *testing.T) {
 		assertErrResponse(t, resp.GetError(), 4001, "INVALID_REQUEST")
 		if got := h.watcher.PIDs(); len(got) != 0 {
 			t.Errorf("Watch PIDs on validation failure: got %v, want []", got)
+		}
+		if resp.GetGrainPid() != nil {
+			t.Errorf("grain_pid on validation failure: got %+v, want nil", resp.GetGrainPid())
 		}
 	})
 
@@ -333,6 +340,9 @@ func TestGrain_RegisterConnection(t *testing.T) {
 		}
 		if resp.GetError() != nil {
 			t.Fatalf("expected re-register to succeed, got error: %+v", resp.GetError())
+		}
+		if resp.GetGrainPid() == nil {
+			t.Error("grain_pid on re-register: got nil, want the activation PID")
 		}
 		if got := h.g.Connections(); !reflect.DeepEqual(got, []*actor.PID{pid}) {
 			t.Errorf("Connections: got %v, want [%v] (size unchanged)", got, pid)

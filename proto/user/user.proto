@@ -36,8 +36,14 @@ message RegisterConnectionRequest {
 
 // RegisterConnectionResponse indicates whether the connection was registered.
 // A nil error indicates success; a populated error indicates failure. See ADR-013.
+//
+// On success, grain_pid carries the responding activation's PID — populated
+// from the grain's own `ctx.Self()`, per ADR-011 — so the caller can watch it
+// and re-register when the activation dies (the reverse half of the
+// bidirectional watch, ADR-006). Unset on failure.
 message RegisterConnectionResponse {
   common.ErrorDetail error = 1;
+  PID grain_pid = 2;
 }
 
 // --- Command Routing (gateway commands routed to Room grain) ---

@@ -188,9 +188,15 @@ func (x *RegisterConnectionRequest) GetRequesterPid() *PID {
 
 // RegisterConnectionResponse indicates whether the connection was registered.
 // A nil error indicates success; a populated error indicates failure. See ADR-013.
+//
+// On success, grain_pid carries the responding activation's PID — populated
+// from the grain's own `ctx.Self()`, per ADR-011 — so the caller can watch it
+// and re-register when the activation dies (the reverse half of the
+// bidirectional watch, ADR-006). Unset on failure.
 type RegisterConnectionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Error         *common.ErrorDetail    `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	GrainPid      *PID                   `protobuf:"bytes,2,opt,name=grain_pid,json=grainPid,proto3" json:"grain_pid,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -228,6 +234,13 @@ func (*RegisterConnectionResponse) Descriptor() ([]byte, []int) {
 func (x *RegisterConnectionResponse) GetError() *common.ErrorDetail {
 	if x != nil {
 		return x.Error
+	}
+	return nil
+}
+
+func (x *RegisterConnectionResponse) GetGrainPid() *PID {
+	if x != nil {
+		return x.GrainPid
 	}
 	return nil
 }
@@ -1074,9 +1087,10 @@ const file_user_user_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\"K\n" +
 	"\x19RegisterConnectionRequest\x12.\n" +
-	"\rrequester_pid\x18\x01 \x01(\v2\t.user.PIDR\frequesterPid\"G\n" +
+	"\rrequester_pid\x18\x01 \x01(\v2\t.user.PIDR\frequesterPid\"o\n" +
 	"\x1aRegisterConnectionResponse\x12)\n" +
-	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\"*\n" +
+	"\x05error\x18\x01 \x01(\v2\x13.common.ErrorDetailR\x05error\x12&\n" +
+	"\tgrain_pid\x18\x02 \x01(\v2\t.user.PIDR\bgrainPid\"*\n" +
 	"\x0fJoinRoomRequest\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\"=\n" +
 	"\x10JoinRoomResponse\x12)\n" +
@@ -1178,43 +1192,44 @@ var file_user_user_proto_goTypes = []any{
 var file_user_user_proto_depIdxs = []int32{
 	1,  // 0: user.RegisterConnectionRequest.requester_pid:type_name -> user.PID
 	20, // 1: user.RegisterConnectionResponse.error:type_name -> common.ErrorDetail
-	20, // 2: user.JoinRoomResponse.error:type_name -> common.ErrorDetail
-	20, // 3: user.LeaveRoomResponse.error:type_name -> common.ErrorDetail
-	21, // 4: user.SendMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
-	20, // 5: user.SendMessageResponse.error:type_name -> common.ErrorDetail
-	22, // 6: user.ForwardMessageRequest.room:type_name -> common.RoomRef
-	23, // 7: user.ForwardMessageRequest.sender:type_name -> common.UserRef
-	21, // 8: user.ForwardMessageRequest.timestamp:type_name -> google.protobuf.Timestamp
-	22, // 9: user.NotifyRoomEventRequest.room:type_name -> common.RoomRef
-	23, // 10: user.NotifyRoomEventRequest.user:type_name -> common.UserRef
-	0,  // 11: user.NotifyRoomEventRequest.event_type:type_name -> user.RoomEventType
-	21, // 12: user.NotifyRoomEventRequest.timestamp:type_name -> google.protobuf.Timestamp
-	22, // 13: user.GetJoinedRoomsResponse.rooms:type_name -> common.RoomRef
-	20, // 14: user.SetRoomMemberRoleResponse.error:type_name -> common.ErrorDetail
-	20, // 15: user.TransferRoomOwnershipResponse.error:type_name -> common.ErrorDetail
-	2,  // 16: user.UserGrain.RegisterConnection:input_type -> user.RegisterConnectionRequest
-	4,  // 17: user.UserGrain.JoinRoom:input_type -> user.JoinRoomRequest
-	6,  // 18: user.UserGrain.LeaveRoom:input_type -> user.LeaveRoomRequest
-	8,  // 19: user.UserGrain.SendMessage:input_type -> user.SendMessageRequest
-	10, // 20: user.UserGrain.ForwardMessage:input_type -> user.ForwardMessageRequest
-	12, // 21: user.UserGrain.NotifyRoomEvent:input_type -> user.NotifyRoomEventRequest
-	14, // 22: user.UserGrain.GetJoinedRooms:input_type -> user.GetJoinedRoomsRequest
-	16, // 23: user.UserGrain.SetRoomMemberRole:input_type -> user.SetRoomMemberRoleRequest
-	18, // 24: user.UserGrain.TransferRoomOwnership:input_type -> user.TransferRoomOwnershipRequest
-	3,  // 25: user.UserGrain.RegisterConnection:output_type -> user.RegisterConnectionResponse
-	5,  // 26: user.UserGrain.JoinRoom:output_type -> user.JoinRoomResponse
-	7,  // 27: user.UserGrain.LeaveRoom:output_type -> user.LeaveRoomResponse
-	9,  // 28: user.UserGrain.SendMessage:output_type -> user.SendMessageResponse
-	11, // 29: user.UserGrain.ForwardMessage:output_type -> user.ForwardMessageResponse
-	13, // 30: user.UserGrain.NotifyRoomEvent:output_type -> user.NotifyRoomEventResponse
-	15, // 31: user.UserGrain.GetJoinedRooms:output_type -> user.GetJoinedRoomsResponse
-	17, // 32: user.UserGrain.SetRoomMemberRole:output_type -> user.SetRoomMemberRoleResponse
-	19, // 33: user.UserGrain.TransferRoomOwnership:output_type -> user.TransferRoomOwnershipResponse
-	25, // [25:34] is the sub-list for method output_type
-	16, // [16:25] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	1,  // 2: user.RegisterConnectionResponse.grain_pid:type_name -> user.PID
+	20, // 3: user.JoinRoomResponse.error:type_name -> common.ErrorDetail
+	20, // 4: user.LeaveRoomResponse.error:type_name -> common.ErrorDetail
+	21, // 5: user.SendMessageResponse.timestamp:type_name -> google.protobuf.Timestamp
+	20, // 6: user.SendMessageResponse.error:type_name -> common.ErrorDetail
+	22, // 7: user.ForwardMessageRequest.room:type_name -> common.RoomRef
+	23, // 8: user.ForwardMessageRequest.sender:type_name -> common.UserRef
+	21, // 9: user.ForwardMessageRequest.timestamp:type_name -> google.protobuf.Timestamp
+	22, // 10: user.NotifyRoomEventRequest.room:type_name -> common.RoomRef
+	23, // 11: user.NotifyRoomEventRequest.user:type_name -> common.UserRef
+	0,  // 12: user.NotifyRoomEventRequest.event_type:type_name -> user.RoomEventType
+	21, // 13: user.NotifyRoomEventRequest.timestamp:type_name -> google.protobuf.Timestamp
+	22, // 14: user.GetJoinedRoomsResponse.rooms:type_name -> common.RoomRef
+	20, // 15: user.SetRoomMemberRoleResponse.error:type_name -> common.ErrorDetail
+	20, // 16: user.TransferRoomOwnershipResponse.error:type_name -> common.ErrorDetail
+	2,  // 17: user.UserGrain.RegisterConnection:input_type -> user.RegisterConnectionRequest
+	4,  // 18: user.UserGrain.JoinRoom:input_type -> user.JoinRoomRequest
+	6,  // 19: user.UserGrain.LeaveRoom:input_type -> user.LeaveRoomRequest
+	8,  // 20: user.UserGrain.SendMessage:input_type -> user.SendMessageRequest
+	10, // 21: user.UserGrain.ForwardMessage:input_type -> user.ForwardMessageRequest
+	12, // 22: user.UserGrain.NotifyRoomEvent:input_type -> user.NotifyRoomEventRequest
+	14, // 23: user.UserGrain.GetJoinedRooms:input_type -> user.GetJoinedRoomsRequest
+	16, // 24: user.UserGrain.SetRoomMemberRole:input_type -> user.SetRoomMemberRoleRequest
+	18, // 25: user.UserGrain.TransferRoomOwnership:input_type -> user.TransferRoomOwnershipRequest
+	3,  // 26: user.UserGrain.RegisterConnection:output_type -> user.RegisterConnectionResponse
+	5,  // 27: user.UserGrain.JoinRoom:output_type -> user.JoinRoomResponse
+	7,  // 28: user.UserGrain.LeaveRoom:output_type -> user.LeaveRoomResponse
+	9,  // 29: user.UserGrain.SendMessage:output_type -> user.SendMessageResponse
+	11, // 30: user.UserGrain.ForwardMessage:output_type -> user.ForwardMessageResponse
+	13, // 31: user.UserGrain.NotifyRoomEvent:output_type -> user.NotifyRoomEventResponse
+	15, // 32: user.UserGrain.GetJoinedRooms:output_type -> user.GetJoinedRoomsResponse
+	17, // 33: user.UserGrain.SetRoomMemberRole:output_type -> user.SetRoomMemberRoleResponse
+	19, // 34: user.UserGrain.TransferRoomOwnership:output_type -> user.TransferRoomOwnershipResponse
+	26, // [26:35] is the sub-list for method output_type
+	17, // [17:26] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_user_user_proto_init() }
