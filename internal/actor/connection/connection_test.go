@@ -40,10 +40,13 @@ func (s *stubAuthenticator) ValidateToken(ctx context.Context, token string) (*a
 }
 
 // recordingGrainCaller captures every RegisterConnection invocation so
-// tests can assert what the actor sent.
+// tests can assert what the actor sent. Replies come from the queue first,
+// one entry per call in order; once drained (or when no queue is set) the
+// fixed resp/err pair answers every remaining call.
 type recordingGrainCaller struct {
 	mu    sync.Mutex
 	calls []registerCall
+	queue []registerReply
 	resp  *userpb.RegisterConnectionResponse
 	err   error
 }
@@ -53,10 +56,25 @@ type registerCall struct {
 	req    *userpb.RegisterConnectionRequest
 }
 
+// registerReply is one queued RegisterConnection outcome.
+type registerReply struct {
+	resp *userpb.RegisterConnectionResponse
+	err  error
+}
+
 func (r *recordingGrainCaller) RegisterConnection(userID string, req *userpb.RegisterConnectionRequest) (*userpb.RegisterConnectionResponse, error) {
 	r.mu.Lock()
 	r.calls = append(r.calls, registerCall{userID: userID, req: req})
+	var queued *registerReply
+	if len(r.queue) > 0 {
+		reply := r.queue[0]
+		r.queue = r.queue[1:]
+		queued = &reply
+	}
 	r.mu.Unlock()
+	if queued != nil {
+		return queued.resp, queued.err
+	}
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -72,6 +90,24 @@ func (r *recordingGrainCaller) snapshot() []registerCall {
 	out := make([]registerCall, len(r.calls))
 	copy(out, r.calls)
 	return out
+}
+
+// waitForCalls polls until n RegisterConnection calls have been recorded and
+// returns them, failing the test at the deadline. Registration is driven by
+// the actor's mailbox goroutine, so assertions on call count must wait.
+func (r *recordingGrainCaller) waitForCalls(t *testing.T, n int, d time.Duration) []registerCall {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		calls := r.snapshot()
+		if len(calls) >= n {
+			return calls
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected %d RegisterConnection calls within %s, got %d", n, d, len(calls))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // session holds the parts of a single test session: the dialed client
