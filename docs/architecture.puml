@@ -1,0 +1,46 @@
+@startuml
+' Rendered to architecture.svg by .github/workflows/plantuml.yml (docs/ABC.puml
+' → docs/ABC.svg). Keep @startuml bare: a named @startuml would override the
+' output filename and break that convention. To preview locally, run
+' `make diagrams` (same pinned renderer as CI; see PLANTUML_IMAGE in the
+' Makefile).
+'
+' This diagram stays at component altitude: which pieces exist, which tier
+' owns them, and who talks to whom. Message-level flow (RPC names, ordering,
+' failure paths) lives in overall.puml, the sequence diagram.
+
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+
+actor "Chat user" as user
+
+node "cmd/client\nterminal UI" as client
+
+package "Gateway tier — cmd/gateway (cluster client)" as gateway {
+    component "Public listener :8080\nHTTP commands + WebSocket events" as pub
+    component "Internal listener :9090\njob triggers, GET /metrics" as ops
+    component "UserConnection actor\none per WebSocket" as uc
+    component "GC cron\n(in-process trigger)" as cron
+}
+
+package "Backend tier — cmd/backend (cluster member)" as backend {
+    component "User grain\none activation per user" as ug
+    component "Room grain\none activation per room" as rg
+    component "Maintenance grain\none fixed identity, cluster-wide" as mg
+}
+
+database "PostgreSQL\n(+ PGroonga search)" as db
+
+user -down-> client
+client <-down-> pub : "HTTP commands /\nWebSocket events"
+pub -down-> uc : "spawn per\nupgraded socket"
+cron -down-> ops : "POST trigger"
+
+uc <-down-> ug : "register connection /\ndeliver room events\n(cluster gRPC)"
+ug -down-> rg : "route join / leave /\npost message"
+rg -up-> ug : "fan out to\nevery member"
+ops -down-> mg : "trigger pending-\naccount sweep"
+
+gateway -down-> db : "auth, registration,\ntimeline reads"
+backend -up-> db : "hydrate on activation;\npersist membership + messages"
+@enduml
