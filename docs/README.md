@@ -70,7 +70,8 @@ and [ADR-017](adr/adr-017-supervision-strategy.md) (supervision strategy).
 The client-facing contracts are machine-readable:
 [`api/openapi.yaml`](../api/openapi.yaml) for HTTP commands and queries,
 [`api/asyncapi.yaml`](../api/asyncapi.yaml) for the WebSocket event stream.
-Browse both locally with `make docs-preview`.
+Browse both locally with `make docs-preview`; override the local ports with
+`DOCS_PORT` and `ASYNCAPI_PORT` when the defaults collide.
 
 ## Official Proto.Actor references
 
