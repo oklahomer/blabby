@@ -12,7 +12,7 @@ What makes it worth a look:
 
 ## Architecture
 
-![Component view: client, gateway tier with its two listeners, backend tier with the three grains, PostgreSQL](docs/architecture.svg)
+![Component view: client, gateway tier with its two listeners, backend tier with the three grains, PostgreSQL](docs/intro.png)
 
 A stateless **gateway** (`cmd/gateway`) fronts a cluster of grains hosted by the **backend** (`cmd/backend`): clients speak HTTP and WebSocket to the gateway, and everything behind it is actors. The two are separate binaries — the gateway joins the cluster as a *client* and hosts one `UserConnection` actor per socket, the backend joins as a *member* and hosts the `User`, `Room`, and `Maintenance` grains — so the API tier and the grain tier scale independently. Durable state lives in PostgreSQL; grain memory is a cache over it.
 
