@@ -81,6 +81,70 @@ func TestRegisterRoutes_WrongMethodReturns405WithJSONEnvelope(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutes_WrongMethodOnRoomRoutesReturns405(t *testing.T) {
+	tests := []struct {
+		name      string
+		method    string
+		path      string
+		wantAllow string
+	}{
+		{"catalogue path", http.MethodDelete, "/rooms", "GET, HEAD, POST"},
+		{"membership path", http.MethodPost, "/rooms/R000000004/membership", "PUT, DELETE"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := gatewayWithAuth(&stubAuthenticator{})
+			handler := g.RegisterRoutes()
+
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("expected 405 for %s %s, got %d", tt.method, tt.path, rec.Code)
+			}
+			if got := rec.Header().Get("Allow"); got != tt.wantAllow {
+				t.Errorf("Allow header: got %q, want %q", got, tt.wantAllow)
+			}
+			if got := rec.Header().Get("Content-Type"); got != "application/json" {
+				t.Errorf("Content-Type: got %q, want application/json", got)
+			}
+			resp := decodeErrorResponse(t, rec.Body)
+			if resp.Error.Code != errcode.InvalidRequest {
+				t.Errorf("error.code: got %d, want %d", resp.Error.Code, errcode.InvalidRequest)
+			}
+		})
+	}
+}
+
+// TestRegisterRoutes_HeadWSReturnsJSON405 pins the one deliberate exception
+// to GET-implies-HEAD: a WebSocket upgrade requires GET, so HEAD /ws is
+// rejected with the gateway's JSON 405 instead of reaching gorilla's
+// plain-text handshake error. The request runs through a real server because
+// net/http suppresses HEAD response bodies — a bare ResponseRecorder would
+// retain a body production strips, so only status and headers are asserted.
+func TestRegisterRoutes_HeadWSReturnsJSON405(t *testing.T) {
+	g := gatewayWithAuth(&stubAuthenticator{})
+	srv := httptest.NewServer(g.RegisterRoutes())
+	defer srv.Close()
+
+	resp, err := srv.Client().Head(srv.URL + "/ws")
+	if err != nil {
+		t.Fatalf("HEAD /ws: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 for HEAD /ws, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Allow"); got != "GET" {
+		t.Errorf("Allow header: got %q, want GET", got)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type: got %q, want application/json", got)
+	}
+}
+
 func TestSplitMethodPath(t *testing.T) {
 	tests := []struct {
 		name       string
