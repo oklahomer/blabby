@@ -6,7 +6,6 @@ import (
 
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/domain"
-	"github.com/oklahomer/blabby/internal/id"
 )
 
 // endpointRoomCreate creates a room owned by the authenticated caller.
@@ -40,7 +39,7 @@ func (g *Gateway) handleRoomCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logRoomEntry(endpointRoomCreate, r.Method, userID, id.RoomID{})
+	logRoomEntry(roomOp{endpoint: endpointRoomCreate, method: r.Method, userID: userID})
 	info, err := g.roomCreator.CreateRoom(r.Context(), userID, name)
 	if err != nil {
 		slog.Error("gateway.room.create_failed", "user_id", userID, "error", err.Error())
@@ -53,6 +52,6 @@ func (g *Gateway) handleRoomCreate(w http.ResponseWriter, r *http.Request) {
 			"user_id", userID, "room_id", info.ID, "error", err)
 	}
 
-	logRoomExit(endpointRoomCreate, r.Method, userID, info.ID, outcomeOK, 0)
+	logRoomExit(roomOp{endpoint: endpointRoomCreate, method: r.Method, userID: userID, roomID: info.ID}, outcomeOK, 0)
 	writeJSON(w, http.StatusCreated, roomDescriptor{ID: info.PublicID(), Name: info.Name})
 }

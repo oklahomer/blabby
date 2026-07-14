@@ -113,7 +113,8 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 		WriteErrorResponse(w, httpStatus(perr.detail.Code), perr.detail)
 		return
 	}
-	logRoomEntry(endpointRoomList, r.Method, userID, id.RoomID{})
+	op := roomOp{endpoint: endpointRoomList, method: r.Method, userID: userID}
+	logRoomEntry(op)
 
 	query := ListActiveQuery{Query: params.query, Limit: params.limit}
 	if !params.after.IsZero() {
@@ -128,7 +129,7 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 			WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("after references an unknown room"))
 			return
 		case err != nil:
-			logRoomTransportError(endpointRoomList, r.Method, userID, id.RoomID{})
+			logRoomTransportError(op)
 			WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to resolve after cursor"))
 			return
 		}
@@ -149,7 +150,7 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 		next := page.Rooms[len(page.Rooms)-1].PublicID()
 		resp.Next = &next
 	}
-	logRoomExit(endpointRoomList, r.Method, userID, id.RoomID{}, outcomeOK, 0)
+	logRoomExit(op, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -163,7 +164,8 @@ func (g *Gateway) handleRoomJoined(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	logRoomEntry(endpointRoomJoined, r.Method, userID, id.RoomID{})
+	op := roomOp{endpoint: endpointRoomJoined, method: r.Method, userID: userID}
+	logRoomEntry(op)
 
 	resp, err := g.userGrainFor(userID).GetJoinedRooms(&userpb.GetJoinedRoomsRequest{})
 	if err != nil {
@@ -186,7 +188,7 @@ func (g *Gateway) handleRoomJoined(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logRoomExit(endpointRoomJoined, r.Method, userID, id.RoomID{}, outcomeOK, 0)
+	logRoomExit(op, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, roomListResponse{Rooms: descriptors})
 }
 

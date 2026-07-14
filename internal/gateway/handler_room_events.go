@@ -125,11 +125,12 @@ func (g *Gateway) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 		WriteErrorResponse(w, httpStatus(perr.detail.Code), perr.detail)
 		return
 	}
-	logRoomEntry(endpointRoomEvents, r.Method, userID, roomID)
+	op := roomOp{endpoint: endpointRoomEvents, method: r.Method, userID: userID, roomID: roomID}
+	logRoomEntry(op)
 
 	member, err := g.timeline.IsMember(r.Context(), roomID, userID)
 	if err != nil {
-		logRoomTransportError(endpointRoomEvents, r.Method, userID, roomID)
+		logRoomTransportError(op)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to check membership"))
 		return
 	}
@@ -148,7 +149,7 @@ func (g *Gateway) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 		Limit:  params.limit,
 	})
 	if err != nil {
-		logRoomTransportError(endpointRoomEvents, r.Method, userID, roomID)
+		logRoomTransportError(op)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to load events"))
 		return
 	}
@@ -169,7 +170,7 @@ func (g *Gateway) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 		next := page.Events[len(page.Events)-1].ID.String()
 		resp.Next = &next
 	}
-	logRoomExit(endpointRoomEvents, r.Method, userID, roomID, outcomeOK, 0)
+	logRoomExit(op, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, resp)
 }
 

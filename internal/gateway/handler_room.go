@@ -68,18 +68,19 @@ func (g *Gateway) handleRoomMembershipPut(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	logRoomEntry(endpointRoomMembershipPut, r.Method, userID, roomID)
+	op := roomOp{endpoint: endpointRoomMembershipPut, method: r.Method, userID: userID, roomID: roomID}
+	logRoomEntry(op)
 	resp, err := g.userGrainFor(userID).JoinRoom(&userpb.JoinRoomRequest{RoomId: roomID.String()})
 	if err != nil {
-		logRoomTransportError(endpointRoomMembershipPut, r.Method, userID, roomID)
+		logRoomTransportError(op)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
 		return
 	}
 	if pe := resp.GetError(); pe != nil {
-		writeBusinessErrorResponse(w, endpointRoomMembershipPut, r.Method, userID, roomID, pe)
+		writeBusinessErrorResponse(w, op, pe)
 		return
 	}
-	logRoomExit(endpointRoomMembershipPut, r.Method, userID, roomID, outcomeOK, 0)
+	logRoomExit(op, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, successResponse{Success: true})
 }
 
@@ -96,18 +97,19 @@ func (g *Gateway) handleRoomMembershipDelete(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	logRoomEntry(endpointRoomMembershipDelete, r.Method, userID, roomID)
+	op := roomOp{endpoint: endpointRoomMembershipDelete, method: r.Method, userID: userID, roomID: roomID}
+	logRoomEntry(op)
 	resp, err := g.userGrainFor(userID).LeaveRoom(&userpb.LeaveRoomRequest{RoomId: roomID.String()})
 	if err != nil {
-		logRoomTransportError(endpointRoomMembershipDelete, r.Method, userID, roomID)
+		logRoomTransportError(op)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
 		return
 	}
 	if pe := resp.GetError(); pe != nil {
-		writeBusinessErrorResponse(w, endpointRoomMembershipDelete, r.Method, userID, roomID, pe)
+		writeBusinessErrorResponse(w, op, pe)
 		return
 	}
-	logRoomExit(endpointRoomMembershipDelete, r.Method, userID, roomID, outcomeOK, 0)
+	logRoomExit(op, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, successResponse{Success: true})
 }
 
@@ -217,7 +219,7 @@ func (g *Gateway) requireRoomID(w http.ResponseWriter, r *http.Request, endpoint
 		WriteErrorResponse(w, http.StatusNotFound, ErrRoomNotFound("room not found"))
 		return id.RoomID{}, false
 	case err != nil:
-		logRoomTransportError(endpoint, r.Method, userID, id.RoomID{})
+		logRoomTransportError(roomOp{endpoint: endpoint, method: r.Method, userID: userID})
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to resolve room"))
 		return id.RoomID{}, false
 	}
@@ -261,6 +263,19 @@ func writeJSON(w http.ResponseWriter, httpStatus int, v any) {
 	}
 }
 
+// roomOp bundles the identifying context every room handler threads through
+// its log and error helpers: endpoint pattern, HTTP method, acting user, and
+// target room (zero for the catalogue endpoints, which address no single
+// room). It is an immutable value — a handler that learns the room id
+// mid-flight (room creation) constructs a second literal rather than
+// mutating.
+type roomOp struct {
+	endpoint string
+	method   string
+	userID   id.UserID
+	roomID   id.RoomID
+}
+
 // writeBusinessErrorResponse converts a non-nil grain ErrorDetail into
 // the gateway envelope and writes it with the mapped HTTP status. The
 // matching exit log line is emitted before the write so it appears in
@@ -268,39 +283,39 @@ func writeJSON(w http.ResponseWriter, httpStatus int, v any) {
 //
 // Callers MUST pass a non-nil pe; every call site already checks
 // `resp.GetError() != nil` before invoking this helper.
-func writeBusinessErrorResponse(w http.ResponseWriter, endpoint, method string, userID id.UserID, roomID id.RoomID, pe *commonpb.ErrorDetail) {
+func writeBusinessErrorResponse(w http.ResponseWriter, op roomOp, pe *commonpb.ErrorDetail) {
 	ed, err := FromProtoErrorDetail(pe)
 	if err != nil {
 		slog.Error("gateway.room.contract_violation",
-			"endpoint", endpoint, "method", method,
-			"user_id", userID, "room_id", roomID,
+			"endpoint", op.endpoint, "method", op.method,
+			"user_id", op.userID, "room_id", op.roomID,
 			"code", pe.GetCode(), "status", pe.GetStatus(), "error", err)
 		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("internal server error"))
 		return
 	}
 	slog.Info("gateway.room.exited",
-		"endpoint", endpoint, "method", method,
-		"user_id", userID, "room_id", roomID,
+		"endpoint", op.endpoint, "method", op.method,
+		"user_id", op.userID, "room_id", op.roomID,
 		"outcome", outcomeBusinessError, "code", ed.Code)
 	WriteErrorResponse(w, httpStatus(ed.Code), ed)
 }
 
-func logRoomEntry(endpoint, method string, userID id.UserID, roomID id.RoomID) {
+func logRoomEntry(op roomOp) {
 	slog.Info("gateway.room.entered",
-		"endpoint", endpoint, "method", method,
-		"user_id", userID, "room_id", roomID)
+		"endpoint", op.endpoint, "method", op.method,
+		"user_id", op.userID, "room_id", op.roomID)
 }
 
-func logRoomExit(endpoint, method string, userID id.UserID, roomID id.RoomID, outcome string, code int) {
+func logRoomExit(op roomOp, outcome string, code int) {
 	slog.Info("gateway.room.exited",
-		"endpoint", endpoint, "method", method,
-		"user_id", userID, "room_id", roomID,
+		"endpoint", op.endpoint, "method", op.method,
+		"user_id", op.userID, "room_id", op.roomID,
 		"outcome", outcome, "code", code)
 }
 
-func logRoomTransportError(endpoint, method string, userID id.UserID, roomID id.RoomID) {
+func logRoomTransportError(op roomOp) {
 	slog.Warn("gateway.room.transport_error",
-		"endpoint", endpoint, "method", method,
-		"user_id", userID, "room_id", roomID,
+		"endpoint", op.endpoint, "method", op.method,
+		"user_id", op.userID, "room_id", op.roomID,
 		"outcome", outcomeTransportError)
 }
