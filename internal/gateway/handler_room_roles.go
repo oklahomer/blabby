@@ -60,7 +60,7 @@ func (g *Gateway) handleRoomMemberRolePut(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req setRoleRequest
-	if !decodeRoomCommandBody(w, r, &req) {
+	if !decodeJSONBody(w, r, maxRoomCommandBodyBytes, &req) {
 		return
 	}
 	if strings.TrimSpace(req.Role) == "" {
@@ -99,7 +99,7 @@ func (g *Gateway) handleRoomOwnerPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req setOwnerRequest
-	if !decodeRoomCommandBody(w, r, &req) {
+	if !decodeJSONBody(w, r, maxRoomCommandBodyBytes, &req) {
 		return
 	}
 	if strings.TrimSpace(req.User) == "" {
@@ -156,15 +156,4 @@ func (g *Gateway) requireTargetUserID(w http.ResponseWriter, r *http.Request, en
 		return id.UserID{}, false
 	}
 	return targetID, true
-}
-
-// decodeRoomCommandBody decodes one of the room command endpoints' tiny JSON bodies with the
-// package's strict rules (JSON content type, size cap, no trailing data),
-// writing the rejection itself and returning false on failure.
-func decodeRoomCommandBody(w http.ResponseWriter, r *http.Request, dst any) bool {
-	if err := decodeStrictJSONBody(w, r, maxRoomCommandBodyBytes, dst); err != nil {
-		WriteErrorResponse(w, httpStatus(err.detail.Code), err.detail)
-		return false
-	}
-	return true
 }

@@ -148,6 +148,7 @@ func TestHandleLogin(t *testing.T) {
 			g := gatewayWithAuth(&stubAuthenticator{authenticateFn: tt.authFn})
 
 			req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 
 			g.RegisterRoutes().ServeHTTP(rec, req)
@@ -194,6 +195,7 @@ func TestHandleLogin_AuthErrorMessageDoesNotLeakDetails(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	g.RegisterRoutes().ServeHTTP(rec, req)
 
@@ -220,6 +222,7 @@ func TestHandleLogin_InfrastructureErrorReturns500(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	g.RegisterRoutes().ServeHTTP(rec, req)
 
@@ -243,6 +246,7 @@ func TestHandleLogin_NilResultFromAuthenticatorReturns500(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	g.RegisterRoutes().ServeHTTP(rec, req)
 
@@ -263,6 +267,7 @@ func TestHandleLogin_EmptyTokenFromAuthenticatorReturns500(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"mail_address":"alice@example.com","password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	g.RegisterRoutes().ServeHTTP(rec, req)
 
@@ -275,26 +280,78 @@ func TestHandleLogin_EmptyTokenFromAuthenticatorReturns500(t *testing.T) {
 	}
 }
 
-func TestHandleLogin_BodyTooLargeReturns400(t *testing.T) {
-	g := gatewayWithAuth(&stubAuthenticator{
-		authenticateFn: func(ctx context.Context, params auth.AuthParams) (*auth.Result, error) {
-			return &auth.Result{Token: "tok"}, nil
-		},
-	})
+// authBodyEndpoints lists the four unauthenticated JSON-body endpoints that
+// share the strict decode rules (content type, byte cap, no trailing data).
+// The stub deps behind each endpoint are never reached: every case here is
+// rejected by the decoder before handler logic runs.
+func authBodyEndpoints() []string {
+	return []string{"/login", "/users", "/users/verifications", "/users/verifications/resend"}
+}
 
-	// Build a JSON body larger than the 1 MB cap.
+func TestAuthEndpoints_NonJSONContentTypeReturns400(t *testing.T) {
+	for _, path := range authBodyEndpoints() {
+		t.Run(path, func(t *testing.T) {
+			g := gatewayWithAuth(&stubAuthenticator{})
+
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"mail_address":"a@example.com"}`))
+			req.Header.Set("Content-Type", "text/plain")
+			rec := httptest.NewRecorder()
+			g.RegisterRoutes().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status: got %d, want 400", rec.Code)
+			}
+			resp := decodeErrorResponse(t, rec.Body)
+			if resp.Error.Code != errcode.InvalidRequest {
+				t.Errorf("code: got %d, want %d", resp.Error.Code, errcode.InvalidRequest)
+			}
+		})
+	}
+}
+
+func TestAuthEndpoints_BodyTooLargeReturns413(t *testing.T) {
+	// A JSON body larger than the 1 MB cap.
 	huge := strings.Repeat("a", (1<<20)+10)
-	body := `{"mail_address":"alice@example.com","password":"` + huge + `"}`
+	body := `{"mail_address":"` + huge + `"}`
+	for _, path := range authBodyEndpoints() {
+		t.Run(path, func(t *testing.T) {
+			g := gatewayWithAuth(&stubAuthenticator{})
 
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			g.RegisterRoutes().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("status: got %d, want 413", rec.Code)
+			}
+			resp := decodeErrorResponse(t, rec.Body)
+			if resp.Error.Code != errcode.PayloadTooLarge {
+				t.Errorf("code: got %d, want %d", resp.Error.Code, errcode.PayloadTooLarge)
+			}
+		})
+	}
+}
+
+// TestHandleLogin_OversizedTrailingDataReturns413 pins the byte cap on the
+// trailing-data check: a valid first JSON value followed by input that pushes
+// the total past the cap is an oversize rejection (413), not a generic 400 —
+// the limit must hold no matter which decode read crosses it.
+func TestHandleLogin_OversizedTrailingDataReturns413(t *testing.T) {
+	g := gatewayWithAuth(&stubAuthenticator{})
+
+	body := `{"mail_address":"alice@example.com","password":"x"}` +
+		`"` + strings.Repeat("a", (1<<20)+10) + `"`
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	g.RegisterRoutes().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status: got %d, want 400", rec.Code)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status: got %d, want 413", rec.Code)
 	}
 	resp := decodeErrorResponse(t, rec.Body)
-	if resp.Error.Code != errcode.InvalidRequest {
-		t.Errorf("code: got %d, want %d", resp.Error.Code, errcode.InvalidRequest)
+	if resp.Error.Code != errcode.PayloadTooLarge {
+		t.Errorf("code: got %d, want %d", resp.Error.Code, errcode.PayloadTooLarge)
 	}
 }

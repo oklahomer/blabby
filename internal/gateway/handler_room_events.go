@@ -64,14 +64,14 @@ type roomEventsParams struct {
 // parseRoomEventsQuery parses and validates the q / before / limit query
 // parameters. A blank q or before is treated as absent; limit defaults to
 // roomEventsDefaultLimit and is rejected outside [1, roomEventsMaxLimit].
-func parseRoomEventsQuery(r *http.Request) (roomEventsParams, *roomRequestError) {
+func parseRoomEventsQuery(r *http.Request) (roomEventsParams, *requestError) {
 	params := roomEventsParams{limit: roomEventsDefaultLimit}
 	values := r.URL.Query()
 
 	if raw := strings.TrimSpace(values.Get("q")); raw != "" {
 		query, err := domain.NewMessageQuery(raw)
 		if err != nil {
-			return roomEventsParams{}, &roomRequestError{
+			return roomEventsParams{}, &requestError{
 				reason: "invalid_query",
 				detail: ErrInvalidRequest("q must be 1-256 bytes of valid UTF-8"),
 			}
@@ -81,7 +81,7 @@ func parseRoomEventsQuery(r *http.Request) (roomEventsParams, *roomRequestError)
 	if raw := strings.TrimSpace(values.Get("before")); raw != "" {
 		before, err := id.ParseEventID(raw)
 		if err != nil {
-			return roomEventsParams{}, &roomRequestError{
+			return roomEventsParams{}, &requestError{
 				reason: "invalid_before",
 				detail: ErrInvalidRequest("before is not a valid event id"),
 			}
@@ -91,7 +91,7 @@ func parseRoomEventsQuery(r *http.Request) (roomEventsParams, *roomRequestError)
 	if raw := values.Get("limit"); raw != "" {
 		limit, err := strconv.Atoi(raw)
 		if err != nil || limit < 1 || limit > roomEventsMaxLimit {
-			return roomEventsParams{}, &roomRequestError{
+			return roomEventsParams{}, &requestError{
 				reason: "invalid_limit",
 				detail: ErrInvalidRequest(fmt.Sprintf("limit must be an integer between 1 and %d", roomEventsMaxLimit)),
 			}

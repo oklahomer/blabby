@@ -1,9 +1,7 @@
 package gateway
 
 import (
-	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -41,16 +39,8 @@ type ResendVerificationRequest struct {
 // locked challenge — so it reveals nothing about which precondition failed.
 // Success is 200.
 func (g *Gateway) handleVerify(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxLoginBodyBytes)
-
 	var req VerifyRequest
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(&req); err != nil {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("malformed request body"))
-		return
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("malformed request body"))
+	if !decodeJSONBody(w, r, maxLoginBodyBytes, &req) {
 		return
 	}
 
@@ -90,16 +80,8 @@ func (g *Gateway) writeVerifyError(w http.ResponseWriter, err error) {
 // silent no-op) so it cannot be used to probe which addresses are registered; only
 // a pending account that has exhausted its resend budget yields 429.
 func (g *Gateway) handleResendVerification(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxLoginBodyBytes)
-
 	var req ResendVerificationRequest
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(&req); err != nil {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("malformed request body"))
-		return
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("malformed request body"))
+	if !decodeJSONBody(w, r, maxLoginBodyBytes, &req) {
 		return
 	}
 

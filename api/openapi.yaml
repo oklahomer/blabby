@@ -88,10 +88,11 @@ paths:
                 public_code: UA1B2C3D4E5
         '400':
           description: |
-            The request body was malformed or a field failed validation: a
-            missing field or malformed handle is `INVALID_REQUEST`, a value that
-            does not parse as a bare email address is `INVALID_EMAIL`, and a
-            password shorter than 12 bytes is `WEAK_PASSWORD`.
+            The request body was malformed or not `application/json`, or a
+            field failed validation: a missing field or malformed handle is
+            `INVALID_REQUEST`, a value that does not parse as a bare email
+            address is `INVALID_EMAIL`, and a password shorter than 12 bytes
+            is `WEAK_PASSWORD`.
           content:
             application/json:
               schema:
@@ -114,6 +115,17 @@ paths:
                   code: 6001
                   status: EMAIL_ALREADY_REGISTERED
                   message: email already registered
+        '413':
+          description: The request body exceeded the 1 MB limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4003
+                  status: PAYLOAD_TOO_LARGE
+                  message: request body exceeds maximum size
         '429':
           $ref: '#/components/responses/VerificationRateLimited'
         '500':
@@ -150,9 +162,10 @@ paths:
           description: The account is now active and can log in. The response has no body.
         '400':
           description: |
-            The request was malformed (`INVALID_REQUEST`), the email did not
-            parse (`INVALID_EMAIL`), or the verification could not succeed
-            (`VERIFICATION_INVALID` — the uniform failure described above).
+            The request was malformed or not `application/json`
+            (`INVALID_REQUEST`), the email did not parse (`INVALID_EMAIL`), or
+            the verification could not succeed (`VERIFICATION_INVALID` — the
+            uniform failure described above).
           content:
             application/json:
               schema:
@@ -162,6 +175,17 @@ paths:
                   code: 6003
                   status: VERIFICATION_INVALID
                   message: verification failed
+        '413':
+          description: The request body exceeded the 1 MB limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4003
+                  status: PAYLOAD_TOO_LARGE
+                  message: request body exceeds maximum size
         '500':
           $ref: '#/components/responses/InternalError'
   /users/verifications/resend:
@@ -194,8 +218,8 @@ paths:
             design. The response has no body.
         '400':
           description: |
-            The request body was malformed (`INVALID_REQUEST`) or the email did
-            not parse (`INVALID_EMAIL`).
+            The request body was malformed or not `application/json`
+            (`INVALID_REQUEST`), or the email did not parse (`INVALID_EMAIL`).
           content:
             application/json:
               schema:
@@ -205,6 +229,17 @@ paths:
                   code: 4004
                   status: INVALID_EMAIL
                   message: mail address is not a valid email
+        '413':
+          description: The request body exceeded the 1 MB limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4003
+                  status: PAYLOAD_TOO_LARGE
+                  message: request body exceeds maximum size
         '429':
           $ref: '#/components/responses/VerificationRateLimited'
         '500':
@@ -243,9 +278,9 @@ paths:
                 token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
         '400':
           description: |
-            The request body was malformed, empty, carried trailing data, or the
-            username/password exceeded the size limits (username 64 bytes,
-            password 256 bytes, body 1 MB).
+            The request body was malformed, empty, carried trailing data, was
+            not `application/json`, or the username/password exceeded the
+            field size limits (username 64 bytes, password 256 bytes).
           content:
             application/json:
               schema:
@@ -273,6 +308,17 @@ paths:
                   code: 1001
                   status: AUTH_INVALID_TOKEN
                   message: invalid credentials
+        '413':
+          description: The request body exceeded the 1 MB limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: 4003
+                  status: PAYLOAD_TOO_LARGE
+                  message: request body exceeds maximum size
         '500':
           $ref: '#/components/responses/InternalError'
   /ws:

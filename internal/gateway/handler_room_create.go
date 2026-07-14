@@ -31,7 +31,7 @@ func (g *Gateway) handleRoomCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req createRoomRequest
-	if !decodeRoomCommandBody(w, r, &req) {
+	if !decodeJSONBody(w, r, maxRoomCommandBodyBytes, &req) {
 		return
 	}
 	name, err := domain.NewRoomName(req.Name)

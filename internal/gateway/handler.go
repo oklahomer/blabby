@@ -3,7 +3,6 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -36,18 +35,8 @@ type LoginResponse struct {
 }
 
 func (g *Gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxLoginBodyBytes)
-
 	var req LoginRequest
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(&req); err != nil {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("malformed request body"))
-		return
-	}
-	// Reject any trailing data after the first JSON value to avoid silently
-	// accepting concatenated objects or junk after a valid request.
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("malformed request body"))
+	if !decodeJSONBody(w, r, maxLoginBodyBytes, &req) {
 		return
 	}
 

@@ -3,9 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
-	"mime"
 	"net/http"
 	"strings"
 
@@ -226,96 +224,31 @@ func (g *Gateway) requireRoomID(w http.ResponseWriter, r *http.Request, endpoint
 	return roomID, true
 }
 
-// roomRequestError carries both the user-facing gateway ErrorDetail and a
-// coarse classifier for the structured-log "reason" field. It is produced
-// by the room handlers' request parsers (decodeSendMessageRequest,
-// parseRoomListQuery).
-//
-// The classifier is distinct from the canonical status string so
-// operators can grep logs by cause ("malformed_body" vs "trailing_garbage"
-// vs "empty_text" etc.) — the status string alone collapses every 400
-// to "INVALID_REQUEST".
-type roomRequestError struct {
-	reason string
-	detail ErrorDetail
-}
-
-func (e *roomRequestError) Error() string { return e.detail.Message }
-
 // decodeSendMessageRequest parses and validates the POST body for
 // handleRoomSendMessage. It returns the parsed request on success, or a
-// roomRequestError describing the rejection cause on failure.
+// requestError describing the rejection cause on failure.
 //
 // The MaxBytesReader is installed on r.Body before decoding so an
 // oversize body surfaces as *http.MaxBytesError at decode time and is
 // mapped to a "payload_too_large" / 413 response.
-func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (*sendMessageRequest, *roomRequestError) {
+func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (*sendMessageRequest, *requestError) {
 	var req sendMessageRequest
 	if err := decodeStrictJSONBody(w, r, maxRoomMessageBodyBytes, &req); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(req.Text) == "" {
-		return nil, &roomRequestError{
+		return nil, &requestError{
 			reason: "empty_text",
 			detail: ErrInvalidRequest("text is required"),
 		}
 	}
 	if len(req.Text) > maxRoomMessageTextBytes {
-		return nil, &roomRequestError{
+		return nil, &requestError{
 			reason: "text_too_long",
 			detail: ErrInvalidRequest("text exceeds maximum length"),
 		}
 	}
 	return &req, nil
-}
-
-// decodeStrictJSONBody applies the gateway's common JSON-body rules for room
-// command endpoints: JSON content type, a per-endpoint byte cap, exactly one JSON
-// value, and no trailing data. Endpoint-specific semantic validation happens in
-// the caller after a typed request value exists.
-func decodeStrictJSONBody(w http.ResponseWriter, r *http.Request, maxBytes int64, dst any) *roomRequestError {
-	if !contentTypeIsJSON(r.Header.Get("Content-Type")) {
-		return &roomRequestError{
-			reason: "content_type",
-			detail: ErrInvalidRequest("content-type must be application/json"),
-		}
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(dst); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			return &roomRequestError{
-				reason: "payload_too_large",
-				detail: ErrPayloadTooLarge("request body exceeds maximum size"),
-			}
-		}
-		return &roomRequestError{
-			reason: "malformed_body",
-			detail: ErrInvalidRequest("malformed request body"),
-		}
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return &roomRequestError{
-			reason: "trailing_garbage",
-			detail: ErrInvalidRequest("malformed request body"),
-		}
-	}
-	return nil
-}
-
-// contentTypeIsJSON parses the Content-Type header and returns true if
-// the media type is application/json. Charset variants are accepted.
-func contentTypeIsJSON(header string) bool {
-	if header == "" {
-		return false
-	}
-	mediaType, _, err := mime.ParseMediaType(header)
-	if err != nil {
-		return false
-	}
-	return mediaType == "application/json"
 }
 
 // writeJSON writes v as a JSON body with the given HTTP status. Used by

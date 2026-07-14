@@ -3,7 +3,6 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -34,16 +33,8 @@ type RegisterResponse struct {
 // WEAK_PASSWORD, a generic INVALID_REQUEST for a malformed handle); a duplicate
 // address/handle is a 409, an exhausted resend budget a 429; success is 201.
 func (g *Gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxLoginBodyBytes)
-
 	var req RegisterRequest
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(&req); err != nil {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("malformed request body"))
-		return
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("malformed request body"))
+	if !decodeJSONBody(w, r, maxLoginBodyBytes, &req) {
 		return
 	}
 
