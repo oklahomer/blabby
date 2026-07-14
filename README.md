@@ -65,6 +65,8 @@ Type the email address, press `tab`, type the password, press `enter`. Then:
 
 That's the whole loop — from a fresh clone to exchanging messages in a few minutes across three terminals.
 
+Prefer one command for the server stack? `make up` collapses steps 1–3: it builds the blabby image on first use and runs `docker compose up`, starting PostgreSQL, a containerized backend, and a containerized gateway together (plus a local [Mailpit](https://mailpit.axllent.org/) for the optional registration-mail flow), streaming all their logs until `ctrl+c`. Run the client exactly as in step 4. The containers run the built image, not your working tree — rebuild it with `make docker` after code changes, or use the per-terminal steps above when iterating on the Go code.
+
 > The default JWT signing secret is a built-in development value (the gateway logs a warning). Pass `--jwt-secret` to the gateway (and `--listen` to change its address) for anything beyond local experimentation; every gateway in a real deployment must share the same secret.
 
 Want to run several gateways and backends that discover each other and route messages across nodes? See [`docs/multi-node-cluster.md`](docs/multi-node-cluster.md) for a runnable walk-through.
@@ -82,11 +84,18 @@ Want to run several gateways and backends that discover each other and route mes
 
 Common tasks are wrapped in the `Makefile`:
 
-`make spec-lint` also requires Node and `npx` on `PATH`; the other Quick Start requirements are enough to build, run, and test the Go binaries locally.
+`make spec-lint` also requires Node and `npx` on `PATH`; the other Quick Start requirements are enough to build, run, and test the Go binaries locally. The database-backed integration tests run only when `BLABBY_DATABASE_URL` points at the running PostgreSQL — they skip silently without it — so export it before `make test` for the full suite:
+
+```bash
+export BLABBY_DATABASE_URL="postgres://blabby:blabby@localhost:5432/blabby?sslmode=disable"
+```
 
 ```bash
 make build         # compile ./cmd/backend, ./cmd/gateway, and ./cmd/client
-make test          # race-flagged suite plus the multi-member cluster test
+make test          # race-flagged suite plus the multi-member cluster tests
+make up            # docker compose up: PostgreSQL + containerized backend and gateway (Quick Start steps 1-3)
+make db-reset      # recreate the database from a clean volume (wipes local data, reapplies schema + dev seed)
+make db-shell      # open psql against the running postgres service
 make lint          # golangci-lint
 make spec-lint     # validate the OpenAPI and AsyncAPI contracts
 make docs-preview  # browse both API contracts locally
