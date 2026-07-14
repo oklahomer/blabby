@@ -75,9 +75,10 @@ operations:
     summary: Frames the server sends to a client.
     description: |
       The server replies to the handshake with `auth_ok` or `auth_error`, then
-      streams room activity as `message`, `joined`, and `left` frames. `error`
-      and `ping` are part of the contract but are not produced by the shipped
-      server today — see each message's description.
+      streams room activity as `message`, `joined`, and `left` frames and
+      emits `ping` heartbeats on a fixed cadence. `error` is part of the
+      contract but is not produced by the shipped server today — see its
+      message description.
     messages:
       - $ref: '#/channels/chat/messages/authOk'
       - $ref: '#/channels/chat/messages/authError'
@@ -105,9 +106,9 @@ components:
       title: Pong
       summary: The client's reply to a server `ping`.
       description: |
-        Acknowledges a `ping`. The shipped server does not enable the heartbeat by
-        default, so a `pong` is a no-op unless the heartbeat has been turned on;
-        sending one on an idle connection is harmless.
+        Acknowledges a `ping`, re-arming the server's pong watchdog. A client
+        that stops answering is disconnected once the watchdog expires;
+        sending a `pong` the server did not ask for is harmless.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/PongPayload'
@@ -209,9 +210,9 @@ components:
       title: Ping
       summary: A server heartbeat probe.
       description: |
-        Part of the heartbeat protocol. The shipped server does not enable the
-        heartbeat by default, so it does not send `ping` frames unless the
-        heartbeat has been turned on.
+        Part of the heartbeat protocol. The server sends a `ping` every 30
+        seconds; a client that fails to answer with `pong` before the
+        75-second watchdog expires is disconnected.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/PingPayload'

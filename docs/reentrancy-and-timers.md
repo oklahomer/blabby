@@ -83,11 +83,12 @@ The connection actor runs three timers this way:
   ignores the stale tick. Not cancelling on success is deliberate
   simplicity.
 - **Heartbeat ping** — `SendRepeatedly` emits `AppPingTick` on a fixed
-  interval (`heartbeat.go`).
-- **Pong watchdog** — a one-shot `PongTimeoutExpired`, armed by the first
-  unanswered ping and re-armed only by a pong. The `ensureWatchdog` /
-  `resetWatchdog` split means one watchdog spans consecutive unanswered
-  pings instead of each ping pushing the deadline out.
+  interval (`heartbeat.go`); the shipped gateway pings every 30 seconds.
+- **Pong watchdog** — a one-shot `PongTimeoutExpired` (75 seconds in the
+  shipped gateway), armed by the first unanswered ping and re-armed only by
+  a pong. The `ensureWatchdog` / `resetWatchdog` split means one watchdog
+  spans consecutive unanswered pings instead of each ping pushing the
+  deadline out.
 
 One subtlety in `heartbeat.go`'s doc comment repays reading: the cancel
 handles live on per-actor state, not in middleware closures, because
