@@ -309,7 +309,9 @@ type ReadLoopRequest struct {
 
 // ReadLoopCmd starts a long-lived goroutine that drains the
 // WebSocket and dispatches each frame back into the Update loop via
-// FrameSender.Send. The Cmd itself returns nil immediately — the
+// FrameSender.Send. Server "ping" frames are answered with a "pong"
+// in place and never reach the Update loop. The Cmd itself returns
+// nil immediately — the
 // goroutine outlives the Cmd invocation and exits when the
 // connection closes (cleanly or otherwise), at which point it sends
 // a single WSDisconnected and returns.
@@ -353,6 +355,22 @@ func ReadLoopCmd(req ReadLoopRequest) tea.Cmd {
 				if jsonErr := json.Unmarshal(frame, &env); jsonErr != nil {
 					// Malformed frame from the server is a server-side
 					// bug; drop it silently rather than crashing the UI.
+					continue
+				}
+				if env.Type == "ping" {
+					// Answer the application heartbeat in place. Writing
+					// from this goroutine honors gorilla's single-writer
+					// rule: after the auth handshake it is the only
+					// WriteJSON caller (CloseGracefully uses WriteControl,
+					// which gorilla permits concurrently). A failed write
+					// is fatal — gorilla latches write errors, and with no
+					// read deadline a half-open connection would never
+					// unblock ReadMessage — so report the disconnect and
+					// let the deferred Close clean up.
+					if writeErr := req.Conn.WriteJSON(PongFrame{Type: "pong"}); writeErr != nil {
+						req.Sender.Send(WSDisconnected{Err: writeErr, Generation: req.Generation})
+						return
+					}
 					continue
 				}
 				req.Sender.Send(WSFrameReceived{Type: env.Type, Raw: frame, Generation: req.Generation})
