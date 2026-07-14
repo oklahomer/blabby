@@ -63,6 +63,7 @@ const (
 	eventConnectionEventUnknown           = "connection.event.unknown"
 	eventConnectionRoomRefInvalid         = "connection.room_ref.invalid"
 	eventConnectionUserRefInvalid         = "connection.user_ref.invalid"
+	eventConnectionCloseInitiated         = "connection.close_initiated"
 	eventConnectionCloseFrameError        = "connection.close_frame.error"
 	eventConnectionReadPumpPanic          = "connection.read_pump.panic"
 	eventConnectionSupervision            = "connection.supervision"
@@ -154,16 +155,12 @@ func WithReregisterRetryDelay(d time.Duration) Option {
 }
 
 // WithAppHeartbeat enables application-level ping/pong timing for the
-// connection. This option only sets the cadence; the actor owns the timers
-// themselves — one [heartbeatTimers] per spawn, driven from Receive — and
-// decides what ping and timeout mean.
-func WithAppHeartbeat(pingInterval, pongTimeout time.Duration) Option {
-	return func(c *userConnectionConfig) {
-		c.heartbeat = heartbeatConfig{
-			pingInterval: pingInterval,
-			pongTimeout:  pongTimeout,
-		}
-	}
+// connection with the given cadence; the production gateway passes its
+// default cadence for every /ws spawn. The option only sets the timing —
+// the actor owns the timers themselves, one [heartbeatTimers] per spawn,
+// driven from Receive, and decides what ping and timeout mean.
+func WithAppHeartbeat(cadence HeartbeatCadence) Option {
+	return func(c *userConnectionConfig) { c.heartbeat = cadence }
 }
 
 // NewProps builds an actor.Props for a UserConnection bound to conn. The
@@ -214,7 +211,7 @@ type userConnectionConfig struct {
 	userClient           UserGrainCaller
 	authTimeout          time.Duration
 	reregisterRetryDelay time.Duration
-	heartbeat            heartbeatConfig
+	heartbeat            HeartbeatCadence
 }
 
 // Receive handles actor lifecycle messages directly and delegates ordinary
@@ -456,14 +453,20 @@ func (uc *UserConnection) postAuthBehavior(ctx actor.Context) {
 	}
 }
 
-// newClosingBehavior returns the closing behavior. Constructing it queues cc
-// on the outbound channel on a best-effort basis so the close frame is in
-// flight as soon as the caller installs the behavior via Become. The
+// newClosingBehavior returns the closing behavior. Constructing it records
+// the close reason and queues cc on the outbound channel so the close frame
+// is in flight as soon as the caller installs the behavior via Become. The
+// enqueue is the supervised send on purpose: if the channel is full, the
+// backpressure panic reaches the guardian and stops the actor — a close that
+// cannot even be queued must still tear the connection down, not leave the
+// actor idling forever in a behavior that never terminates. The log line is
+// emitted first so the intent is recorded even on that panic path. The
 // returned ReceiveFunc gates the non-lifecycle message space — Receive
 // handles transport tear-down and Proto.Actor lifecycle directly, so
 // closing only needs to drop everything else until *actor.Stopping arrives.
 func (uc *UserConnection) newClosingBehavior(ctx actor.Context, cc *CloseConnection) actor.ReceiveFunc {
-	uc.sendOutboundBestEffort(ctx, cc)
+	slog.Info(eventConnectionCloseInitiated, uc.logAttrs(ctx, "reason", cc.Reason)...)
+	uc.sendOutbound(ctx, cc)
 	return func(ctx actor.Context) {}
 }
 
@@ -739,8 +742,9 @@ func (uc *UserConnection) sendOutbound(ctx actor.Context, msg any) {
 }
 
 // sendOutboundBestEffort enqueues msg if there is room and otherwise drops it.
-// Used for the close frame, which is advisory: if the channel is full the peer
-// is likely stale or already gone, and the actor will tear down regardless.
+// Used for the pre-auth AuthFailed courtesy frames: each send is immediately
+// followed by the closing transition, so dropping one only costs the peer a
+// nicer error message — the close itself still happens.
 func (uc *UserConnection) sendOutboundBestEffort(ctx actor.Context, msg any) {
 	select {
 	case uc.outbound <- msg:

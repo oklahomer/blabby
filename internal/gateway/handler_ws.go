@@ -3,6 +3,7 @@ package gateway
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/gorilla/websocket"
@@ -14,6 +15,18 @@ import (
 // handler so the route table in RegisterRoutes references the same
 // string the handler is registered under.
 const endpointWS = "GET /ws"
+
+// Application heartbeat cadence for every production connection. The pong
+// timeout must exceed the ping interval — a pong re-arms the watchdog rather
+// than canceling it — and MustHeartbeatCadence enforces that at process
+// start, so a bad edit here fails the first run instead of silently killing
+// healthy peers.
+const (
+	defaultPingInterval = 30 * time.Second
+	defaultPongTimeout  = 75 * time.Second
+)
+
+var defaultHeartbeatCadence = connection.MustHeartbeatCadence(defaultPingInterval, defaultPongTimeout)
 
 // wsUpgrader is the package-private upgrader used by every /ws request.
 //
@@ -59,7 +72,9 @@ func (g *Gateway) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	props := connection.NewProps(conn, g.auth, g.cluster)
+	props := connection.NewProps(conn, g.auth, g.cluster,
+		connection.WithAppHeartbeat(g.heartbeat),
+	)
 	pid = g.actorRoot.Spawn(props)
 	slog.Info("gateway.ws.upgraded",
 		"method", r.Method,
