@@ -394,7 +394,7 @@ func TestHeartbeat_PreAuthPingIsSent(t *testing.T) {
 		return nil, nil
 	}}
 	sess := startSession(t, authStub, &recordingGrainCaller{},
-		WithAppHeartbeat(20*time.Millisecond, 500*time.Millisecond),
+		WithAppHeartbeat(MustHeartbeatCadence(20*time.Millisecond, 500*time.Millisecond)),
 	)
 
 	got := readJSON(t, sess.client)
@@ -412,7 +412,7 @@ func TestHeartbeat_PongTimeoutClosesConnection(t *testing.T) {
 		return nil, nil
 	}}
 	sess := startSession(t, authStub, &recordingGrainCaller{},
-		WithAppHeartbeat(20*time.Millisecond, 40*time.Millisecond),
+		WithAppHeartbeat(MustHeartbeatCadence(20*time.Millisecond, 40*time.Millisecond)),
 	)
 
 	if got := readJSON(t, sess.client); got["type"] != "ping" {
@@ -434,7 +434,7 @@ func TestHeartbeat_PongKeepsConnectionAlive(t *testing.T) {
 		return nil, nil
 	}}
 	sess := startSession(t, authStub, &recordingGrainCaller{},
-		WithAppHeartbeat(20*time.Millisecond, 250*time.Millisecond),
+		WithAppHeartbeat(MustHeartbeatCadence(20*time.Millisecond, 250*time.Millisecond)),
 	)
 
 	// 15 pings ≈ 300ms — past pongTimeout, so survival proves the resets.
@@ -445,6 +445,42 @@ func TestHeartbeat_PongKeepsConnectionAlive(t *testing.T) {
 		if err := sess.client.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`)); err != nil {
 			t.Fatalf("write pong %d: %v", i, err)
 		}
+	}
+}
+
+// TestNewClosingBehavior_FailsClosedOnFullOutbound pins the fail-closed close
+// path: when the outbound channel cannot even accept the CloseConnection, the
+// supervised send panics with *outboundBackpressureError so the guardian
+// stops the actor instead of leaving it idling in a closing behavior that
+// never terminates. TestClassifyConnectionFailure proves the error maps to
+// StopDirective; recovering here keeps the assertion free of supervision
+// timing.
+func TestNewClosingBehavior_FailsClosedOnFullOutbound(t *testing.T) {
+	system := actor.NewActorSystem()
+	// An unbuffered channel with no reader makes every non-blocking send
+	// hit the backpressure branch.
+	uc := &UserConnection{outbound: make(chan any)}
+
+	type runClose struct{}
+	recovered := make(chan any, 1)
+	props := actor.PropsFromFunc(func(ctx actor.Context) {
+		if _, ok := ctx.Message().(*runClose); !ok {
+			return
+		}
+		defer func() { recovered <- recover() }()
+		uc.newClosingBehavior(ctx, &CloseConnection{Reason: "pong_timeout"})
+	})
+	pid := system.Root.Spawn(props)
+	t.Cleanup(func() { _ = system.Root.PoisonFuture(pid).Wait() })
+
+	system.Root.Send(pid, &runClose{})
+	select {
+	case r := <-recovered:
+		if _, ok := r.(*outboundBackpressureError); !ok {
+			t.Fatalf("recovered %T (%v), want *outboundBackpressureError", r, r)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("closing behavior never ran")
 	}
 }
 

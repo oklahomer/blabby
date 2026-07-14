@@ -404,6 +404,118 @@ func TestReadLoopCmdDispatchesFramesAndDisconnect(t *testing.T) {
 	}
 }
 
+func TestReadLoopCmdAnswersPingWithPong(t *testing.T) {
+	t.Parallel()
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	pongCh := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		if err := conn.WriteJSON(map[string]any{"type": "ping"}); err != nil {
+			return
+		}
+		_, frame, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		pongCh <- frame
+	}))
+	defer srv.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(strings.Replace(srv.URL, "http", "ws", 1), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	sender := newCaptureSender()
+	if msg := ReadLoopCmd(ReadLoopRequest{
+		Context:    context.Background(),
+		Sender:     sender,
+		Conn:       conn,
+		Generation: testGeneration,
+	})(); msg != nil {
+		t.Fatalf("ReadLoopCmd should return nil immediately, got %T", msg)
+	}
+
+	select {
+	case frame := <-pongCh:
+		var env FrameEnvelope
+		if err := json.Unmarshal(frame, &env); err != nil {
+			t.Fatalf("decode pong reply: %v (raw %q)", err, frame)
+		}
+		if env.Type != "pong" {
+			t.Fatalf("reply type = %q, want pong", env.Type)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the pong reply")
+	}
+
+	// The server closes after receiving the pong; the loop reports the
+	// disconnect as usual.
+	select {
+	case <-sender.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for WSDisconnected")
+	}
+
+	// The ping is answered in place, never forwarded to the Update loop.
+	for _, m := range sender.snapshot() {
+		if fr, ok := m.(WSFrameReceived); ok {
+			t.Errorf("frame forwarded to UI: %#v", fr)
+		}
+	}
+}
+
+func TestReadLoopCmdExitsWhenPongWriteFails(t *testing.T) {
+	t.Parallel()
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	hold := make(chan struct{})
+	t.Cleanup(func() { close(hold) })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		if err := conn.WriteJSON(map[string]any{"type": "ping"}); err != nil {
+			return
+		}
+		<-hold // keep the socket open so only the client's write path fails
+	}))
+	defer srv.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(strings.Replace(srv.URL, "http", "ws", 1), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	// An already-expired write deadline makes the pong write fail while
+	// reads keep working — the shape of a half-open connection.
+	if err := conn.SetWriteDeadline(time.Now().Add(-time.Second)); err != nil {
+		t.Fatalf("set write deadline: %v", err)
+	}
+
+	sender := newCaptureSender()
+	if msg := ReadLoopCmd(ReadLoopRequest{
+		Context:    context.Background(),
+		Sender:     sender,
+		Conn:       conn,
+		Generation: testGeneration,
+	})(); msg != nil {
+		t.Fatalf("ReadLoopCmd should return nil immediately, got %T", msg)
+	}
+
+	// The failed pong write must end the loop with WSDisconnected rather
+	// than leaving it blocked on a read that may never return.
+	select {
+	case <-sender.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for WSDisconnected after pong-write failure")
+	}
+}
+
 func TestLoginCmdTokenNeverLeaksToErrorPath(t *testing.T) {
 	t.Parallel()
 	const secretToken = "super.secret.jwt"

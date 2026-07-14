@@ -17,9 +17,9 @@ type timersProbe struct {
 	gotTimeout chan struct{}
 }
 
-func newTimersProbe(cfg heartbeatConfig) *timersProbe {
+func newTimersProbe(cadence HeartbeatCadence) *timersProbe {
 	return &timersProbe{
-		timers:     newHeartbeatTimers(cfg),
+		timers:     newHeartbeatTimers(cadence),
 		gotPing:    make(chan struct{}, 1),
 		gotTimeout: make(chan struct{}, 1),
 	}
@@ -59,10 +59,7 @@ func waitSignal(t *testing.T, ch <-chan struct{}, what string) {
 
 func TestHeartbeatTimers_SendsPingTickAndPongTimeout(t *testing.T) {
 	system := actor.NewActorSystem()
-	probe := newTimersProbe(heartbeatConfig{
-		pingInterval: 20 * time.Millisecond,
-		pongTimeout:  30 * time.Millisecond,
-	})
+	probe := newTimersProbe(MustHeartbeatCadence(20*time.Millisecond, 30*time.Millisecond))
 	props := actor.PropsFromProducer(func() actor.Actor { return probe })
 
 	pid := system.Root.Spawn(props)
@@ -79,16 +76,13 @@ func TestHeartbeatTimers_SendsPingTickAndPongTimeout(t *testing.T) {
 // and stopping the first must not cancel the second's ping schedule.
 func TestHeartbeatTimers_PerActorStateAcrossPropsReuse(t *testing.T) {
 	system := actor.NewActorSystem()
-	cfg := heartbeatConfig{
-		pingInterval: 20 * time.Millisecond,
-		// Long timeout: watchdog noise is irrelevant to this test.
-		pongTimeout: 10 * time.Second,
-	}
+	// Long timeout: watchdog noise is irrelevant to this test.
+	cadence := MustHeartbeatCadence(20*time.Millisecond, 10*time.Second)
 
 	var mu sync.Mutex
 	var probes []*timersProbe
 	props := actor.PropsFromProducer(func() actor.Actor {
-		p := newTimersProbe(cfg)
+		p := newTimersProbe(cadence)
 		mu.Lock()
 		probes = append(probes, p)
 		mu.Unlock()
@@ -133,21 +127,46 @@ func TestHeartbeatTimers_PerActorStateAcrossPropsReuse(t *testing.T) {
 	waitSignal(t, probeB.gotPing, "actor B's *AppPingTick after actor A stopped")
 }
 
-func TestHeartbeatConfig_RequiresBothDurations(t *testing.T) {
+func TestNewHeartbeatCadence_RejectsInvalidPairs(t *testing.T) {
 	tests := []struct {
 		name string
-		cfg  heartbeatConfig
-		want bool
+		ping time.Duration
+		pong time.Duration
 	}{
-		{name: "both set", cfg: heartbeatConfig{pingInterval: time.Second, pongTimeout: time.Second}, want: true},
-		{name: "missing ping", cfg: heartbeatConfig{pongTimeout: time.Second}, want: false},
-		{name: "missing timeout", cfg: heartbeatConfig{pingInterval: time.Second}, want: false},
+		{name: "zero ping", ping: 0, pong: time.Second},
+		{name: "negative ping", ping: -time.Second, pong: time.Second},
+		{name: "zero pong", ping: time.Second, pong: 0},
+		{name: "pong equals ping", ping: time.Second, pong: time.Second},
+		{name: "pong below ping", ping: time.Second, pong: 500 * time.Millisecond},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.cfg.enabled(); got != tc.want {
-				t.Errorf("enabled() = %v, want %v", got, tc.want)
+			if _, err := NewHeartbeatCadence(tc.ping, tc.pong); err == nil {
+				t.Errorf("NewHeartbeatCadence(%v, %v) accepted an invalid pair", tc.ping, tc.pong)
 			}
 		})
 	}
+}
+
+func TestNewHeartbeatCadence_ValidPairEnables(t *testing.T) {
+	cadence, err := NewHeartbeatCadence(20*time.Millisecond, 50*time.Millisecond)
+	if err != nil {
+		t.Fatalf("NewHeartbeatCadence: %v", err)
+	}
+	if !cadence.enabled() {
+		t.Error("constructed cadence must be enabled")
+	}
+	var disabled HeartbeatCadence
+	if disabled.enabled() {
+		t.Error("zero cadence must be disabled")
+	}
+}
+
+func TestMustHeartbeatCadence_PanicsOnInvalidPair(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("MustHeartbeatCadence accepted an invalid pair without panicking")
+		}
+	}()
+	MustHeartbeatCadence(time.Second, time.Second)
 }

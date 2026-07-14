@@ -76,6 +76,13 @@ type FrameEnvelope struct {
 	Type string `json:"type"`
 }
 
+// PongFrame is the outbound reply to a server "ping" frame — mirrors
+// the pong wire shape the server decodes in
+// internal/actor/connection/decoder.go.
+type PongFrame struct {
+	Type string `json:"type"`
+}
+
 // AuthErrorFrame mirrors internal/actor/connection/encoder.go's
 // auth_error payload (1001/1002/1003).
 type AuthErrorFrame struct {

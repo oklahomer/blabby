@@ -7,6 +7,7 @@ import (
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/cluster"
 
+	"github.com/oklahomer/blabby/internal/actor/connection"
 	"github.com/oklahomer/blabby/internal/auth"
 	"github.com/oklahomer/blabby/internal/id"
 )
@@ -30,6 +31,11 @@ type Gateway struct {
 	// nil leaves the route unregistered so the path returns 404 — see
 	// RegisterInternalRoutes.
 	metrics http.Handler
+
+	// heartbeat is the application ping/pong cadence handleWS passes to
+	// every connection spawn. NewGateway sets the production default;
+	// integration tests shorten it through the export_test seam.
+	heartbeat connection.HeartbeatCadence
 
 	// userGrain is a test seam. Production construction in NewGateway
 	// leaves it nil and userGrainFor falls through to
@@ -75,6 +81,7 @@ func NewGateway(deps Deps) *Gateway {
 		cluster:      deps.Cluster,
 		actorRoot:    deps.ActorRoot,
 		metrics:      deps.Metrics,
+		heartbeat:    defaultHeartbeatCadence,
 	}
 }
 
