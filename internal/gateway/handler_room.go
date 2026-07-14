@@ -3,9 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
-	"mime"
 	"net/http"
 	"strings"
 
@@ -70,18 +68,19 @@ func (g *Gateway) handleRoomMembershipPut(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	logRoomEntry(endpointRoomMembershipPut, r.Method, userID, roomID)
+	op := roomOp{endpoint: endpointRoomMembershipPut, method: r.Method, userID: userID, roomID: roomID}
+	logRoomEntry(op)
 	resp, err := g.userGrainFor(userID).JoinRoom(&userpb.JoinRoomRequest{RoomId: roomID.String()})
 	if err != nil {
-		logRoomTransportError(endpointRoomMembershipPut, r.Method, userID, roomID)
+		logRoomTransportError(op)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
 		return
 	}
 	if pe := resp.GetError(); pe != nil {
-		writeBusinessErrorResponse(w, endpointRoomMembershipPut, r.Method, userID, roomID, pe)
+		writeBusinessErrorResponse(w, op, pe)
 		return
 	}
-	logRoomExit(endpointRoomMembershipPut, r.Method, userID, roomID, outcomeOK, 0)
+	logRoomExit(op, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, successResponse{Success: true})
 }
 
@@ -98,18 +97,19 @@ func (g *Gateway) handleRoomMembershipDelete(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	logRoomEntry(endpointRoomMembershipDelete, r.Method, userID, roomID)
+	op := roomOp{endpoint: endpointRoomMembershipDelete, method: r.Method, userID: userID, roomID: roomID}
+	logRoomEntry(op)
 	resp, err := g.userGrainFor(userID).LeaveRoom(&userpb.LeaveRoomRequest{RoomId: roomID.String()})
 	if err != nil {
-		logRoomTransportError(endpointRoomMembershipDelete, r.Method, userID, roomID)
+		logRoomTransportError(op)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
 		return
 	}
 	if pe := resp.GetError(); pe != nil {
-		writeBusinessErrorResponse(w, endpointRoomMembershipDelete, r.Method, userID, roomID, pe)
+		writeBusinessErrorResponse(w, op, pe)
 		return
 	}
-	logRoomExit(endpointRoomMembershipDelete, r.Method, userID, roomID, outcomeOK, 0)
+	logRoomExit(op, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, successResponse{Success: true})
 }
 
@@ -127,7 +127,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	req, derr := decodeSendMessageRequest(r, w)
+	req, derr := decodeSendMessageRequest(w, r)
 	if derr != nil {
 		slog.Warn("gateway.room.rejected",
 			"endpoint", endpointRoomMessage, "method", r.Method,
@@ -219,49 +219,33 @@ func (g *Gateway) requireRoomID(w http.ResponseWriter, r *http.Request, endpoint
 		WriteErrorResponse(w, http.StatusNotFound, ErrRoomNotFound("room not found"))
 		return id.RoomID{}, false
 	case err != nil:
-		logRoomTransportError(endpoint, r.Method, userID, id.RoomID{})
+		logRoomTransportError(roomOp{endpoint: endpoint, method: r.Method, userID: userID})
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to resolve room"))
 		return id.RoomID{}, false
 	}
 	return roomID, true
 }
 
-// roomRequestError carries both the user-facing gateway ErrorDetail and a
-// coarse classifier for the structured-log "reason" field. It is produced
-// by the room handlers' request parsers (decodeSendMessageRequest,
-// parseRoomListQuery).
-//
-// The classifier is distinct from the canonical status string so
-// operators can grep logs by cause ("malformed_body" vs "trailing_garbage"
-// vs "empty_text" etc.) — the status string alone collapses every 400
-// to "INVALID_REQUEST".
-type roomRequestError struct {
-	reason string
-	detail ErrorDetail
-}
-
-func (e *roomRequestError) Error() string { return e.detail.Message }
-
 // decodeSendMessageRequest parses and validates the POST body for
 // handleRoomSendMessage. It returns the parsed request on success, or a
-// roomRequestError describing the rejection cause on failure.
+// requestError describing the rejection cause on failure.
 //
 // The MaxBytesReader is installed on r.Body before decoding so an
 // oversize body surfaces as *http.MaxBytesError at decode time and is
 // mapped to a "payload_too_large" / 413 response.
-func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (*sendMessageRequest, *roomRequestError) {
+func decodeSendMessageRequest(w http.ResponseWriter, r *http.Request) (*sendMessageRequest, *requestError) {
 	var req sendMessageRequest
 	if err := decodeStrictJSONBody(w, r, maxRoomMessageBodyBytes, &req); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(req.Text) == "" {
-		return nil, &roomRequestError{
+		return nil, &requestError{
 			reason: "empty_text",
 			detail: ErrInvalidRequest("text is required"),
 		}
 	}
 	if len(req.Text) > maxRoomMessageTextBytes {
-		return nil, &roomRequestError{
+		return nil, &requestError{
 			reason: "text_too_long",
 			detail: ErrInvalidRequest("text exceeds maximum length"),
 		}
@@ -269,63 +253,27 @@ func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (*sendMess
 	return &req, nil
 }
 
-// decodeStrictJSONBody applies the gateway's common JSON-body rules for room
-// command endpoints: JSON content type, a per-endpoint byte cap, exactly one JSON
-// value, and no trailing data. Endpoint-specific semantic validation happens in
-// the caller after a typed request value exists.
-func decodeStrictJSONBody(w http.ResponseWriter, r *http.Request, maxBytes int64, dst any) *roomRequestError {
-	if !contentTypeIsJSON(r.Header.Get("Content-Type")) {
-		return &roomRequestError{
-			reason: "content_type",
-			detail: ErrInvalidRequest("content-type must be application/json"),
-		}
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(dst); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			return &roomRequestError{
-				reason: "payload_too_large",
-				detail: ErrPayloadTooLarge("request body exceeds maximum size"),
-			}
-		}
-		return &roomRequestError{
-			reason: "malformed_body",
-			detail: ErrInvalidRequest("malformed request body"),
-		}
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return &roomRequestError{
-			reason: "trailing_garbage",
-			detail: ErrInvalidRequest("malformed request body"),
-		}
-	}
-	return nil
-}
-
-// contentTypeIsJSON parses the Content-Type header and returns true if
-// the media type is application/json. Charset variants are accepted.
-func contentTypeIsJSON(header string) bool {
-	if header == "" {
-		return false
-	}
-	mediaType, _, err := mime.ParseMediaType(header)
-	if err != nil {
-		return false
-	}
-	return mediaType == "application/json"
-}
-
 // writeJSON writes v as a JSON body with the given HTTP status. Used by
 // the success path of every room command handler.
-func writeJSON(w http.ResponseWriter, httpStatus int, v any) {
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(httpStatus)
+	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Error("gateway.room.write_failed", "error", err)
 	}
+}
+
+// roomOp bundles the identifying context every room handler threads through
+// its log and error helpers: endpoint pattern, HTTP method, acting user, and
+// target room (zero for the catalogue endpoints, which address no single
+// room). It is an immutable value — a handler that learns the room id
+// mid-flight (room creation) constructs a second literal rather than
+// mutating.
+type roomOp struct {
+	endpoint string
+	method   string
+	userID   id.UserID
+	roomID   id.RoomID
 }
 
 // writeBusinessErrorResponse converts a non-nil grain ErrorDetail into
@@ -335,39 +283,39 @@ func writeJSON(w http.ResponseWriter, httpStatus int, v any) {
 //
 // Callers MUST pass a non-nil pe; every call site already checks
 // `resp.GetError() != nil` before invoking this helper.
-func writeBusinessErrorResponse(w http.ResponseWriter, endpoint, method string, userID id.UserID, roomID id.RoomID, pe *commonpb.ErrorDetail) {
+func writeBusinessErrorResponse(w http.ResponseWriter, op roomOp, pe *commonpb.ErrorDetail) {
 	ed, err := FromProtoErrorDetail(pe)
 	if err != nil {
 		slog.Error("gateway.room.contract_violation",
-			"endpoint", endpoint, "method", method,
-			"user_id", userID, "room_id", roomID,
+			"endpoint", op.endpoint, "method", op.method,
+			"user_id", op.userID, "room_id", op.roomID,
 			"code", pe.GetCode(), "status", pe.GetStatus(), "error", err)
 		WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("internal server error"))
 		return
 	}
 	slog.Info("gateway.room.exited",
-		"endpoint", endpoint, "method", method,
-		"user_id", userID, "room_id", roomID,
+		"endpoint", op.endpoint, "method", op.method,
+		"user_id", op.userID, "room_id", op.roomID,
 		"outcome", outcomeBusinessError, "code", ed.Code)
 	WriteErrorResponse(w, httpStatus(ed.Code), ed)
 }
 
-func logRoomEntry(endpoint, method string, userID id.UserID, roomID id.RoomID) {
+func logRoomEntry(op roomOp) {
 	slog.Info("gateway.room.entered",
-		"endpoint", endpoint, "method", method,
-		"user_id", userID, "room_id", roomID)
+		"endpoint", op.endpoint, "method", op.method,
+		"user_id", op.userID, "room_id", op.roomID)
 }
 
-func logRoomExit(endpoint, method string, userID id.UserID, roomID id.RoomID, outcome string, code int) {
+func logRoomExit(op roomOp, outcome string, code int) {
 	slog.Info("gateway.room.exited",
-		"endpoint", endpoint, "method", method,
-		"user_id", userID, "room_id", roomID,
+		"endpoint", op.endpoint, "method", op.method,
+		"user_id", op.userID, "room_id", op.roomID,
 		"outcome", outcome, "code", code)
 }
 
-func logRoomTransportError(endpoint, method string, userID id.UserID, roomID id.RoomID) {
+func logRoomTransportError(op roomOp) {
 	slog.Warn("gateway.room.transport_error",
-		"endpoint", endpoint, "method", method,
-		"user_id", userID, "room_id", roomID,
+		"endpoint", op.endpoint, "method", op.method,
+		"user_id", op.userID, "room_id", op.roomID,
 		"outcome", outcomeTransportError)
 }

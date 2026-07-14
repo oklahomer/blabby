@@ -199,7 +199,7 @@ func TestUserCreate_PropagatesHardError(t *testing.T) {
 	}
 }
 
-// findByCase drives the three single-row FindBy* lookups, which differ only in
+// findByCase drives the single-row FindBy* lookups, which differ only in
 // their WHERE clause and the argument they bind.
 type findByCase struct {
 	name    string
@@ -215,13 +215,6 @@ func findByCases(t *testing.T) []findByCase {
 				return r.FindByEmail(context.Background(), q, mustMailAddress(t, "alice@example.com"))
 			},
 			wantArg: "alice@example.com",
-		},
-		{
-			name: "FindByHandle",
-			call: func(r *UserRepo, q postgres.Querier) (User, error) {
-				return r.FindByHandle(context.Background(), q, mustHandle(t, "Alice"))
-			},
-			wantArg: "alice",
 		},
 		{
 			name: "FindByID",

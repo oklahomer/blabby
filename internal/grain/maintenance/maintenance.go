@@ -161,24 +161,24 @@ func (g *Grain) SweepPendingAccounts(_ *maintenancepb.SweepPendingAccountsReques
 // logOutcome reports a finished sweep. err is set when the future failed (the worker
 // hung past the timeout or crashed); otherwise res carries the worker's reply.
 func (g *Grain) logOutcome(ctx cluster.GrainContext, res any, err error) {
-	switch {
-	case err != nil:
+	if err != nil {
 		slog.Error("maintenance.pending_account_gc.unfinished",
 			"grain_id", ctx.Identity(), "error", err)
-	default:
-		result, ok := res.(sweepResult)
-		switch {
-		case !ok:
-			slog.Error("maintenance.pending_account_gc.unexpected_reply",
-				"grain_id", ctx.Identity(), "reply_type", fmt.Sprintf("%T", res))
-		case result.err != nil:
-			slog.Error("maintenance.pending_account_gc.failed",
-				"grain_id", ctx.Identity(), "error", result.err)
-		default:
-			slog.Info("maintenance.pending_account_gc.swept",
-				"grain_id", ctx.Identity(), "deleted", result.deleted)
-		}
+		return
 	}
+	result, ok := res.(sweepResult)
+	if !ok {
+		slog.Error("maintenance.pending_account_gc.unexpected_reply",
+			"grain_id", ctx.Identity(), "reply_type", fmt.Sprintf("%T", res))
+		return
+	}
+	if result.err != nil {
+		slog.Error("maintenance.pending_account_gc.failed",
+			"grain_id", ctx.Identity(), "error", result.err)
+		return
+	}
+	slog.Info("maintenance.pending_account_gc.swept",
+		"grain_id", ctx.Identity(), "deleted", result.deleted)
 }
 
 // ReceiveDefault logs any unexpected message. The sweep's lifecycle runs entirely

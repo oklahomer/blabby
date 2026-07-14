@@ -65,9 +65,9 @@ func NewErrorDetail(code errcode.Code, message string) ErrorDetail {
 // WriteErrorResponse writes a JSON error envelope to the response writer
 // with the given HTTP status code. This should be the only path for writing
 // error responses, ensuring no internal details leak to clients.
-func WriteErrorResponse(w http.ResponseWriter, httpStatus int, detail ErrorDetail) {
+func WriteErrorResponse(w http.ResponseWriter, status int, detail ErrorDetail) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(httpStatus)
+	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(ErrorResponse{Error: detail}); err != nil {
 		slog.Error("gateway.error.write_failed", "error", err, "code", detail.Code, "status", detail.Status)
 	}

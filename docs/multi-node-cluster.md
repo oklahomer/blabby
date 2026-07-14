@@ -37,7 +37,7 @@ tiers.
 | `--cluster-host` | both | Remote transport bind host (default `127.0.0.1`) |
 | `--cluster-port` | both | Remote transport bind port — **fixed, non-zero** when seeds are supplied |
 | `--advertised-host` | both | `host:port` peers use to reach this process; **required** with seeds, port should equal `--cluster-port` |
-| `--discovery-port` | both | automanaged discovery port (default `6330`); unique per process on one host |
+| `--discovery-port` | both | automanaged discovery port (default `6330` for the backend, `6331` for the gateway); unique per process on one host |
 | `--seeds` | both | Comma-separated `host:discoveryPort` list of the **backends** to discover |
 
 Supplying one or more `--seeds` selects multi-node mode. In that mode a process
@@ -116,8 +116,11 @@ go run ./cmd/gateway \
 Each **gateway** logs the backend's arrival, naming its advertised address:
 
 ```json
-{"level":"INFO","msg":"server.cluster.member_joined","node_address":"127.0.0.1:8090","kinds":["UserGrain","RoomGrain"]}
+{"level":"INFO","msg":"server.cluster.member_joined","node_address":"127.0.0.1:8090","kinds":["prototopic","UserGrain","RoomGrain","MaintenanceGrain"]}
 ```
+
+`prototopic` is Proto.Actor's built-in pub-sub kind; the other three are
+blabby's grains.
 
 The gateways are clients, not members, so they never appear in the cluster's
 member topology — only backends do. A member leaving logs

@@ -327,16 +327,7 @@ func (g *Grain) JoinRoom(req *userpb.JoinRoomRequest, ctx cluster.GrainContext) 
 
 	roomResp, err := g.rooms.Join(roomID, &roompb.JoinRequest{User: g.self})
 	if err != nil {
-		// Transport failures are translated into a structured business
-		// error so the gateway treats them uniformly with domain failures.
-		// The message stays generic — no actor paths leaked to the client.
-		slog.Warn(middleware.EventGrainTransportError,
-			"grain_type", ctx.Kind(),
-			"grain_id", ctx.Identity(),
-			"msg_type", "JoinRoom",
-			"room_id", roomID,
-			"error", err,
-		)
+		logTransportError(ctx, "JoinRoom", roomID, err)
 		return &userpb.JoinRoomResponse{Error: errDetail(errcode.InternalError, "failed to reach room")}, nil
 	}
 	if roomErr := roomResp.GetError(); roomErr != nil {
@@ -394,13 +385,7 @@ func (g *Grain) LeaveRoom(req *userpb.LeaveRoomRequest, ctx cluster.GrainContext
 
 	roomResp, err := g.rooms.Leave(roomID, &roompb.LeaveRequest{UserId: ctx.Identity()})
 	if err != nil {
-		slog.Warn(middleware.EventGrainTransportError,
-			"grain_type", ctx.Kind(),
-			"grain_id", ctx.Identity(),
-			"msg_type", "LeaveRoom",
-			"room_id", roomID,
-			"error", err,
-		)
+		logTransportError(ctx, "LeaveRoom", roomID, err)
 		return &userpb.LeaveRoomResponse{Error: errDetail(errcode.InternalError, "failed to reach room")}, nil
 	}
 	if roomErr := roomResp.GetError(); roomErr != nil {
@@ -455,13 +440,7 @@ func (g *Grain) SendMessage(req *userpb.SendMessageRequest, ctx cluster.GrainCon
 		Text: req.GetText(),
 	})
 	if err != nil {
-		slog.Warn(middleware.EventGrainTransportError,
-			"grain_type", ctx.Kind(),
-			"grain_id", ctx.Identity(),
-			"msg_type", "SendMessage",
-			"room_id", roomID,
-			"error", err,
-		)
+		logTransportError(ctx, "SendMessage", roomID, err)
 		return &userpb.SendMessageResponse{Error: errDetail(errcode.InternalError, "failed to reach room")}, nil
 	}
 	if roomErr := roomResp.GetError(); roomErr != nil {
@@ -557,6 +536,21 @@ func (g *Grain) fanOut(ctx cluster.GrainContext, pids []*actor.PID, msg proto.Me
 	for _, pid := range pids {
 		send(pid, msg)
 	}
+}
+
+// logTransportError records a failed Room-grain call for one of the five
+// room-routing methods; op names the routed operation ("JoinRoom",
+// "SendMessage", …). The caller translates the failure into a structured
+// business error so the gateway treats it uniformly with domain failures,
+// keeping the client-facing message generic — no actor paths leak.
+func logTransportError(ctx cluster.GrainContext, op string, roomID id.RoomID, err error) {
+	slog.Warn(middleware.EventGrainTransportError,
+		"grain_type", ctx.Kind(),
+		"grain_id", ctx.Identity(),
+		"msg_type", op,
+		"room_id", roomID,
+		"error", err,
+	)
 }
 
 // parseRoomError converts a raw Room-grain error into the shared taxonomy and

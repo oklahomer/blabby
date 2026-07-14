@@ -93,6 +93,7 @@ func TestHandleVerify(t *testing.T) {
 			g := gatewayWithVerification(svc)
 
 			req := httptest.NewRequest(http.MethodPost, "/users/verifications", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			g.RegisterRoutes().ServeHTTP(rec, req)
 
@@ -155,6 +156,7 @@ func TestHandleResendVerification(t *testing.T) {
 			g := gatewayWithVerification(svc)
 
 			req := httptest.NewRequest(http.MethodPost, "/users/verifications/resend", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			g.RegisterRoutes().ServeHTTP(rec, req)
 

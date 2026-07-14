@@ -57,14 +57,14 @@ type roomListParams struct {
 // parseRoomListQuery parses and validates the q / after / limit query
 // parameters. A blank q or after is treated as absent; limit defaults to
 // roomListDefaultLimit and is rejected outside [1, roomListMaxLimit].
-func parseRoomListQuery(r *http.Request) (roomListParams, *roomRequestError) {
+func parseRoomListQuery(r *http.Request) (roomListParams, *requestError) {
 	params := roomListParams{limit: roomListDefaultLimit}
 	values := r.URL.Query()
 
 	if raw := strings.TrimSpace(values.Get("q")); raw != "" {
 		query, err := domain.NewRoomNameQuery(raw)
 		if err != nil {
-			return roomListParams{}, &roomRequestError{
+			return roomListParams{}, &requestError{
 				reason: "invalid_query",
 				detail: ErrInvalidRequest("q must be 1-64 bytes of printable characters"),
 			}
@@ -74,7 +74,7 @@ func parseRoomListQuery(r *http.Request) (roomListParams, *roomRequestError) {
 	if raw := strings.TrimSpace(values.Get("after")); raw != "" {
 		code, err := id.ParseRoomCode(raw)
 		if err != nil {
-			return roomListParams{}, &roomRequestError{
+			return roomListParams{}, &requestError{
 				reason: "invalid_after",
 				detail: ErrInvalidRequest("after is not a valid room code"),
 			}
@@ -84,7 +84,7 @@ func parseRoomListQuery(r *http.Request) (roomListParams, *roomRequestError) {
 	if raw := values.Get("limit"); raw != "" {
 		limit, err := strconv.Atoi(raw)
 		if err != nil || limit < 1 || limit > roomListMaxLimit {
-			return roomListParams{}, &roomRequestError{
+			return roomListParams{}, &requestError{
 				reason: "invalid_limit",
 				detail: ErrInvalidRequest(fmt.Sprintf("limit must be an integer between 1 and %d", roomListMaxLimit)),
 			}
@@ -113,7 +113,8 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 		WriteErrorResponse(w, httpStatus(perr.detail.Code), perr.detail)
 		return
 	}
-	logRoomEntry(endpointRoomList, r.Method, userID, id.RoomID{})
+	op := roomOp{endpoint: endpointRoomList, method: r.Method, userID: userID}
+	logRoomEntry(op)
 
 	query := ListActiveQuery{Query: params.query, Limit: params.limit}
 	if !params.after.IsZero() {
@@ -128,7 +129,7 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 			WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("after references an unknown room"))
 			return
 		case err != nil:
-			logRoomTransportError(endpointRoomList, r.Method, userID, id.RoomID{})
+			logRoomTransportError(op)
 			WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to resolve after cursor"))
 			return
 		}
@@ -149,7 +150,7 @@ func (g *Gateway) handleRoomList(w http.ResponseWriter, r *http.Request) {
 		next := page.Rooms[len(page.Rooms)-1].PublicID()
 		resp.Next = &next
 	}
-	logRoomExit(endpointRoomList, r.Method, userID, id.RoomID{}, outcomeOK, 0)
+	logRoomExit(op, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -163,7 +164,8 @@ func (g *Gateway) handleRoomJoined(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	logRoomEntry(endpointRoomJoined, r.Method, userID, id.RoomID{})
+	op := roomOp{endpoint: endpointRoomJoined, method: r.Method, userID: userID}
+	logRoomEntry(op)
 
 	resp, err := g.userGrainFor(userID).GetJoinedRooms(&userpb.GetJoinedRoomsRequest{})
 	if err != nil {
@@ -186,7 +188,7 @@ func (g *Gateway) handleRoomJoined(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logRoomExit(endpointRoomJoined, r.Method, userID, id.RoomID{}, outcomeOK, 0)
+	logRoomExit(op, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, roomListResponse{Rooms: descriptors})
 }
 

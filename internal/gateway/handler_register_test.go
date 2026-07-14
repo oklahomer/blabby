@@ -109,6 +109,7 @@ func TestHandleRegister(t *testing.T) {
 			g := gatewayWithRegistrar(reg)
 
 			req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			g.RegisterRoutes().ServeHTTP(rec, req)
 
@@ -147,6 +148,7 @@ func TestHandleRegister_ParsesAndNormalizes(t *testing.T) {
 
 	body := `{"mail_address":"  Alice@Example.COM ","handle":"Alice_99","password":"supersecret12"}`
 	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	g.RegisterRoutes().ServeHTTP(rec, req)
 

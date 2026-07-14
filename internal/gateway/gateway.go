@@ -85,43 +85,75 @@ func NewGateway(deps Deps) *Gateway {
 	}
 }
 
+// routeGroup declares one path's handlers and its Allow header. The full
+// method+path pattern constants stay the single source of truth for routing;
+// allow is a reviewed literal, deliberately declared rather than derived from
+// the handlers, so a rejection-only registration (the HEAD /ws entry) never
+// advertises itself. Go 1.22+ mux GET patterns also match HEAD, so GET paths
+// advertise "GET, HEAD".
+type routeGroup struct {
+	allow  string
+	routes []route
+}
+
+// route pairs one method+path pattern constant with its handler.
+type route struct {
+	pattern string
+	handler http.Handler
+}
+
+// registerGroups wires each group's pattern→handler pairs plus one path-only
+// fallback per group, answering every unlisted method with the JSON 405 and
+// the group's Allow literal. The fallback path derives from the group's
+// first pattern; Go 1.22+ mux selects the most specific pattern, so the
+// method+path registrations win for their methods and everything else falls
+// through to the path-only fallback.
+func (g *Gateway) registerGroups(mux *http.ServeMux, groups []routeGroup) {
+	for _, group := range groups {
+		for _, r := range group.routes {
+			mux.Handle(r.pattern, r.handler)
+		}
+		_, path := splitMethodPath(group.routes[0].pattern)
+		mux.Handle(path, g.handleMethodNotAllowed(group.allow))
+	}
+}
+
 // RegisterRoutes returns an http.Handler with all gateway routes registered.
-// Routes use Go 1.22+ method+path patterns. The catch-all "/" pattern emits a
-// JSON error envelope for unmatched paths, and the path-only "/login" pattern
-// emits a JSON 405 for non-POST requests against /login. Go 1.22+ mux selects
-// the most specific pattern, so "POST /login" wins over "/login" for POSTs.
+// Each routeGroup carries one path; the catch-all "/" pattern emits a JSON
+// error envelope for unmatched paths.
 //
 // /ws is intentionally NOT wrapped with g.requireAuth: WebSocket auth runs
 // after upgrade as a first-frame protocol message, not via the
-// Authorization header.
+// Authorization header. It is also the one path that opts out of the
+// GET-implies-HEAD rule: a WebSocket upgrade requires GET, and without the
+// explicit HEAD registration the mux would route HEAD into the GET handler,
+// where gorilla answers with a plain-text handshake error instead of the
+// gateway's JSON 405.
 func (g *Gateway) RegisterRoutes() http.Handler {
 	mux := http.NewServeMux()
-
-	loginMethod, loginPath := splitMethodPath(endpointLogin)
-	registerMethod, registerPath := splitMethodPath(endpointRegister)
-	verifyMethod, verifyPath := splitMethodPath(endpointVerify)
-	resendMethod, resendPath := splitMethodPath(endpointResendVerification)
-	wsMethod, wsPath := splitMethodPath(endpointWS)
-
-	mux.HandleFunc(endpointLogin, g.handleLogin)
-	mux.HandleFunc(loginPath, g.handleMethodNotAllowed(loginMethod))
-	mux.HandleFunc(endpointRegister, g.handleRegister)
-	mux.HandleFunc(registerPath, g.handleMethodNotAllowed(registerMethod))
-	mux.HandleFunc(endpointVerify, g.handleVerify)
-	mux.HandleFunc(verifyPath, g.handleMethodNotAllowed(verifyMethod))
-	mux.HandleFunc(endpointResendVerification, g.handleResendVerification)
-	mux.HandleFunc(resendPath, g.handleMethodNotAllowed(resendMethod))
-	mux.HandleFunc(endpointWS, g.handleWS)
-	mux.HandleFunc(wsPath, g.handleMethodNotAllowed(wsMethod))
-	mux.Handle(endpointRoomList, g.requireAuth(g.handleRoomList))
-	mux.Handle(endpointRoomCreate, g.requireAuth(g.handleRoomCreate))
-	mux.Handle(endpointRoomJoined, g.requireAuth(g.handleRoomJoined))
-	mux.Handle(endpointRoomEvents, g.requireAuth(g.handleRoomEvents))
-	mux.Handle(endpointRoomMembershipPut, g.requireAuth(g.handleRoomMembershipPut))
-	mux.Handle(endpointRoomMembershipDelete, g.requireAuth(g.handleRoomMembershipDelete))
-	mux.Handle(endpointRoomMessage, g.requireAuth(g.handleRoomSendMessage))
-	mux.Handle(endpointRoomMemberRole, g.requireAuth(g.handleRoomMemberRolePut))
-	mux.Handle(endpointRoomOwner, g.requireAuth(g.handleRoomOwnerPut))
+	g.registerGroups(mux, []routeGroup{
+		{allow: "POST", routes: []route{{endpointLogin, http.HandlerFunc(g.handleLogin)}}},
+		{allow: "POST", routes: []route{{endpointRegister, http.HandlerFunc(g.handleRegister)}}},
+		{allow: "POST", routes: []route{{endpointVerify, http.HandlerFunc(g.handleVerify)}}},
+		{allow: "POST", routes: []route{{endpointResendVerification, http.HandlerFunc(g.handleResendVerification)}}},
+		{allow: "GET", routes: []route{
+			{endpointWS, http.HandlerFunc(g.handleWS)},
+			{"HEAD /ws", g.handleMethodNotAllowed("GET")},
+		}},
+		{allow: "GET, HEAD, POST", routes: []route{
+			{endpointRoomList, g.requireAuth(g.handleRoomList)},
+			{endpointRoomCreate, g.requireAuth(g.handleRoomCreate)},
+		}},
+		{allow: "GET, HEAD", routes: []route{{endpointRoomJoined, g.requireAuth(g.handleRoomJoined)}}},
+		{allow: "GET, HEAD", routes: []route{{endpointRoomEvents, g.requireAuth(g.handleRoomEvents)}}},
+		{allow: "PUT, DELETE", routes: []route{
+			{endpointRoomMembershipPut, g.requireAuth(g.handleRoomMembershipPut)},
+			{endpointRoomMembershipDelete, g.requireAuth(g.handleRoomMembershipDelete)},
+		}},
+		{allow: "POST", routes: []route{{endpointRoomMessage, g.requireAuth(g.handleRoomSendMessage)}}},
+		{allow: "PUT", routes: []route{{endpointRoomMemberRole, g.requireAuth(g.handleRoomMemberRolePut)}}},
+		{allow: "PUT", routes: []route{{endpointRoomOwner, g.requireAuth(g.handleRoomOwnerPut)}}},
+	})
 	mux.HandleFunc("/", g.handleNotFound)
 	return mux
 }
@@ -141,15 +173,13 @@ const endpointMetrics = "GET /metrics"
 func (g *Gateway) RegisterInternalRoutes() http.Handler {
 	mux := http.NewServeMux()
 
-	gcMethod, gcPath := splitMethodPath(endpointPendingAccountGC)
-	mux.HandleFunc(endpointPendingAccountGC, g.handlePendingAccountGC)
-	mux.HandleFunc(gcPath, g.handleMethodNotAllowed(gcMethod))
-
-	if g.metrics != nil {
-		metricsMethod, metricsPath := splitMethodPath(endpointMetrics)
-		mux.Handle(endpointMetrics, g.metrics)
-		mux.HandleFunc(metricsPath, g.handleMethodNotAllowed(metricsMethod))
+	groups := []routeGroup{
+		{allow: "POST", routes: []route{{endpointPendingAccountGC, http.HandlerFunc(g.handlePendingAccountGC)}}},
 	}
+	if g.metrics != nil {
+		groups = append(groups, routeGroup{allow: "GET, HEAD", routes: []route{{endpointMetrics, g.metrics}}})
+	}
+	g.registerGroups(mux, groups)
 
 	mux.HandleFunc("/", g.handleNotFound)
 	return mux

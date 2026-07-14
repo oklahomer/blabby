@@ -8,9 +8,6 @@ import "errors"
 // that returning these errors directly to clients does not leak validation
 // internals.
 var (
-	// ErrTokenMissing indicates that no token was supplied.
-	ErrTokenMissing = errors.New("auth: token missing")
-
 	// ErrTokenInvalid indicates that the token is malformed, has an invalid
 	// signature, fails issuer/audience checks, or is otherwise unusable for
 	// reasons other than expiration.

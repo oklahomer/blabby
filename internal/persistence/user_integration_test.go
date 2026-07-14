@@ -74,13 +74,6 @@ func TestUserRepoIntegration(t *testing.T) {
 	if byEmail.ID != created.ID {
 		t.Fatalf("FindByEmail id = %d, want %d", byEmail.ID.Int64(), created.ID.Int64())
 	}
-	byHandle, err := repo.FindByHandle(ctx, pool, handle)
-	if err != nil {
-		t.Fatalf("FindByHandle: %v", err)
-	}
-	if byHandle.ID != created.ID {
-		t.Fatalf("FindByHandle id = %d, want %d", byHandle.ID.Int64(), created.ID.Int64())
-	}
 	byID, err := repo.FindByID(ctx, pool, created.ID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)

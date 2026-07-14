@@ -55,12 +55,13 @@ func (g *Gateway) handleRoomMemberRolePut(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	targetID, ok := g.requireTargetUserID(w, r, endpointRoomMemberRole, userID, r.PathValue("user"))
+	op := roomOp{endpoint: endpointRoomMemberRole, method: r.Method, userID: userID, roomID: roomID}
+	targetID, ok := g.requireTargetUserID(w, r, op, r.PathValue("user"))
 	if !ok {
 		return
 	}
 	var req setRoleRequest
-	if !decodeRoomCommandBody(w, r, &req) {
+	if !decodeJSONBody(w, r, maxRoomCommandBodyBytes, &req) {
 		return
 	}
 	if strings.TrimSpace(req.Role) == "" {
@@ -68,22 +69,22 @@ func (g *Gateway) handleRoomMemberRolePut(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	logRoomEntry(endpointRoomMemberRole, r.Method, userID, roomID)
+	logRoomEntry(op)
 	resp, err := g.userGrainFor(userID).SetRoomMemberRole(&userpb.SetRoomMemberRoleRequest{
 		RoomId:       roomID.String(),
 		TargetUserId: targetID.String(),
 		Role:         req.Role,
 	})
 	if err != nil {
-		logRoomTransportError(endpointRoomMemberRole, r.Method, userID, roomID)
+		logRoomTransportError(op)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
 		return
 	}
 	if pe := resp.GetError(); pe != nil {
-		writeBusinessErrorResponse(w, endpointRoomMemberRole, r.Method, userID, roomID, pe)
+		writeBusinessErrorResponse(w, op, pe)
 		return
 	}
-	logRoomExit(endpointRoomMemberRole, r.Method, userID, roomID, outcomeOK, 0)
+	logRoomExit(op, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, successResponse{Success: true})
 }
 
@@ -98,34 +99,35 @@ func (g *Gateway) handleRoomOwnerPut(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	op := roomOp{endpoint: endpointRoomOwner, method: r.Method, userID: userID, roomID: roomID}
 	var req setOwnerRequest
-	if !decodeRoomCommandBody(w, r, &req) {
+	if !decodeJSONBody(w, r, maxRoomCommandBodyBytes, &req) {
 		return
 	}
 	if strings.TrimSpace(req.User) == "" {
 		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("user is required"))
 		return
 	}
-	newOwnerID, ok := g.requireTargetUserID(w, r, endpointRoomOwner, userID, req.User)
+	newOwnerID, ok := g.requireTargetUserID(w, r, op, req.User)
 	if !ok {
 		return
 	}
 
-	logRoomEntry(endpointRoomOwner, r.Method, userID, roomID)
+	logRoomEntry(op)
 	resp, err := g.userGrainFor(userID).TransferRoomOwnership(&userpb.TransferRoomOwnershipRequest{
 		RoomId:         roomID.String(),
 		NewOwnerUserId: newOwnerID.String(),
 	})
 	if err != nil {
-		logRoomTransportError(endpointRoomOwner, r.Method, userID, roomID)
+		logRoomTransportError(op)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
 		return
 	}
 	if pe := resp.GetError(); pe != nil {
-		writeBusinessErrorResponse(w, endpointRoomOwner, r.Method, userID, roomID, pe)
+		writeBusinessErrorResponse(w, op, pe)
 		return
 	}
-	logRoomExit(endpointRoomOwner, r.Method, userID, roomID, outcomeOK, 0)
+	logRoomExit(op, outcomeOK, 0)
 	writeJSON(w, http.StatusOK, successResponse{Success: true})
 }
 
@@ -133,12 +135,12 @@ func (g *Gateway) handleRoomOwnerPut(w http.ResponseWriter, r *http.Request) {
 // A malformed or unknown code is a 400: the opaque codes are unguessable, and a
 // nonexistent user is by definition not a member of the room, so nothing is
 // revealed that membership wouldn't.
-func (g *Gateway) requireTargetUserID(w http.ResponseWriter, r *http.Request, endpoint string, actorID id.UserID, raw string) (id.UserID, bool) {
+func (g *Gateway) requireTargetUserID(w http.ResponseWriter, r *http.Request, op roomOp, raw string) (id.UserID, bool) {
 	code, err := id.ParseUserCode(raw)
 	if err != nil {
 		slog.Warn("gateway.room.rejected",
-			"endpoint", endpoint, "method", r.Method,
-			"user_id", actorID, "reason", "invalid_user_code")
+			"endpoint", op.endpoint, "method", op.method,
+			"user_id", op.userID, "reason", "invalid_user_code")
 		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("user id is invalid"))
 		return id.UserID{}, false
 	}
@@ -146,25 +148,14 @@ func (g *Gateway) requireTargetUserID(w http.ResponseWriter, r *http.Request, en
 	switch {
 	case errors.Is(err, auth.ErrPublicCodeUnknown):
 		slog.Warn("gateway.room.rejected",
-			"endpoint", endpoint, "method", r.Method,
-			"user_id", actorID, "reason", "unknown_user_code")
+			"endpoint", op.endpoint, "method", op.method,
+			"user_id", op.userID, "reason", "unknown_user_code")
 		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("unknown user"))
 		return id.UserID{}, false
 	case err != nil:
-		logRoomTransportError(endpoint, r.Method, actorID, id.RoomID{})
+		logRoomTransportError(op)
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to resolve user"))
 		return id.UserID{}, false
 	}
 	return targetID, true
-}
-
-// decodeRoomCommandBody decodes one of the room command endpoints' tiny JSON bodies with the
-// package's strict rules (JSON content type, size cap, no trailing data),
-// writing the rejection itself and returning false on failure.
-func decodeRoomCommandBody(w http.ResponseWriter, r *http.Request, dst any) bool {
-	if err := decodeStrictJSONBody(w, r, maxRoomCommandBodyBytes, dst); err != nil {
-		WriteErrorResponse(w, httpStatus(err.detail.Code), err.detail)
-		return false
-	}
-	return true
 }

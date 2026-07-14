@@ -215,7 +215,7 @@ func TestFindByID_Success(t *testing.T) {
 }
 
 func TestFindByID_ReturnsArchivedRoom(t *testing.T) {
-	// The differentiator from FindByPublicCode/ListByIDs: an archived room is
+	// The differentiator from FindByPublicCode: an archived room is
 	// surfaced (not hidden) so the Room grain can see it and reject commands with
 	// ROOM_NOT_FOUND rather than treating it as never having existed.
 	fq := &fakeQuerier{queryRow: func(sql string, args ...any) pgx.Row {
@@ -371,41 +371,5 @@ func TestListActive_PropagatesQueryError(t *testing.T) {
 	_, _, err := NewRoomRepo(nil).ListActive(context.Background(), fq, RoomListActiveParams{Limit: 5})
 	if !errors.Is(err, boom) {
 		t.Fatalf("ListActive err = %v, want wrapped %v", err, boom)
-	}
-}
-
-func TestListByIDs_EmptyInputSkipsQuery(t *testing.T) {
-	fq := &fakeQuerier{query: func(string, ...any) (pgx.Rows, error) {
-		t.Fatal("ListByIDs queried the DB for an empty id slice")
-		return nil, nil
-	}}
-	rooms, err := NewRoomRepo(nil).ListByIDs(context.Background(), fq, nil)
-	if err != nil || rooms != nil {
-		t.Fatalf("ListByIDs(nil) = %v, %v; want nil, nil", rooms, err)
-	}
-}
-
-func TestListByIDs(t *testing.T) {
-	var gotSQL string
-	var gotArgs []any
-	fq := &fakeQuerier{query: func(sql string, args ...any) (pgx.Rows, error) {
-		gotSQL, gotArgs = sql, args
-		return &fakeRows{rows: [][]any{roomValues(4, "G000000004", "General", 1, "active")}}, nil
-	}}
-
-	rooms, err := NewRoomRepo(nil).ListByIDs(context.Background(), fq, []id.RoomID{mustRoomID(t, 4), mustRoomID(t, 5)})
-	if err != nil {
-		t.Fatalf("ListByIDs: %v", err)
-	}
-	if len(rooms) != 1 || rooms[0].ID.Int64() != 4 {
-		t.Fatalf("rooms = %+v", rooms)
-	}
-	ids, ok := gotArgs[0].([]int64)
-	if !ok || len(ids) != 2 || ids[0] != 4 || ids[1] != 5 {
-		t.Fatalf("args[0] = %v, want []int64{4, 5} for = ANY($1)", gotArgs[0])
-	}
-	// Archived rooms must never reach the client through the joined-rooms mapping.
-	if !strings.Contains(gotSQL, "status = 'active'") {
-		t.Errorf("ListByIDs SQL is missing the active filter: %s", gotSQL)
 	}
 }

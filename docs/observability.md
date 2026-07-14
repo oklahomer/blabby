@@ -89,8 +89,9 @@ lessons [ADR-022](adr/adr-022-protoactor-metrics-exposure.md) records:
   spawn counters, mailbox and receive-duration histograms, futures
   counters, all without a line of bespoke measurement code.
 - Watch any log stream and read the envelope fields on `grain.msg` and
-  `connection.msg` lines: type names only, joined into a per-grain trail by
-  `grain_id`.
+  `connection.msg` lines: type names only — `grain.msg` lines join into a
+  per-grain trail by `grain_id`, `connection.msg` lines into a
+  per-connection trail by `actor_path`.
 - Kill a client mid-conversation while another user keeps sending: if a
   fan-out races the watch eviction, `server.deadletter.observed` catches
   the undeliverable delivery, type name and PID, no payload.
