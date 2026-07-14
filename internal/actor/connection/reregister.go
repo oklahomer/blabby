@@ -82,13 +82,30 @@ func (uc *UserConnection) recordReregisterFailure(ctx actor.Context, err error) 
 	return false
 }
 
+// attemptReregister runs one re-register attempt and its bookkeeping: on
+// success it adopts the fresh activation and watches its PID; on failure it
+// records the attempt (scheduling a retry while the budget lasts) and
+// reports whether the budget is exhausted. The dispatch site owns the
+// resulting transition, so every Become stays visible in postAuthBehavior.
+func (uc *UserConnection) attemptReregister(ctx actor.Context) (shouldClose bool) {
+	grainPID, err := uc.reregister(ctx)
+	if err != nil {
+		return uc.recordReregisterFailure(ctx, err)
+	}
+	uc.recordReregisterSuccess(ctx, grainPID)
+	if grainPID != nil {
+		ctx.Watch(grainPID)
+	}
+	return false
+}
+
 // recordReregisterSuccess adopts the fresh activation PID and resets the
 // attempt budget. A nil grainPID (version skew) is a degraded success: the
 // registration itself landed, deliveries flow again, but with no PID to
 // watch, self-healing degrades to client-driven recovery — strictly better
 // than burning the retry budget on a registration that keeps succeeding.
-// The dispatch site arms the watch; every new activation PID gets a fresh
-// one, since a stale watch would reopen the silent gap (ADR-006).
+// attemptReregister arms a fresh watch for every new activation PID, since
+// a stale watch would reopen the silent gap (ADR-006).
 func (uc *UserConnection) recordReregisterSuccess(ctx actor.Context, grainPID *actor.PID) {
 	uc.grainPID = grainPID
 	uc.reregisterAttempts = 0

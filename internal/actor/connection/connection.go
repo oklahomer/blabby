@@ -407,29 +407,13 @@ func (uc *UserConnection) postAuthBehavior(ctx actor.Context) {
 		if uc.reregisterRetryCancel != nil {
 			return
 		}
-		grainPID, err := uc.reregister(ctx)
-		if err != nil {
-			if uc.recordReregisterFailure(ctx, err) {
-				uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: "reregister_failed"}))
-			}
-			return
-		}
-		uc.recordReregisterSuccess(ctx, grainPID)
-		if grainPID != nil {
-			ctx.Watch(grainPID)
+		if uc.attemptReregister(ctx) {
+			uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: "reregister_failed"}))
 		}
 	case *ReregisterRetry:
 		uc.reregisterRetryCancel = nil // the one-shot has fired; the handle is spent
-		grainPID, err := uc.reregister(ctx)
-		if err != nil {
-			if uc.recordReregisterFailure(ctx, err) {
-				uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: "reregister_failed"}))
-			}
-			return
-		}
-		uc.recordReregisterSuccess(ctx, grainPID)
-		if grainPID != nil {
-			ctx.Watch(grainPID)
+		if uc.attemptReregister(ctx) {
+			uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: "reregister_failed"}))
 		}
 	case *AppPingTick:
 		uc.sendOutbound(ctx, &AppPing{})

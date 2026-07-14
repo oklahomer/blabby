@@ -9,7 +9,6 @@ import (
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/id"
-	"github.com/oklahomer/blabby/internal/middleware"
 )
 
 // Event-name constants for the role-management command routing, following the
@@ -43,13 +42,7 @@ func (g *Grain) SetRoomMemberRole(req *userpb.SetRoomMemberRoleRequest, ctx clus
 		Role:         req.GetRole(),
 	})
 	if err != nil {
-		slog.Warn(middleware.EventGrainTransportError,
-			"grain_type", ctx.Kind(),
-			"grain_id", ctx.Identity(),
-			"msg_type", "SetRoomMemberRole",
-			"room_id", roomID,
-			"error", err,
-		)
+		logTransportError(ctx, "SetRoomMemberRole", roomID, err)
 		return &userpb.SetRoomMemberRoleResponse{Error: errDetail(errcode.InternalError, "failed to reach room")}, nil
 	}
 	if roomErr := roomResp.GetError(); roomErr != nil {
@@ -80,13 +73,7 @@ func (g *Grain) TransferRoomOwnership(req *userpb.TransferRoomOwnershipRequest, 
 		NewOwnerUserId: req.GetNewOwnerUserId(),
 	})
 	if err != nil {
-		slog.Warn(middleware.EventGrainTransportError,
-			"grain_type", ctx.Kind(),
-			"grain_id", ctx.Identity(),
-			"msg_type", "TransferRoomOwnership",
-			"room_id", roomID,
-			"error", err,
-		)
+		logTransportError(ctx, "TransferRoomOwnership", roomID, err)
 		return &userpb.TransferRoomOwnershipResponse{Error: errDetail(errcode.InternalError, "failed to reach room")}, nil
 	}
 	if roomErr := roomResp.GetError(); roomErr != nil {
