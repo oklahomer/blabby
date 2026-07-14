@@ -326,7 +326,7 @@ func (uc *UserConnection) preAuthBehavior(ctx actor.Context) {
 	case *InboundAuth:
 		uid, grainPID, rej := uc.handleAuth(ctx, msg)
 		if rej != nil {
-			uc.sendOutboundBestEffort(ctx, newAuthFailed(rej.Code, rej.Message))
+			uc.sendOutboundBestEffort(ctx, &AuthFailed{Code: rej.Code, Message: rej.Message})
 			uc.logAuthRejected(ctx, rej.Reason, rej.Code)
 			uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: rej.Reason}))
 			return
@@ -345,14 +345,14 @@ func (uc *UserConnection) preAuthBehavior(ctx actor.Context) {
 		uc.behavior.Become(uc.postAuthBehavior)
 	case *AuthTimeoutExpired:
 		const reason = "auth_timeout"
-		uc.sendOutboundBestEffort(ctx, newAuthFailed(errcode.AuthMissingToken, "authentication timeout"))
+		uc.sendOutboundBestEffort(ctx, &AuthFailed{Code: errcode.AuthMissingToken, Message: "authentication timeout"})
 		uc.logAuthRejected(ctx, reason, errcode.AuthMissingToken)
 		uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: reason}))
 	case *DecodeFailed:
 		uc.logDecodeFailure(ctx, msg)
 	case *ProtocolViolation:
 		reason := string(msg.Reason)
-		uc.sendOutboundBestEffort(ctx, newAuthFailed(errcode.AuthMissingToken, "missing authentication token"))
+		uc.sendOutboundBestEffort(ctx, &AuthFailed{Code: errcode.AuthMissingToken, Message: "missing authentication token"})
 		uc.logAuthRejected(ctx, reason, errcode.AuthMissingToken)
 		uc.behavior.Become(uc.newClosingBehavior(ctx, &CloseConnection{Reason: reason}))
 	case *AppPingTick:
@@ -477,10 +477,6 @@ type authRejection struct {
 	Code    errcode.Code
 	Message string
 	Reason  string
-}
-
-func newAuthFailed(code errcode.Code, message string) *AuthFailed {
-	return &AuthFailed{Code: code, Message: message}
 }
 
 // handleAuth runs token validation and User-grain registration. It performs

@@ -127,7 +127,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	req, derr := decodeSendMessageRequest(r, w)
+	req, derr := decodeSendMessageRequest(w, r)
 	if derr != nil {
 		slog.Warn("gateway.room.rejected",
 			"endpoint", endpointRoomMessage, "method", r.Method,
@@ -233,7 +233,7 @@ func (g *Gateway) requireRoomID(w http.ResponseWriter, r *http.Request, endpoint
 // The MaxBytesReader is installed on r.Body before decoding so an
 // oversize body surfaces as *http.MaxBytesError at decode time and is
 // mapped to a "payload_too_large" / 413 response.
-func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (*sendMessageRequest, *requestError) {
+func decodeSendMessageRequest(w http.ResponseWriter, r *http.Request) (*sendMessageRequest, *requestError) {
 	var req sendMessageRequest
 	if err := decodeStrictJSONBody(w, r, maxRoomMessageBodyBytes, &req); err != nil {
 		return nil, err
@@ -255,9 +255,9 @@ func decodeSendMessageRequest(r *http.Request, w http.ResponseWriter) (*sendMess
 
 // writeJSON writes v as a JSON body with the given HTTP status. Used by
 // the success path of every room command handler.
-func writeJSON(w http.ResponseWriter, httpStatus int, v any) {
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(httpStatus)
+	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Error("gateway.room.write_failed", "error", err)
 	}
