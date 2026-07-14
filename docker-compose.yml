@@ -1,5 +1,5 @@
 services:
-  # Grain tier: a cluster member hosting the User and Room grains.
+  # Grain tier: a cluster member hosting the User, Room, and Maintenance grains.
   backend:
     build: .
     image: blabby
