@@ -92,26 +92,6 @@ func TestRoomRepoIntegration(t *testing.T) {
 	if _, err := repo.FindByPublicCode(ctx, pool, archivedCode); err != ErrRoomNotFound {
 		t.Fatalf("FindByPublicCode(archived) err = %v, want ErrRoomNotFound", err)
 	}
-	withArchived, err := repo.ListByIDs(ctx, pool, []id.RoomID{created.ID, mustRoomID(t, archivedID)})
-	if err != nil {
-		t.Fatalf("ListByIDs: %v", err)
-	}
-	if containsRoom(withArchived, mustRoomID(t, archivedID)) {
-		t.Fatalf("ListByIDs returned the archived room; want it filtered out (got %v)", roomIDs(withArchived))
-	}
-	if !containsRoom(withArchived, created.ID) {
-		t.Fatalf("ListByIDs dropped the active room; got %v", roomIDs(withArchived))
-	}
-
-	// ListByIDs returns exactly the rooms whose ids were requested.
-	byIDs, err := repo.ListByIDs(ctx, pool, []id.RoomID{created.ID, mustRoomID(t, 4)})
-	if err != nil {
-		t.Fatalf("ListByIDs: %v", err)
-	}
-	if !containsRoom(byIDs, created.ID) || !containsRoom(byIDs, mustRoomID(t, 4)) {
-		t.Fatalf("ListByIDs = %v, want both the created room and seed room 4", roomIDs(byIDs))
-	}
-
 	// ListActive includes the freshly created active room and hides the
 	// archived one.
 	active, _, err := repo.ListActive(ctx, pool, RoomListActiveParams{Limit: 10000})

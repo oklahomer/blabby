@@ -15,7 +15,7 @@ import (
 
 // ErrUserNotFound is returned when a lookup matches no account. The reads load a
 // user regardless of status (a pending account still resolves), so this means no
-// row carries the given email, handle, public_code, or id at all — letting the
+// row carries the given email, public_code, or id at all — letting the
 // caller distinguish "no such account" from "found but not yet active".
 var ErrUserNotFound = errors.New("persistence: user not found")
 
@@ -128,15 +128,6 @@ func (r *UserRepo) FindByEmail(ctx context.Context, q postgres.Querier, mail dom
 	return r.findOne(ctx, q, findByEmailSQL, mail.String())
 }
 
-const findByHandleNormSQL = `SELECT ` + userColumns + ` FROM service_user WHERE handle_norm = $1`
-
-// FindByHandle resolves a handle to its account, regardless of status — the
-// registration duplicate-handle check. It returns ErrUserNotFound when the handle
-// is free.
-func (r *UserRepo) FindByHandle(ctx context.Context, q postgres.Querier, handle domain.Handle) (User, error) {
-	return r.findOne(ctx, q, findByHandleNormSQL, handle.Normalized())
-}
-
 const userFindByIDSQL = `SELECT ` + userColumns + ` FROM service_user WHERE id = $1`
 
 // FindByID loads an account by its internal UserID, regardless of status — the
@@ -147,7 +138,7 @@ func (r *UserRepo) FindByID(ctx context.Context, q postgres.Querier, userID id.U
 }
 
 // findOne runs a single-row userColumns SELECT and maps pgx.ErrNoRows to the
-// package sentinel. The three FindBy* lookups differ only in their WHERE clause.
+// package sentinel. The FindBy* lookups differ only in their WHERE clause.
 func (r *UserRepo) findOne(ctx context.Context, q postgres.Querier, sql string, arg any) (User, error) {
 	user, err := scanUser(q.QueryRow(ctx, sql, arg))
 	if errors.Is(err, pgx.ErrNoRows) {

@@ -15,8 +15,8 @@ import (
 )
 
 // ErrRoomNotFound is returned when a lookup matches no room. The active-only
-// lookups (FindByPublicCode, ListByIDs) also report an archived room as not
-// found, matching the gateway's ROOM_NOT_FOUND contract: an inactive room is not
+// lookup (FindByPublicCode) also reports an archived room as not found,
+// matching the gateway's ROOM_NOT_FOUND contract: an inactive room is not
 // addressable by its public code. FindByID, which loads regardless of status,
 // returns it only when no row carries the id at all.
 var ErrRoomNotFound = errors.New("persistence: room not found")
@@ -137,27 +137,6 @@ func (r *RoomRepo) FindByID(ctx context.Context, q postgres.Querier, roomID id.R
 		return Room{}, fmt.Errorf("persistence: find by id: %w", err)
 	}
 	return room, nil
-}
-
-const listByIDsSQL = `SELECT ` + roomColumns + ` FROM room WHERE id = ANY($1) AND status = 'active'`
-
-// ListByIDs returns the rooms with the given internal ids, in no particular order
-// (the caller re-associates by id). It is the gateway's internal-RoomID → R…
-// descriptor mapping for the joined-rooms response. Unknown or archived ids are
-// simply absent from the result; an empty input yields an empty result.
-func (r *RoomRepo) ListByIDs(ctx context.Context, q postgres.Querier, ids []id.RoomID) ([]Room, error) {
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	raw := make([]int64, len(ids))
-	for i, roomID := range ids {
-		raw[i] = roomID.Int64()
-	}
-	rows, err := q.Query(ctx, listByIDsSQL, raw)
-	if err != nil {
-		return nil, fmt.Errorf("persistence: list by ids: %w", err)
-	}
-	return collectRooms(rows)
 }
 
 const listActiveSQL = `SELECT ` + roomColumns + ` FROM room WHERE status = 'active'`
