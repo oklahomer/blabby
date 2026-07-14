@@ -32,11 +32,12 @@ left off.
 
 A message's full journey, from login through fan-out to disconnect and
 self-healing, is drawn in the [message-flow sequence diagram](overall.svg)
-(source: [`overall.puml`](overall.puml)). Two companion walk-throughs go
+(source: [`overall.puml`](overall.puml)). A companion walk-through goes
 deeper: [`multi-node-cluster.md`](multi-node-cluster.md) runs several
-gateways and backends that discover each other, and
-[`userconnection_design_en.md`](userconnection_design_en.md) covers the
-connection lifecycle design.
+gateways and backends that discover each other. The connection lifecycle
+is covered by [`reentrancy-and-timers.md`](reentrancy-and-timers.md) and
+the [connection-states diagram](connection-states.svg) (source:
+[`connection-states.puml`](connection-states.puml)).
 
 ## Feature tours
 
