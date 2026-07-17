@@ -137,5 +137,17 @@ jobs:
       - name: Test
         run: make test
 
+      # Separate from the -race gate above: make coverage measures the headline
+      # scope (./internal/...) without -race. The schema is already loaded and
+      # BLABBY_DATABASE_URL is set, so the persistence integration tests count
+      # toward the number reported to Coveralls.
+      - name: Coverage
+        run: make coverage
+
+      - name: Report coverage to Coveralls
+        uses: shogo82148/actions-goveralls@v1
+        with:
+          path-to-profile: coverage.out
+
       - name: Build
         run: make build
