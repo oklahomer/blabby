@@ -1,5 +1,7 @@
 # blabby
 
+[![Coverage Status](https://coveralls.io/repos/github/oklahomer/blabby/badge.svg?branch=main)](https://coveralls.io/github/oklahomer/blabby?branch=main)
+
 A small, real-time group-chat system built on [Proto.Actor](https://proto.actor/) virtual actors (grains) in Go — designed to be **read**, not just run. blabby is a reference implementation that shows how the grain model maps onto identity-bearing entities (a user, a room), how a stateless gateway bridges plain HTTP/WebSocket clients to a cluster of grains, and how the pieces fit together end to end with a terminal client you can drive in a couple of minutes.
 
 What makes it worth a look:
