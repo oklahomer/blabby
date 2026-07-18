@@ -251,12 +251,12 @@ paths:
         - Authentication
       summary: Exchange credentials for a bearer token.
       description: |
-        Authenticates a username/password pair and returns a JWT bearer token to
-        be sent on every other endpoint. This endpoint is public.
+        Authenticates a mail-address/password pair and returns a JWT bearer
+        token to be sent on every other endpoint. This endpoint is public.
 
         All authentication failures return the same `401 AUTH_INVALID_TOKEN`
-        response regardless of whether the username or the password was wrong, so
-        the response cannot be used to enumerate valid usernames.
+        response regardless of whether the mail address or the password was
+        wrong, so the response cannot be used to enumerate accounts.
       security: []
       requestBody:
         required: true
@@ -265,7 +265,7 @@ paths:
             schema:
               $ref: '#/components/schemas/LoginRequest'
             example:
-              username: alice
+              mail_address: alice@example.com
               password: alice123
       responses:
         '200':
@@ -279,8 +279,8 @@ paths:
         '400':
           description: |
             The request body was malformed, empty, carried trailing data, was
-            not `application/json`, or the username/password exceeded the
-            field size limits (username 64 bytes, password 256 bytes).
+            not `application/json`, or the mail address/password exceeded the
+            field size limits (mail address 254 bytes, password 256 bytes).
           content:
             application/json:
               schema:
@@ -289,7 +289,7 @@ paths:
                 error:
                   code: 4001
                   status: INVALID_REQUEST
-                  message: username and password are required
+                  message: mail address and password are required
         '401':
           description: |
             The login was refused. Every credential failure — unknown address,
@@ -369,8 +369,9 @@ paths:
             x-max-utf8-bytes: 64
           description: |
             A display-name search fragment, following the same character rules
-            as room names: 1-64 bytes of printable characters. A blank value
-            is treated as absent.
+            as room names: 1-64 bytes of printable characters, NFC-normalized
+            like the stored names it searches. A blank value is treated as
+            absent.
         - name: after
           in: query
           required: false
@@ -532,10 +533,12 @@ paths:
             minLength: 1
             x-max-utf8-bytes: 256
           description: |
-            A message-text search fragment: 1-256 bytes of valid UTF-8. Every
-            whitespace-separated term must appear in the message. When set,
-            only `message` events are returned. A blank value is treated as
-            absent.
+            A message-text search fragment: 1-256 bytes of valid UTF-8,
+            canonicalized (NFC, LF newlines) and following the same character
+            rules as message text (control characters other than newline and
+            tab are rejected). Every whitespace-separated term must appear in
+            the message. When set, only `message` events are returned. A
+            blank value is treated as absent.
         - name: before
           in: query
           required: false
@@ -964,8 +967,12 @@ components:
           format: email
           x-max-utf8-bytes: 254
           description: |
-            The account's email address. Must be a bare address (no display
-            name); normalized to lowercase. At most 254 bytes.
+            The account's email address: a bare address in the server's ASCII
+            subset of RFC 5321 — a dot-string local part (at most 64 bytes)
+            and letter-digit-hyphen domain labels. Display names, quoted
+            local parts, address literals, and internationalized (SMTPUTF8,
+            U-label) forms are not supported; ASCII IDNA A-labels (xn--...)
+            are. Normalized to lowercase. At most 254 bytes.
         handle:
           type: string
           minLength: 3
@@ -977,9 +984,17 @@ components:
             case-insensitive.
         password:
           type: string
-          minLength: 12
+          minLength: 1
+          x-min-utf8-bytes: 12
           x-max-utf8-bytes: 256
-          description: The account password. At least 12 bytes, at most 256 bytes.
+          description: |
+            The account password. The 12-byte minimum is measured on the
+            NFC-normalized form (a byte count, not the character count JSON
+            Schema minLength would express); the 256-byte cap applies to the
+            submitted bytes (a transport cap). The server NFC-normalizes the
+            password — and never trims it, so whitespace anywhere in it is
+            significant — before hashing, so visually identical spellings are
+            one credential.
     RegisterResponse:
       type: object
       required:
@@ -1019,21 +1034,26 @@ components:
     LoginRequest:
       type: object
       required:
-        - username
+        - mail_address
         - password
       properties:
-        username:
+        mail_address:
           type: string
-          minLength: 1
-          pattern: '\S'
-          x-max-utf8-bytes: 64
-          description: The account username. At most 64 bytes.
+          format: email
+          x-max-utf8-bytes: 254
+          description: |
+            The mail address the account registered with — the login identity.
+            Bare ASCII form, at most 254 bytes.
         password:
           type: string
           minLength: 1
-          pattern: '\S'
           x-max-utf8-bytes: 256
-          description: The account password. At most 256 bytes.
+          description: |
+            The account password. NFC-normalized — never trimmed, so
+            whitespace anywhere in it is significant — before verification,
+            matching registration. The 256-byte cap applies to the submitted
+            bytes (a transport cap); only a truly empty password is treated
+            as missing.
     LoginResponse:
       type: object
       required:
@@ -1163,7 +1183,13 @@ components:
           minLength: 1
           pattern: '\S'
           x-max-utf8-bytes: 4096
-          description: The message body. Required, non-blank, at most 4 KiB.
+          description: |
+            The message body. Required and non-blank. The server stores and
+            delivers a canonical form: line endings (CRLF or lone CR) become
+            LF, Unicode is NFC-normalized, and surrounding whitespace is
+            trimmed; the 4 KiB cap applies to that canonical form. Control
+            characters other than newline and tab, and explicit bidi
+            override/isolate characters, are rejected.
     CreateRoomRequest:
       type: object
       required:
@@ -1174,10 +1200,11 @@ components:
           minLength: 1
           x-max-utf8-bytes: 64
           description: |
-            The room's display name: trimmed, non-blank, at most 64 bytes of
-            printable characters (spaces included; control and invisible
-            formatting characters are rejected). It is a label, not an
-            address, and names are deliberately non-unique.
+            The room's display name: NFC-normalized, trimmed, non-blank, at
+            most 64 bytes of printable characters (spaces included; control
+            and invisible formatting characters are rejected). The byte cap
+            applies to the NFC form. It is a label, not an address, and names
+            are deliberately non-unique.
     SetRoleRequest:
       type: object
       required:
