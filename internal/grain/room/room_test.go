@@ -507,6 +507,42 @@ func TestGrain_PostMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("text is canonicalized before store and fan-out", func(t *testing.T) {
+		// The grain re-parses text at its cluster boundary, so even a caller
+		// that bypasses the gateway cannot store non-canonical bytes: CRLF
+		// maps to LF and NFD input composes to NFC.
+		g, notifier, _ := newGrain(t)
+		mustJoin(t, g, "1")
+		notifier.forwardCalls = nil
+
+		resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", "line one\r\ncafé"), fakeRoomCtx(testRoomID))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.GetError() != nil {
+			t.Fatalf("expected success, got error: %+v", resp.GetError())
+		}
+		const want = "line one\ncafé"
+		if len(notifier.forwardCalls) != 1 || notifier.forwardCalls[0].Text != want {
+			t.Fatalf("forwardCalls = %+v, want one call with text %q", notifier.forwardCalls, want)
+		}
+	})
+
+	t.Run("invalid text returns 4001 with no fan-out", func(t *testing.T) {
+		g, notifier, _ := newGrain(t)
+		mustJoin(t, g, "1")
+		notifier.forwardCalls = nil
+
+		resp, err := g.PostMessage(graintest.NewPostMessageRequest("1", "bad\x00byte"), fakeRoomCtx(testRoomID))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertErrResponse(t, resp.GetError(), 4001, "INVALID_REQUEST")
+		if len(notifier.forwardCalls) != 0 {
+			t.Errorf("forwardCalls: got %d, want 0", len(notifier.forwardCalls))
+		}
+	})
+
 	t.Run("non-member sender returns 2001 with no fan-out and no state mutation", func(t *testing.T) {
 		g, notifier, _ := newGrain(t)
 

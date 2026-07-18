@@ -81,6 +81,31 @@ func TestHashPassword_AcceptsLongPasswords(t *testing.T) {
 	}
 }
 
+func TestPassword_NFDAndNFCSpellingsShareOneHash(t *testing.T) {
+	// The password is NFC-normalized — never trimmed — before hashing and
+	// verification, so the decomposed spelling a macOS IME emits and the
+	// precomposed spelling other platforms emit are one credential.
+	nfd := "pássword-secret" // á as a + combining acute (U+0301)
+	nfc := "pássword-secret"  // á precomposed (U+00E1)
+
+	hash, err := HashPassword(nfd)
+	if err != nil {
+		t.Fatalf("HashPassword(nfd): %v", err)
+	}
+	if err := VerifyPassword(hash, nfc); err != nil {
+		t.Errorf("VerifyPassword(nfc spelling) = %v, want nil", err)
+	}
+
+	// Normalization is not trimming: surrounding whitespace stays significant.
+	spaced, err := HashPassword(" secret-password ")
+	if err != nil {
+		t.Fatalf("HashPassword(spaced): %v", err)
+	}
+	if err := VerifyPassword(spaced, "secret-password"); err == nil {
+		t.Error("VerifyPassword(trimmed spelling) = nil, want mismatch")
+	}
+}
+
 func TestValidatePasswordStrength(t *testing.T) {
 	// Boundary: exactly MinPasswordLen passes, one byte short fails.
 	if err := ValidatePasswordStrength(strings.Repeat("a", MinPasswordLen)); err != nil {
@@ -91,6 +116,16 @@ func TestValidatePasswordStrength(t *testing.T) {
 	}
 	if err := ValidatePasswordStrength(""); !errors.Is(err, ErrWeakPassword) {
 		t.Errorf("ValidatePasswordStrength(empty) = %v, want ErrWeakPassword", err)
+	}
+	// Whitespace is significant and never trimmed: a spaces-only password of
+	// the minimum length is a valid credential (login must accept it too).
+	if err := ValidatePasswordStrength(strings.Repeat(" ", MinPasswordLen)); err != nil {
+		t.Errorf("ValidatePasswordStrength(spaces only) = %v, want nil", err)
+	}
+	// The minimum is measured on the canonical form: five "a"+combining-acute
+	// pairs are 15 raw bytes but 10 once composed, which is too short.
+	if err := ValidatePasswordStrength(strings.Repeat("á", 5)); !errors.Is(err, ErrWeakPassword) {
+		t.Errorf("ValidatePasswordStrength(nfd short) = %v, want ErrWeakPassword", err)
 	}
 }
 

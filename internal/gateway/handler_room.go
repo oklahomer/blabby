@@ -5,19 +5,18 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/id"
 	"github.com/oklahomer/blabby/internal/persistence"
 )
 
-const (
-	maxRoomMessageBodyBytes = 8 * 1024 // 8 KiB request body cap
-	maxRoomMessageTextBytes = 4 * 1024 // 4 KiB text cap
-)
+// maxRoomMessageBodyBytes caps the request body (a transport concern); the
+// text itself is capped by domain.MaxMessageTextBytes when parsed.
+const maxRoomMessageBodyBytes = 8 * 1024 // 8 KiB request body cap
 
 // Endpoint labels double as both the mux pattern in RegisterRoutes and
 // the structured-log endpoint field. Defining them once keeps the route
@@ -115,9 +114,10 @@ func (g *Gateway) handleRoomMembershipDelete(w http.ResponseWriter, r *http.Requ
 
 // handleRoomSendMessage dispatches POST /rooms/{id}/messages to the
 // user's grain. The request body is JSON `{"text":"..."}` capped at
-// maxRoomMessageBodyBytes; the text payload is capped at
-// maxRoomMessageTextBytes. The returned timestamp is converted to int64
-// Unix milliseconds at this boundary.
+// maxRoomMessageBodyBytes; the text payload is parsed into a canonical
+// domain.MessageText, and that canonical form is what the grain receives.
+// The returned timestamp is converted to int64 Unix milliseconds at this
+// boundary.
 func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) {
 	userID, ok := authenticatedUserID(w, r, endpointRoomMessage)
 	if !ok {
@@ -127,7 +127,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	req, derr := decodeSendMessageRequest(w, r)
+	msgText, derr := decodeSendMessageRequest(w, r)
 	if derr != nil {
 		slog.Warn("gateway.room.rejected",
 			"endpoint", endpointRoomMessage, "method", r.Method,
@@ -135,19 +135,20 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 		WriteErrorResponse(w, httpStatus(derr.detail.Code), derr.detail)
 		return
 	}
+	text := msgText.String()
 
 	slog.Info("gateway.room.entered",
 		"endpoint", endpointRoomMessage, "method", r.Method,
-		"user_id", userID, "room_id", roomID, "text_len", len(req.Text))
+		"user_id", userID, "room_id", roomID, "text_len", len(text))
 
 	resp, err := g.userGrainFor(userID).SendMessage(&userpb.SendMessageRequest{
-		RoomId: roomID.String(), Text: req.Text,
+		RoomId: roomID.String(), Text: text,
 	})
 	if err != nil {
 		slog.Warn("gateway.room.transport_error",
 			"endpoint", endpointRoomMessage, "method", r.Method,
 			"user_id", userID, "room_id", roomID,
-			"outcome", outcomeTransportError, "text_len", len(req.Text))
+			"outcome", outcomeTransportError, "text_len", len(text))
 		WriteErrorResponse(w, http.StatusServiceUnavailable, ErrServiceUnavailable("failed to reach user grain"))
 		return
 	}
@@ -158,14 +159,14 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 				"endpoint", endpointRoomMessage, "method", r.Method,
 				"user_id", userID, "room_id", roomID,
 				"code", pe.GetCode(), "status", pe.GetStatus(),
-				"error", parseErr, "text_len", len(req.Text))
+				"error", parseErr, "text_len", len(text))
 			WriteErrorResponse(w, http.StatusInternalServerError, ErrInternalError("internal server error"))
 			return
 		}
 		slog.Info("gateway.room.exited",
 			"endpoint", endpointRoomMessage, "method", r.Method,
 			"user_id", userID, "room_id", roomID,
-			"outcome", outcomeBusinessError, "code", ed.Code, "text_len", len(req.Text))
+			"outcome", outcomeBusinessError, "code", ed.Code, "text_len", len(text))
 		WriteErrorResponse(w, httpStatus(ed.Code), ed)
 		return
 	}
@@ -177,7 +178,7 @@ func (g *Gateway) handleRoomSendMessage(w http.ResponseWriter, r *http.Request) 
 	slog.Info("gateway.room.exited",
 		"endpoint", endpointRoomMessage, "method", r.Method,
 		"user_id", userID, "room_id", roomID,
-		"outcome", outcomeOK, "code", 0, "text_len", len(req.Text))
+		"outcome", outcomeOK, "code", 0, "text_len", len(text))
 	writeJSON(w, http.StatusOK, sendMessageSuccessResponse{Success: true, Timestamp: ts})
 }
 
@@ -227,30 +228,32 @@ func (g *Gateway) requireRoomID(w http.ResponseWriter, r *http.Request, endpoint
 }
 
 // decodeSendMessageRequest parses and validates the POST body for
-// handleRoomSendMessage. It returns the parsed request on success, or a
-// requestError describing the rejection cause on failure.
+// handleRoomSendMessage. It returns the message text parsed into its
+// canonical domain form on success, or a requestError describing the
+// rejection cause on failure.
 //
 // The MaxBytesReader is installed on r.Body before decoding so an
 // oversize body surfaces as *http.MaxBytesError at decode time and is
 // mapped to a "payload_too_large" / 413 response.
-func decodeSendMessageRequest(w http.ResponseWriter, r *http.Request) (*sendMessageRequest, *requestError) {
+func decodeSendMessageRequest(w http.ResponseWriter, r *http.Request) (domain.MessageText, *requestError) {
 	var req sendMessageRequest
 	if err := decodeStrictJSONBody(w, r, maxRoomMessageBodyBytes, &req); err != nil {
-		return nil, err
+		return domain.MessageText{}, err
 	}
-	if strings.TrimSpace(req.Text) == "" {
-		return nil, &requestError{
+	text, err := domain.NewMessageText(req.Text)
+	switch {
+	case errors.Is(err, domain.ErrMessageTextEmpty):
+		return domain.MessageText{}, &requestError{
 			reason: "empty_text",
 			detail: ErrInvalidRequest("text is required"),
 		}
-	}
-	if len(req.Text) > maxRoomMessageTextBytes {
-		return nil, &requestError{
-			reason: "text_too_long",
-			detail: ErrInvalidRequest("text exceeds maximum length"),
+	case err != nil:
+		return domain.MessageText{}, &requestError{
+			reason: "invalid_text",
+			detail: ErrInvalidRequest("text must be at most 4096 bytes of valid UTF-8 without control characters other than newline and tab"),
 		}
 	}
-	return &req, nil
+	return text, nil
 }
 
 // writeJSON writes v as a JSON body with the given HTTP status. Used by

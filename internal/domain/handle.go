@@ -27,10 +27,13 @@ type Handle struct {
 	display string
 }
 
-// NewHandle parses raw (after trimming) into a Handle, enforcing the length and
-// charset. Mixed-case input is accepted; the normalized form is lowercased.
+// NewHandle parses raw (after NFC normalization and trimming) into a Handle,
+// enforcing the length and charset. The ASCII charset makes NFC a no-op for
+// every accepted value; it is applied so that every text constructor
+// canonicalizes uniformly. Mixed-case input is accepted; the normalized form
+// is lowercased.
 func NewHandle(raw string) (Handle, error) {
-	trimmed := strings.TrimSpace(raw)
+	trimmed := strings.TrimSpace(normalizeNFC(raw))
 	if len(trimmed) < minHandleLen || len(trimmed) > maxHandleLen {
 		return Handle{}, ErrInvalidHandle
 	}

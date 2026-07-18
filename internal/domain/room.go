@@ -60,8 +60,8 @@ type RoomRefParams struct {
 }
 
 // NewRoomRef builds a RoomRef, requiring a non-zero id, a non-zero public code,
-// a known status, and a non-blank name within [MaxRoomNameBytes]. The metadata
-// version is opaque and accepted as-is.
+// a known status, and a non-blank NFC-normalized name within
+// [MaxRoomNameBytes]. The metadata version is opaque and accepted as-is.
 func NewRoomRef(p RoomRefParams) (RoomRef, error) {
 	if p.ID.IsZero() {
 		return RoomRef{}, fmt.Errorf("domain: room ref: id must not be zero")
@@ -72,7 +72,7 @@ func NewRoomRef(p RoomRefParams) (RoomRef, error) {
 	if _, err := ParseRoomStatus(string(p.Status)); err != nil {
 		return RoomRef{}, fmt.Errorf("domain: room ref: %w", err)
 	}
-	name := strings.TrimSpace(p.Name)
+	name := strings.TrimSpace(normalizeNFC(p.Name))
 	if name == "" {
 		return RoomRef{}, fmt.Errorf("domain: room ref: name must not be blank")
 	}

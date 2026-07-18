@@ -10,9 +10,10 @@ import (
 // search fragment: non-blank, at most MaxRoomNameBytes bytes, printable.
 var ErrInvalidRoomNameQuery = errors.New("room name query: must be 1-64 bytes of printable characters")
 
-// RoomNameQuery is a parsed room-name search fragment: trimmed, non-blank, at
-// most MaxRoomNameBytes bytes, and made of the same printable characters a
-// [RoomName] may contain. The character rules are shared deliberately — a
+// RoomNameQuery is a parsed room-name search fragment: NFC-normalized,
+// trimmed, non-blank, at most MaxRoomNameBytes bytes, and made of the same
+// printable characters a [RoomName] may contain — sharing the canonical form
+// keeps a fragment byte-comparable with the stored names it searches. The character rules are shared deliberately — a
 // fragment holding a rune that can never appear in a display name can never
 // match one, so it is rejected at the boundary instead of running a query that
 // is guaranteed empty. How the fragment matches (substring, case sensitivity)
@@ -23,10 +24,11 @@ type RoomNameQuery struct {
 	value string
 }
 
-// NewRoomNameQuery parses raw (after trimming) into a RoomNameQuery, enforcing
-// the non-blank, byte-length, and printability rules.
+// NewRoomNameQuery parses raw (after NFC normalization and trimming) into a
+// RoomNameQuery, enforcing the non-blank, byte-length, and printability rules
+// on the canonical form.
 func NewRoomNameQuery(raw string) (RoomNameQuery, error) {
-	trimmed := strings.TrimSpace(raw)
+	trimmed := strings.TrimSpace(normalizeNFC(raw))
 	if trimmed == "" || len(trimmed) > MaxRoomNameBytes || !utf8.ValidString(trimmed) {
 		return RoomNameQuery{}, ErrInvalidRoomNameQuery
 	}

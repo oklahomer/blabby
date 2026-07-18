@@ -16,8 +16,8 @@ const MaxRoomNameBytes = 64
 // at most MaxRoomNameBytes bytes made of printable characters.
 var ErrInvalidRoomName = errors.New("room name: must be 1-64 bytes of printable characters")
 
-// RoomName is a parsed room display name: trimmed, non-blank, at most
-// MaxRoomNameBytes UTF-8 bytes, and printable. Letters, digits, punctuation,
+// RoomName is a parsed room display name: NFC-normalized, trimmed, non-blank,
+// at most MaxRoomNameBytes UTF-8 bytes, and printable. Letters, digits, punctuation,
 // symbols, emoji, and spaces (including non-ASCII spaces such as U+3000) are
 // allowed — it is a label, not an identifier. Control characters (NUL would not
 // even survive a PostgreSQL text column), invisible formatting characters
@@ -29,10 +29,11 @@ type RoomName struct {
 	value string
 }
 
-// NewRoomName parses raw (after trimming) into a RoomName, enforcing the
-// non-blank, byte-length, and printability rules.
+// NewRoomName parses raw (after NFC normalization and trimming) into a
+// RoomName, enforcing the non-blank, byte-length, and printability rules on
+// the canonical form.
 func NewRoomName(raw string) (RoomName, error) {
-	trimmed := strings.TrimSpace(raw)
+	trimmed := strings.TrimSpace(normalizeNFC(raw))
 	if trimmed == "" || len(trimmed) > MaxRoomNameBytes || !utf8.ValidString(trimmed) {
 		return RoomName{}, ErrInvalidRoomName
 	}
@@ -48,10 +49,12 @@ func NewRoomName(raw string) (RoomName, error) {
 // printable, plus whitespace runes beyond ASCII space (e.g. the ideographic
 // space U+3000, which unicode.IsPrint alone excludes). Control characters are
 // rejected outright — that also keeps line breaks and tabs out of the
-// single-line label — and so is everything neither printable nor whitespace
-// (zero-width and bidi-override formatting characters).
+// single-line label — and so are the Zl/Zp separators (U+2028, U+2029), which
+// are line breaks in Unicode clothing that IsSpace would otherwise admit, and
+// everything neither printable nor whitespace (zero-width and bidi-override
+// formatting characters).
 func isRoomNameRune(r rune) bool {
-	if unicode.IsControl(r) {
+	if unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp) {
 		return false
 	}
 	return unicode.IsPrint(r) || unicode.IsSpace(r)
