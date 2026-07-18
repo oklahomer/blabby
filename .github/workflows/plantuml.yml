@@ -53,8 +53,9 @@ on:
       - "Makefile"
   workflow_dispatch:
 
-permissions:
-  contents: write
+# The contents: write grant lives on the render job below; no other scope
+# is needed anywhere in this workflow.
+permissions: {}
 
 # Serialize runs per branch: two quick pushes queue instead of racing each
 # other's bot commit. The pull --rebase before push covers the remaining
@@ -67,6 +68,8 @@ jobs:
   render:
     if: github.ref_type == 'branch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       # Secrets are not readable inside `if:` expressions, so their presence
       # is mapped through env into a step output the later steps branch on.
@@ -79,16 +82,22 @@ jobs:
       - name: Mint an installation token for the bot App
         if: steps.cred.outputs.use-app == 'true'
         id: app-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           # client-id accepts the numeric App ID too (the JWT issuer claim
           # takes either); the app-id input is deprecated.
           client-id: ${{ vars.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          # Scope the minted token to the one grant the push needs rather
+          # than inheriting whatever the App installation carries.
+          permission-contents: write
 
-      - uses: actions/checkout@v4
+      # persist-credentials: false keeps the token out of .git/config, where
+      # the PlantUML container (which mounts the workspace) could read it; the
+      # push credential is supplied in the commit step instead.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          token: ${{ steps.app-token.outputs.token || github.token }}
+          persist-credentials: false
 
       - name: Resolve PlantUML image from Makefile
         id: image
@@ -108,15 +117,24 @@ jobs:
           done
 
       - name: Render all tracked .puml files
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
         run: |
           files=$(git ls-files '*.puml')
           if [ -z "$files" ]; then
             echo "No .puml files tracked; nothing to render."
           else
-            docker run --rm -v "$PWD:/data" "${{ steps.image.outputs.image }}" -tsvg $files
+            docker run --rm -v "$PWD:/data" "$IMAGE" -tsvg $files
           fi
 
+      # Expansions are routed through env instead of appearing inline in the
+      # script, so branch names and step outputs are data, never shell text.
       - name: Commit rendered SVGs
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          PUSH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           git add -A -- '*.svg'
           if git diff --cached --quiet; then
@@ -126,15 +144,17 @@ jobs:
           # Attribute the commit to the App's bot user when the App pushed
           # it, so repository history shows which automation acted; the
           # fallback keeps the stock github-actions identity.
-          if [ -n "${{ steps.app-token.outputs.token }}" ]; then
-            slug="${{ steps.app-token.outputs.app-slug }}"
-            uid=$(GH_TOKEN="${{ steps.app-token.outputs.token }}" gh api "/users/${slug}%5Bbot%5D" --jq .id)
-            git config user.name "${slug}[bot]"
-            git config user.email "${uid}+${slug}[bot]@users.noreply.github.com"
+          if [ -n "$APP_TOKEN" ]; then
+            uid=$(GH_TOKEN="$APP_TOKEN" gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
+            git config user.name "${APP_SLUG}[bot]"
+            git config user.email "${uid}+${APP_SLUG}[bot]@users.noreply.github.com"
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           fi
           git commit -m "docs: render PlantUML diagrams"
-          git pull --rebase origin "${{ github.ref_name }}"
-          git push origin "HEAD:refs/heads/${{ github.ref_name }}"
+          # The checkout persisted no credential, so pull and push authenticate
+          # through this step-scoped remote URL instead.
+          remote="https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git pull --rebase "$remote" "$REF_NAME"
+          git push "$remote" "HEAD:refs/heads/$REF_NAME"

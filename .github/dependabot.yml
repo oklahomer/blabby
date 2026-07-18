@@ -1,0 +1,19 @@
+# Keeps the SHA-pinned actions in .github/workflows and the Go module
+# requirements current; without it, pins go stale silently until a scanner
+# flags them again. The cooldown holds new releases for a week before a
+# bump PR opens, so a compromised release pulled by upstream never lands
+# here; security updates bypass the cooldown.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
