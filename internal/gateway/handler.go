@@ -40,7 +40,12 @@ func (g *Gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.TrimSpace(req.MailAddress) == "" || strings.TrimSpace(req.Password) == "" {
+	// Password whitespace is significant — passwords are never trimmed — so
+	// only a truly empty password is "missing"; a whitespace-only one is a
+	// real credential attempt, matching what registration accepts. The mail
+	// address is trimmed by its value object anyway, so a blank one is
+	// missing either way.
+	if strings.TrimSpace(req.MailAddress) == "" || req.Password == "" {
 		WriteErrorResponse(w, http.StatusBadRequest, ErrInvalidRequest("mail address and password are required"))
 		return
 	}

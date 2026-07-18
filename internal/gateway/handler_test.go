@@ -107,11 +107,28 @@ func TestHandleLogin(t *testing.T) {
 			wantErrorCode: errcode.InvalidRequest,
 		},
 		{
-			name:          "whitespace-only password returns 400",
+			// Password whitespace is significant (passwords are never trimmed),
+			// so a whitespace-only password is a real credential attempt: it
+			// reaches the authenticator instead of failing the required-check.
+			// Only a truly empty password is "missing".
+			name:          "whitespace-only password reaches the authenticator",
 			body:          `{"mail_address":"alice@example.com","password":"\t\n"}`,
 			authFn:        successAuth,
-			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: errcode.InvalidRequest,
+			wantStatus:    http.StatusUnauthorized,
+			wantErrorCode: errcode.AuthInvalidToken,
+		},
+		{
+			// The register-side contract accepts a spaces-only password of
+			// sufficient length, so login must be able to verify it.
+			name: "whitespace-only password can authenticate",
+			body: `{"mail_address":"alice@example.com","password":"            "}`,
+			authFn: func(_ context.Context, params auth.AuthParams) (*auth.Result, error) {
+				if params.Password != "            " {
+					return nil, auth.ErrInvalidCredentials
+				}
+				return &auth.Result{UserID: mustUserID(t, "1"), Token: "signed.jwt.token"}, nil
+			},
+			wantStatus: http.StatusOK,
 		},
 		{
 			name:          "trailing JSON object returns 400",

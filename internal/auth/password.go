@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/text/unicode/norm"
 )
 
 // PasswordTargetCost is the bcrypt cost blabby hashes passwords at. Login
@@ -25,24 +26,39 @@ const MinPasswordLen = 12
 var ErrWeakPassword = errors.New("auth: password is too short")
 
 // ValidatePasswordStrength enforces the registration minimum-length policy,
-// returning ErrWeakPassword for a password shorter than MinPasswordLen.
+// returning ErrWeakPassword for a password shorter than MinPasswordLen. The
+// length is measured on the canonical (NFC) form — the same bytes prehash
+// feeds bcrypt.
 func ValidatePasswordStrength(plain string) error {
-	if len(plain) < MinPasswordLen {
+	if len(normalizePassword(plain)) < MinPasswordLen {
 		return ErrWeakPassword
 	}
 	return nil
 }
 
+// normalizePassword returns plain in Unicode Normalization Form C without any
+// trimming (see ADR-023): the decomposed spelling one platform's IME emits and
+// the precomposed spelling another emits are one credential, while whitespace
+// anywhere in the password stays significant. This adopts the NFC rule drawn
+// from RFC 8265's OpaqueString profile, not the full profile — its non-ASCII
+// space mapping and code-point restrictions are deliberately not applied.
+func normalizePassword(plain string) string {
+	return norm.NFC.String(plain)
+}
+
 // prehash maps an arbitrary-length password to a fixed 44-byte token by
-// base64-encoding its SHA-256 digest, which is then what bcrypt actually hashes.
-// bcrypt only operates on up to 72 bytes of input — golang.org/x/crypto/bcrypt
-// rejects anything longer with ErrPasswordTooLong — so pre-hashing lets a
-// password of any length be accepted while still contributing all of its bytes.
-// SHA-256 → base64 yields a fixed 44-byte input. base64.StdEncoding (with
-// padding) is load-bearing: it is the exact encoding the schema seed hashed
-// under, so changing it would break login for the seed accounts.
+// base64-encoding the SHA-256 digest of its canonical (NFC) form, which is
+// then what bcrypt actually hashes. Normalizing here — the single step shared
+// by hashing and verification — is what makes the NFD and NFC spellings of a
+// password one credential. bcrypt only operates on up to 72 bytes of input —
+// golang.org/x/crypto/bcrypt rejects anything longer with ErrPasswordTooLong —
+// so pre-hashing lets a password of any length be accepted while still
+// contributing all of its bytes. SHA-256 → base64 yields a fixed 44-byte
+// input. base64.StdEncoding (with padding) is load-bearing: it is the exact
+// encoding the schema seed hashed under, so changing it would break login for
+// the seed accounts (their ASCII passwords are NFC fixed points).
 func prehash(plain string) []byte {
-	sum := sha256.Sum256([]byte(plain))
+	sum := sha256.Sum256([]byte(normalizePassword(plain)))
 	return []byte(base64.StdEncoding.EncodeToString(sum[:]))
 }
 
