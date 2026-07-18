@@ -20,6 +20,7 @@ import (
 	commonpb "github.com/oklahomer/blabby/gen/common"
 	userpb "github.com/oklahomer/blabby/gen/user"
 	"github.com/oklahomer/blabby/internal/auth"
+	"github.com/oklahomer/blabby/internal/domain"
 	"github.com/oklahomer/blabby/internal/errcode"
 	"github.com/oklahomer/blabby/internal/id"
 )
@@ -386,6 +387,25 @@ func TestHandleRoomSendMessage_HappyPath(t *testing.T) {
 	}
 }
 
+func TestHandleRoomSendMessage_ForwardsCanonicalText(t *testing.T) {
+	// The grain receives the canonical form: CRLF mapped to LF and NFD
+	// composed to NFC — not the raw client bytes.
+	fake := &fakeUserGrainCaller{sendResp: &userpb.SendMessageResponse{
+		Timestamp: timestamppb.New(time.UnixMilli(1)),
+	}}
+	g := gatewayWithFake(fake)
+	rec := servePath(t, g, http.MethodPost, "POST /rooms/{id}/messages",
+		"/rooms/RG000000004/messages", `{"text":"line one\r\ncafé"}`, "application/json", "1")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+	const want = "line one\ncafé"
+	if fake.sendReq == nil || fake.sendReq.GetText() != want {
+		t.Fatalf("SendMessage called with %+v, want text %q", fake.sendReq, want)
+	}
+}
+
 func TestHandleRoomSendMessage_NilTimestampWritesZero(t *testing.T) {
 	fake := &fakeUserGrainCaller{sendResp: &userpb.SendMessageResponse{}}
 	g := gatewayWithFake(fake)
@@ -517,11 +537,19 @@ func TestHandleRoomSendMessage_BodyValidation(t *testing.T) {
 		},
 		{
 			name:        "text over 4 KiB → 400",
-			body:        `{"text":"` + strings.Repeat("a", maxRoomMessageTextBytes+1) + `"}`,
+			body:        `{"text":"` + strings.Repeat("a", domain.MaxMessageTextBytes+1) + `"}`,
 			contentType: "application/json",
 			wantStatus:  http.StatusBadRequest,
 			wantCode:    4001,
-			wantMessage: "text exceeds maximum length",
+			wantMessage: "text must be at most 4096 bytes",
+		},
+		{
+			name:        "text with control characters → 400",
+			body:        `{"text":"a\u0000b"}`,
+			contentType: "application/json",
+			wantStatus:  http.StatusBadRequest,
+			wantCode:    4001,
+			wantMessage: "text must be at most 4096 bytes",
 		},
 		{
 			name:        "body over MaxBytesReader cap → 413",

@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/asynkron/protoactor-go/actor"
@@ -512,16 +511,32 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 		return postErr(errcode.InvalidRequest, "user id and display name are required"), nil
 	}
 	userID := sender.ID()
-	if strings.TrimSpace(req.GetText()) == "" {
+	// Re-parse at the cluster boundary: the gateway already sends the
+	// canonical form, but the grain is reachable by other callers, so it
+	// enforces the same canonical MessageText itself rather than trust
+	// upstream.
+	msgText, terr := domain.NewMessageText(req.GetText())
+	if terr != nil {
+		if errors.Is(terr, domain.ErrMessageTextEmpty) {
+			slog.Warn(eventRoomMessagePostRejected,
+				"grain_type", ctx.Kind(),
+				"grain_id", ctx.Identity(),
+				"user_id", userID,
+				"text_len", len(req.GetText()),
+				"reason", errcode.MissingField.Status(),
+			)
+			return postErr(errcode.MissingField, "text is required"), nil
+		}
 		slog.Warn(eventRoomMessagePostRejected,
 			"grain_type", ctx.Kind(),
 			"grain_id", ctx.Identity(),
 			"user_id", userID,
 			"text_len", len(req.GetText()),
-			"reason", errcode.MissingField.Status(),
+			"reason", errcode.InvalidRequest.Status(),
 		)
-		return postErr(errcode.MissingField, "text is required"), nil
+		return postErr(errcode.InvalidRequest, "text must be at most 4096 bytes of valid UTF-8 without control characters other than newline and tab"), nil
 	}
+	text := msgText.String()
 	if !g.state.isMember(userID) {
 		slog.Warn(eventRoomMessagePostRejected,
 			"grain_type", ctx.Kind(),
@@ -536,7 +551,7 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 	// recent-message cache, the fan-out — happens only once the message is
 	// durable. Without a store (memory-only unit tests) the grain clock stands
 	// in for the DB's occurred_at.
-	evt, err := g.recordMessage(ctx, userID, req.GetText())
+	evt, err := g.recordMessage(ctx, userID, text)
 	if err != nil {
 		return postErr(errcode.InternalError, "failed to record message"), nil
 	}
@@ -552,12 +567,12 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 	g.state.refreshMember(sender)
 	g.state.recordMessage(chatMessage{
 		senderID:  userID,
-		text:      req.GetText(),
+		text:      text,
 		timestamp: timestamp,
 	})
 
 	recipients := g.state.memberIDs()
-	textLen := len(req.GetText())
+	textLen := len(text)
 	slog.Info(eventRoomMessagePosted,
 		"grain_type", ctx.Kind(),
 		"grain_id", ctx.Identity(),
@@ -571,7 +586,7 @@ func (g *Grain) PostMessage(req *roompb.PostMessageRequest, ctx cluster.GrainCon
 		"target_count", len(recipients),
 		"text_len", textLen,
 	)
-	payload := buildForwardMessage(g.state.roomRef(), sender, req.GetText(), timestamp, eventID)
+	payload := buildForwardMessage(g.state.roomRef(), sender, text, timestamp, eventID)
 	g.fanOutForward(ctx, recipients, payload, "PostMessage.fanout")
 
 	return &roompb.PostMessageResponse{Timestamp: timestamppb.New(timestamp)}, nil
