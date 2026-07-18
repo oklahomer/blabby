@@ -23,6 +23,8 @@ func TestNewRoomNameQuery(t *testing.T) {
 			{"cjk", "雑談", "雑談"},
 			{"emoji", "🎉", "🎉"},
 			{"like wildcards are ordinary text", "100%_done\\", "100%_done\\"},
+			// NFD input composes to the NFC form room names are stored in.
+			{"nfd composed to nfc", "が", "が"},
 			{"max bytes", strings.Repeat("a", domain.MaxRoomNameBytes), strings.Repeat("a", domain.MaxRoomNameBytes)},
 		}
 		for _, tc := range tests {
@@ -54,6 +56,7 @@ func TestNewRoomNameQuery(t *testing.T) {
 			"zero-width space": "sneaky\u200bname",
 			"bidi override":    "abc\u202edef",
 			"invalid utf-8":    "bad\xffbyte",
+			"line separator":   "a\u2028b",
 		}
 		for name, raw := range cases {
 			t.Run(name, func(t *testing.T) {

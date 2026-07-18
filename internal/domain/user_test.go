@@ -32,6 +32,7 @@ func TestNewUserRef(t *testing.T) {
 	}{
 		{name: "valid", userID: valid, code: code, display: "Alice", wantName: "Alice"},
 		{name: "name is trimmed", userID: valid, code: code, display: "  Alice  ", wantName: "Alice"},
+		{name: "nfd name composed to nfc", userID: valid, code: code, display: "café", wantName: "café"},
 		{name: "empty name rejected", userID: valid, code: code, display: "", wantErr: true},
 		{name: "whitespace-only name rejected", userID: valid, code: code, display: "   ", wantErr: true},
 		{name: "over-long name rejected", userID: valid, code: code, display: strings.Repeat("x", 257), wantErr: true},

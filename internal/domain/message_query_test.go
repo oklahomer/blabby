@@ -25,6 +25,11 @@ func TestNewMessageQuery(t *testing.T) {
 			{"quotes and backslash", `say "hi" \now`, `say "hi" \now`},
 			{"operator-looking word", "cats OR dogs", "cats OR dogs"},
 			{"newline inside", "line\nbreak", "line\nbreak"},
+			{"tab inside", "col\tcol", "col\tcol"},
+			// NFD input composes to NFC and CRLF canonicalizes to LF — the same
+			// canonical form stored message text has, so fragments can match it.
+			{"nfd composed to nfc", "café", "café"},
+			{"crlf to lf", "line\r\nbreak", "line\nbreak"},
 			{"max bytes", strings.Repeat("a", domain.MaxMessageQueryBytes), strings.Repeat("a", domain.MaxMessageQueryBytes)},
 		}
 		for _, tc := range tests {
@@ -49,6 +54,12 @@ func TestNewMessageQuery(t *testing.T) {
 			"blank":          "   ",
 			"over max bytes": strings.Repeat("a", domain.MaxMessageQueryBytes+1),
 			"invalid utf-8":  "bad\xffbyte",
+			// The same character policy as message text: a fragment holding a
+			// rune no message can contain can never match one, and NUL would
+			// not even survive the SQL boundary.
+			"NUL":           "a\x00b",
+			"ansi escape":   "evil\x1b[31mred",
+			"bidi override": "abc\u202edef",
 		}
 		for name, raw := range cases {
 			t.Run(name, func(t *testing.T) {

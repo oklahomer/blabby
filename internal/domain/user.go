@@ -54,10 +54,10 @@ type UserRef struct {
 }
 
 // NewUserRef builds a UserRef from an already-parsed UserID, its opaque public
-// code, and a display name. The name is trimmed and must be non-empty and within
-// maxUserNameBytes; the UserID and PublicCode must both be non-zero (each parsed
-// at its own boundary). Requiring the public code keeps the internal id from
-// ever having to stand in for it on the client wire.
+// code, and a display name. The name is NFC-normalized and trimmed, and must be
+// non-empty and within maxUserNameBytes; the UserID and PublicCode must both be
+// non-zero (each parsed at its own boundary). Requiring the public code keeps
+// the internal id from ever having to stand in for it on the client wire.
 func NewUserRef(userID id.UserID, publicCode id.PublicCode, name string) (UserRef, error) {
 	if userID.IsZero() {
 		return UserRef{}, fmt.Errorf("domain: user ref: id must not be zero")
@@ -65,7 +65,7 @@ func NewUserRef(userID id.UserID, publicCode id.PublicCode, name string) (UserRe
 	if publicCode.IsZero() {
 		return UserRef{}, fmt.Errorf("domain: user ref: public code must not be zero")
 	}
-	trimmed := strings.TrimSpace(name)
+	trimmed := strings.TrimSpace(normalizeNFC(name))
 	if trimmed == "" {
 		return UserRef{}, fmt.Errorf("domain: user ref: name must not be empty")
 	}

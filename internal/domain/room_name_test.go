@@ -22,6 +22,8 @@ func TestNewRoomName(t *testing.T) {
 			{"cjk", "雑談部屋", "雑談部屋"},
 			{"ideographic space inside kept", "雑談　部屋", "雑談　部屋"},
 			{"emoji", "🎉 party", "🎉 party"},
+			// NFD input (base + combining mark) composes to the NFC form.
+			{"nfd composed to nfc", "が", "が"},
 			{"max bytes", strings.Repeat("a", domain.MaxRoomNameBytes), strings.Repeat("a", domain.MaxRoomNameBytes)},
 		}
 		for _, tc := range tests {
@@ -43,6 +45,9 @@ func TestNewRoomName(t *testing.T) {
 			"blank":                                 "   ",
 			"over max bytes":                        strings.Repeat("a", domain.MaxRoomNameBytes+1),
 			"multibyte overflow (bytes, not runes)": strings.Repeat("字", domain.MaxRoomNameBytes/3+1),
+			// U+0958 is composition-excluded: NFC decomposes it (3 -> 6 bytes),
+			// so the byte cap is checked on the canonical form.
+			"over max bytes after nfc": strings.Repeat("क़", domain.MaxRoomNameBytes/3),
 			// Control characters: NUL would not even survive a PostgreSQL text
 			// column (turning a bad request into a 500), and line breaks or ANSI
 			// escapes corrupt a terminal rendering the label.
@@ -54,6 +59,10 @@ func TestNewRoomName(t *testing.T) {
 			"zero-width space": "sneaky\u200bname",
 			"bidi override":    "abc\u202edef",
 			"invalid utf-8":    "bad\xffbyte",
+			// Zl/Zp separators are line breaks in Unicode clothing; a name is
+			// single-line.
+			"line separator":      "a\u2028b",
+			"paragraph separator": "a\u2029b",
 		}
 		for name, raw := range cases {
 			t.Run(name, func(t *testing.T) {

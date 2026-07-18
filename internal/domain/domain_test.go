@@ -83,6 +83,7 @@ func TestNewRoomRef(t *testing.T) {
 	}{
 		{name: "valid", mutate: func(p domain.RoomRefParams) domain.RoomRefParams { return p }, wantName: "General"},
 		{name: "name is trimmed", mutate: func(p domain.RoomRefParams) domain.RoomRefParams { p.Name = "  General  "; return p }, wantName: "General"},
+		{name: "nfd name composed to nfc", mutate: func(p domain.RoomRefParams) domain.RoomRefParams { p.Name = "café"; return p }, wantName: "café"},
 		{name: "blank name rejected", mutate: func(p domain.RoomRefParams) domain.RoomRefParams { p.Name = "   "; return p }, wantErr: true},
 		{name: "over-long name rejected", mutate: func(p domain.RoomRefParams) domain.RoomRefParams {
 			p.Name = strings.Repeat("x", domain.MaxRoomNameBytes+1)
