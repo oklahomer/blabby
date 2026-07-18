@@ -9,6 +9,12 @@ on:
     branches: [main]
   pull_request:
 
+# Nothing in this workflow pushes or writes to the repository, so the
+# baseline token grant is read-only; the ci job widens its own copy with
+# checks: write, which goveralls needs.
+permissions:
+  contents: read
+
 jobs:
   # Verifies every committed .svg matches a fresh render of its .puml source
   # and that no .svg outlives its source, catching a hand-edited .svg, a
@@ -23,7 +29,11 @@ jobs:
   diagrams:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # persist-credentials: false — no step here pushes, and the PlantUML
+      # container mounts the workspace, so no token should sit in .git/config.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Verify no SVG outlives its .puml source
         run: |
@@ -50,13 +60,22 @@ jobs:
 
   ci:
     runs-on: ubuntu-latest
+    # Job-level permissions replace the workflow-level set, so contents: read
+    # is restated here. goveralls publishes the coverage result as a check
+    # run via github.token, which requires checks: write
+    # (github.com/shogo82148/actions-goveralls/issues/342).
+    permissions:
+      contents: read
+      checks: write
     # Postgres with PGroonga, mirroring docker-compose, so the database-gated
     # integration tests (persistence repos + the multi-member membership-durability
     # test) run in CI rather than being skipped. The schema is applied by a step
     # below, since a service container cannot mount an init script.
     services:
       postgres:
-        image: groonga/pgroonga:4.0.6-alpine-17
+        # The digest freezes what the mutable tag pointed at when pinned;
+        # bump both together (docker-compose keeps the bare tag for local dev).
+        image: groonga/pgroonga:4.0.6-alpine-17@sha256:71665e330db82bb162a021c34d9ccf4bc933505bd78c65f8770eddbeaee8b3ab
         env:
           POSTGRES_USER: blabby
           POSTGRES_PASSWORD: blabby
@@ -71,23 +90,26 @@ jobs:
     env:
       BLABBY_DATABASE_URL: postgres://blabby:blabby@localhost:5432/blabby?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
+      # persist-credentials: false — no step in this job pushes.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       # go-version-file honors go.mod's toolchain directive, so CI runs the
       # exact patched toolchain the module pins. setup-go exports
       # GOTOOLCHAIN=local, which would otherwise ignore the pin (a bare
       # "1.26" resolved to an older patch release and the vulnerability
       # gate correctly failed on an already-fixed stdlib CVE).
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
 
       - name: Install buf
-        uses: bufbuild/buf-setup-action@v1
+        uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
 
       - name: Buf lint
         run: buf lint
@@ -101,7 +123,7 @@ jobs:
           git diff --exit-code gen/
 
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           install-only: true
 
@@ -145,7 +167,7 @@ jobs:
         run: make coverage
 
       - name: Report coverage to Coveralls
-        uses: shogo82148/actions-goveralls@v1
+        uses: shogo82148/actions-goveralls@9606dbc5ac5cf888a0e9ef901515c3cd516a2790 # v1.11.0
         with:
           path-to-profile: coverage.out
 
