@@ -45,6 +45,7 @@ ADR numbers are permanent identifiers assigned in creation order — they are no
 | [ADR-007](adr-007-database-authoritative-persistence.md) | Why PostgreSQL is authoritative: normalized entities plus an append-only event journal, grains hydrating from the store. |
 | [ADR-008](adr-008-no-redis.md) | Why grain memory hydrated from the store replaces a cache tier — no Redis. |
 | [ADR-014](adr-014-domain-identifier-types-and-boundary-parsing.md) | Numeric Snowflake ids internally, opaque public codes externally, parsed once at boundaries. |
+| [ADR-023](adr-023-canonical-text-normalization.md) | Why user-supplied text is canonicalized — NFC, LF newlines — in the domain constructors. |
 | [ADR-019](adr-019-snowflake-ids-and-worker-lease-fencing.md) | How time-ordered ids are minted safely across a cluster via a worker lease. |
 | [ADR-020](adr-020-pgroonga-search-stack.md) | Why CJK-capable full-text and substring search runs inside PostgreSQL via PGroonga. |
 
@@ -81,3 +82,4 @@ ADR numbers are permanent identifiers assigned in creation order — they are no
 | [ADR-020](adr-020-pgroonga-search-stack.md) | PGroonga search stack -- CJK-capable full-text in PostgreSQL, hand-written SQL over pgx | Accepted | 2026-07-05 |
 | [ADR-021](adr-021-scheduled-maintenance-jobs.md) | Scheduled maintenance jobs -- an internal trigger, a singleton grain, and an advisory-lock backstop | Accepted | 2026-07-06 |
 | [ADR-022](adr-022-protoactor-metrics-exposure.md) | Proto.Actor metrics exposure -- an owned MeterProvider on a dedicated Prometheus registry, exposed per binary | Accepted | 2026-07-11 |
+| [ADR-023](adr-023-canonical-text-normalization.md) | Canonical text normalization -- NFC and LF at the domain boundary | Accepted | 2026-07-18 |
