@@ -81,3 +81,8 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/grpc v1.82.1 // indirect
 )
+
+tool (
+	github.com/asynkron/protoactor-go/protobuf/protoc-gen-go-grain
+	google.golang.org/protobuf/cmd/protoc-gen-go
+)

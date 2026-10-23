@@ -114,9 +114,12 @@ jobs:
       - name: Buf lint
         run: buf lint
 
-      - name: Install protoc-gen-go-grain
-        run: go install github.com/asynkron/protoactor-go/protobuf/protoc-gen-go-grain@v0.0.0-20260118094027-288962e52f3f
-
+      # Both protoc plugins (protoc-gen-go, protoc-gen-go-grain) are tool
+      # dependencies in go.mod, and buf.gen.yaml runs them via `go tool`, so
+      # this step generates with exactly the versions the module pins. A
+      # google.golang.org/protobuf or protoactor-go bump that changes the
+      # generated output fails here until `make generate` output is committed
+      # on that branch: the intended signal, scoped to the bump that caused it.
       - name: Buf generate and diff check
         run: |
           buf generate
