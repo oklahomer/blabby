@@ -111,11 +111,10 @@ make generate      # buf generate
 
 ## Code Generation
 
-The protobuf contracts under `proto/` generate both message types and Proto.Actor grain scaffolding — interfaces, typed clients, actor wrappers — via [buf](https://buf.build/) and `protoc-gen-go-grain`. The output in `gen/` is committed, so cloning and building needs no codegen toolchain. To regenerate after editing `.proto` files:
+The protobuf contracts under `proto/` generate both message types and Proto.Actor grain scaffolding — interfaces, typed clients, actor wrappers — via [buf](https://buf.build/) with `protoc-gen-go` and `protoc-gen-go-grain`. Both plugins are `tool` dependencies in `go.mod`, and `buf.gen.yaml` runs them through `go tool`, so they are built on demand at the versions the module pins and only `buf` itself needs installing. The output in `gen/` is committed, so cloning and building needs no codegen toolchain. To regenerate after editing `.proto` files:
 
 ```bash
-go install github.com/asynkron/protoactor-go/protobuf/protoc-gen-go-grain@latest
-buf generate && git diff --exit-code gen/   # regenerate, then verify determinism
+make generate && git diff --exit-code gen/   # regenerate, then verify determinism
 ```
 
 ## Project Structure

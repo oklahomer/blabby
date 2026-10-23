@@ -197,14 +197,16 @@ func runCommand(ctx context.Context, name string, args ...string) error {
 		return err
 	}
 
-	done := make(chan error, 1)
+	var waitErr error
+	done := make(chan struct{})
 	go func() {
-		done <- cmd.Wait()
+		waitErr = cmd.Wait()
+		close(done)
 	}()
 
 	select {
-	case err := <-done:
-		return err
+	case <-done:
+		return waitErr
 	case <-ctx.Done():
 		_ = terminateProcess(cmd)
 		select {
